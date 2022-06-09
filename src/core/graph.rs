@@ -21,13 +21,23 @@
 //!
 //! A graph G = (V, E) is represented using two vectors containing, respectively, all the nodes and
 //! all the edges. A node (or an edge) is identified uniquely by its index in its enclosing vector.
+//! The `NodeIndex` and `EdgeIndex` structures are used to index the nodes and edges.
+//!
+//! The parents and children of each node is implemented as a succession of 'pointers' of
+//! `EdgeIndex`.
+//! If a node n1 has two children n2, n3 then there are two directed edges in the graph n1 -> n2
+//! and n1 -> n3.
+//! These edges are respectively indexed by e1 and e2.
+//! In the `NodeData` structure, the field `children` is filled with the value `Some(e1)`, which
+//! references the first of its outgoing edges (to its children n2).
+//! In the `EdgeData` for the edge e1, the field `next_outgoing` is set to `Some(e2)`, the second
+//! outgoing edge of n1.
+//! On the other hand, since there are no more child to n1 after n3, this field is `None` for the
+//! edge identified by e2.
 //!
 //! # Note:
 //!     Once the graph is constructed, no edge/node should be removed from it. Thus this
 //!     implementation does not have problems like dangling indexes.
-
-#![allow(dead_code)]
-use std::ops::{Index, IndexMut};
 
 /// This is an abstraction that represents a node index. It is used to retrieve the `NodeData` in
 /// the `Graph` representation
@@ -39,21 +49,16 @@ pub struct NodeIndex(pub usize);
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct EdgeIndex(pub usize);
 
-#[derive(Debug, Copy, Clone)]
-pub enum NodeValue {
-    False = 0,
-    True = 1,
-    Unconstrained = 2,
-}
-
 /// Data structure that actually holds the data of a  node in the graph
 #[derive(Debug, Copy, Clone)]
 pub struct NodeData {
     /// The value associated to the node. This represent the assignment to the literal represented
     /// by the node.
-    /// If the node is unassigned, this is None. Otherwise it is either True, False or
-    /// Unconstrained if the node do not constraint the model count.
-    pub value: Option<NodeValue>,
+    /// If the node is unassigned, this is None. Otherwise it is either `true`, `false`.
+    /// Note that in some cases, a node might not constrained the model count. In that case setting
+    /// it to false is not false per se, but might not end up giving a model of the initial boolean
+    /// formula.
+    pub value: Option<bool>,
 
     /// Indicate if the literal represented by the node is a probabilistic literal (i.e. have a
     /// weight) or not
@@ -121,32 +126,6 @@ impl EdgeData {
 pub struct Graph {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<EdgeData>,
-}
-
-impl Index<NodeIndex> for Graph {
-    type Output = NodeData;
-    fn index(&self, idx: NodeIndex) -> &NodeData {
-        &self.nodes[idx.0]
-    }
-}
-
-impl IndexMut<NodeIndex> for Graph {
-    fn index_mut(&mut self, idx: NodeIndex) -> &mut NodeData {
-        &mut self.nodes[idx.0]
-    }
-}
-
-impl Index<EdgeIndex> for Graph {
-    type Output = EdgeData;
-    fn index(&self, idx: EdgeIndex) -> &EdgeData {
-        &self.edges[idx.0]
-    }
-}
-
-impl IndexMut<EdgeIndex> for Graph {
-    fn index_mut(&mut self, idx: EdgeIndex) -> &mut EdgeData {
-        &mut self.edges[idx.0]
-    }
 }
 
 impl Graph {
