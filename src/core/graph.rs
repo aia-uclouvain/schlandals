@@ -39,6 +39,7 @@
 //!     Once the graph is constructed, no edge/node should be removed from it. Thus this
 //!     implementation does not have problems like dangling indexes.
 
+use super::trail::*;
 /// This is an abstraction that represents a node index. It is used to retrieve the `NodeData` in
 /// the `Graph` representation
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -50,15 +51,25 @@ pub struct NodeIndex(pub usize);
 pub struct EdgeIndex(pub usize);
 
 /// Data structure that actually holds the data of a  node in the graph
+/// A node in the graph is in four possible states: 1) Unassigned 2) True 3) False 4)
+/// Unconstrained.
+///
+/// In the last case, it means that the node can be either `true` or `false` without impacting the
+/// counting. If a node is relaxed, then the `relaxed` flag is set to true.
+/// The value of the node is stored in the `value` field and its domain is implicitly given by the
+/// `domain_size` field.
+/// If a `domain_size = 2` then both `true` and `false` are in the domain, and the variable is
+/// unassgined. If `domain_size = 1` then the value is assigned to the value in the `value` field.
+///
+/// # Note:
+///     This might not be the best design, but it seems that a full handling of domain etc (like in
+///     a cp solver) is a bit overkill since at the moment we only need BoolVar.
 #[derive(Debug, Copy, Clone)]
 pub struct NodeData {
-    /// The value associated to the node. This represent the assignment to the literal represented
-    /// by the node.
-    /// If the node is unassigned, this is None. Otherwise it is either `true`, `false`.
-    /// Note that in some cases, a node might not constrained the model count. In that case setting
-    /// it to false is not false per se, but might not end up giving a model of the initial boolean
-    /// formula.
-    pub value: Option<bool>,
+    /// The value assigned to the node. Should only be read when `domain_size = 1`
+    pub value: bool,
+    /// The current size of the domain of the node
+    domain_size: ReversibleInt,
 
     /// Indicate if the literal represented by the node is a probabilistic literal (i.e. have a
     /// weight) or not
@@ -72,16 +83,21 @@ pub struct NodeData {
     pub children: Option<EdgeIndex>,
     /// If present, the index of the first incoming edge of the node
     pub parents: Option<EdgeIndex>,
+    /// Indicates if the node is constrained or not. If the node is relaxed, then it can take
+    /// either the value `true` or `false` without impacting the model count.
+    relaxed: ReversibleBool,
 }
 
 impl NodeData {
-    pub fn new(probabilistic: bool, weight: Option<f64>) -> Self {
+    pub fn new(probabilistic: bool, weight: Option<f64>, state: &mut TrailedStateManager) -> Self {
         Self {
-            value: None,
+            value: false,
+            domain_size: state.manage_int(2),
             probabilistic,
             weight,
             children: None,
             parents: None,
+            relaxed: state.manage_boolean(false),
         }
     }
 
@@ -126,6 +142,7 @@ impl EdgeData {
 pub struct Graph {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<EdgeData>,
+    state: TrailedStateManager,
 }
 
 impl Graph {
@@ -133,6 +150,7 @@ impl Graph {
         Self {
             nodes: vec![],
             edges: vec![],
+            state: TrailedStateManager::new(),
         }
     }
 
@@ -150,11 +168,13 @@ impl Graph {
     pub fn add_node(&mut self, probabilistic: bool, weight: Option<f64>) -> NodeIndex {
         let id = self.nodes.len();
         self.nodes.push(NodeData {
-            value: None,
+            value: false,
+            domain_size: self.state.manage_int(2),
             probabilistic,
             weight,
             children: None,
             parents: None,
+            relaxed: self.state.manage_boolean(false),
         });
         NodeIndex(id)
     }
@@ -194,6 +214,29 @@ impl Graph {
             graph: self,
             next: first,
         }
+    }
+
+    /// Sets `node` to `value`. This assumes that `node` is unassigned
+    pub fn set_node(&mut self, node: NodeIndex, value: bool) {
+        // TODO: Maybe would be useful to launch an error
+        debug_assert!(self.state.get_int(self.nodes[node.0].domain_size) == 2);
+        self.state.decrement(self.nodes[node.0].domain_size);
+        self.nodes[node.0].value = value;
+    }
+
+    /// Set the node `node` as relaxed
+    pub fn relax_node(&mut self, node: NodeIndex) {
+        self.state.set_bool(self.nodes[node.0].relaxed, true);
+    }
+
+    /// Returns true if `node` is relaxed, false otherwise
+    pub fn is_node_relaxed(&self, node: NodeIndex) -> bool {
+        self.state.get_bool(self.nodes[node.0].relaxed)
+    }
+
+    /// Returns true if `node` is bound to a value, false otherwise
+    pub fn is_node_bound(&self, node: NodeIndex) -> bool {
+        self.state.get_int(self.nodes[node.0].domain_size) == 1
     }
 }
 
@@ -240,10 +283,12 @@ impl<'g> Iterator for Children<'g> {
 #[cfg(test)]
 mod test_node_data {
     use crate::core::graph::NodeData;
+    use crate::core::trail::*;
 
     #[test]
     fn new_can_create_probabilistic_node() {
-        let node = NodeData::new(true, Some(0.4));
+        let mut state = TrailedStateManager::new();
+        let node = NodeData::new(true, Some(0.4), &mut state);
         assert_eq!(true, node.is_probabilistic());
         assert!(node.weight.is_some());
         assert_eq!(0.4, node.weight.unwrap());
@@ -251,7 +296,8 @@ mod test_node_data {
 
     #[test]
     fn new_can_create_deterministic_node() {
-        let node = NodeData::new(false, None);
+        let mut state = TrailedStateManager::new();
+        let node = NodeData::new(false, None, &mut state);
         assert_eq!(false, node.is_probabilistic());
         assert_eq!(None, node.weight);
     }
@@ -287,6 +333,7 @@ mod test_edge_data {
 #[cfg(test)]
 mod test_graph {
     use crate::core::graph::{EdgeIndex, Graph, NodeIndex};
+    use crate::core::trail::*;
 
     #[test]
     fn new_create_empty_graph() {
@@ -357,5 +404,35 @@ mod test_graph {
 
         let children: Vec<NodeIndex> = g.children(n1).collect();
         assert_eq!(vec![n4, n3, n2], children);
+    }
+
+    #[test]
+    fn setting_nodes_values() {
+        let mut g = Graph::new();
+        let n1 = g.add_node(false, None);
+        assert!(!g.is_node_bound(n1));
+
+        g.state.save_state();
+
+        g.set_node(n1, true);
+        assert!(g.is_node_bound(n1));
+        assert!(g.nodes[n1.0].value);
+
+        g.state.restore_state();
+        assert!(!g.is_node_bound(n1));
+    }
+
+    #[test]
+    fn relaxing_nodes() {
+        let mut g = Graph::new();
+        let n1 = g.add_node(false, None);
+        assert!(!g.is_node_relaxed(n1));
+        g.state.save_state();
+
+        g.relax_node(n1);
+        assert!(g.is_node_relaxed(n1));
+
+        g.state.restore_state();
+        assert!(!g.is_node_relaxed(n1));
     }
 }
