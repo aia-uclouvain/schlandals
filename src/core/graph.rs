@@ -39,6 +39,7 @@
 //!     Once the graph is constructed, no edge/node should be removed from it. Thus this
 //!     implementation does not have problems like dangling indexes.
 
+#![allow(dead_code)]
 use super::trail::*;
 /// This is an abstraction that represents a node index. It is used to retrieve the `NodeData` in
 /// the `Graph` representation
@@ -76,7 +77,7 @@ pub struct NodeData {
     pub probabilistic: bool,
 
     /// If `probabilistic` is `true`, then this is the weight associated to the node. Otherwise
-    /// this is None
+    /// this is None. The weight is assumed to be log-transformed.
     pub weight: Option<f64>,
 
     /// If present, the index of the first outgoing edge of the node
@@ -143,14 +144,18 @@ pub struct Graph {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<EdgeData>,
     state: TrailedStateManager,
+    pub obj: ReversibleFloat,
 }
 
 impl Graph {
     pub fn new() -> Self {
+        let mut state = TrailedStateManager::new();
+        let obj = state.manage_float(0.0);
         Self {
             nodes: vec![],
             edges: vec![],
-            state: TrailedStateManager::new(),
+            state,
+            obj,
         }
     }
 
@@ -220,6 +225,10 @@ impl Graph {
     pub fn set_node(&mut self, node: NodeIndex, value: bool) {
         // TODO: Maybe would be useful to launch an error
         debug_assert!(self.state.get_int(self.nodes[node.0].domain_size) == 2);
+        let n = &self.nodes[node.0];
+        if n.probabilistic && value && !self.is_node_relaxed(node) {
+            self.state.add_float(self.obj, n.weight.unwrap());
+        }
         self.state.decrement(self.nodes[node.0].domain_size);
         self.nodes[node.0].value = value;
     }
@@ -237,6 +246,11 @@ impl Graph {
     /// Returns true if `node` is bound to a value, false otherwise
     pub fn is_node_bound(&self, node: NodeIndex) -> bool {
         self.state.get_int(self.nodes[node.0].domain_size) == 1
+    }
+
+    /// Returns the current objective with the assignment of the nodes in the graph
+    pub fn get_objective(&self) -> f64 {
+        self.state.get_float(self.obj)
     }
 }
 
@@ -434,5 +448,39 @@ mod test_graph {
 
         g.state.restore_state();
         assert!(!g.is_node_relaxed(n1));
+    }
+
+    #[test]
+    fn incremental_computation_of_objective() {
+        let mut g = Graph::new();
+        assert_eq!(0.0, g.get_objective());
+        let n1 = g.add_node(false, None);
+        let n2 = g.add_node(true, Some(0.4));
+        let n3 = g.add_node(true, Some(0.6));
+        assert_eq!(0.0, g.get_objective());
+
+        g.state.save_state();
+
+        g.set_node(n1, true);
+        assert_eq!(0.0, g.get_objective());
+
+        g.set_node(n2, true);
+        assert_eq!(0.4, g.get_objective());
+
+        g.state.restore_state();
+
+        assert_eq!(0.0, g.get_objective());
+
+        g.state.save_state();
+
+        g.set_node(n2, true);
+        g.set_node(n3, true);
+        assert_eq!(1.0, g.get_objective());
+
+        g.state.restore_state();
+
+        g.relax_node(n1);
+        g.set_node(n1, true);
+        assert_eq!(0.0, g.get_objective());
     }
 }

@@ -79,6 +79,10 @@ pub trait FloatManager {
     fn get_float(&self, id: ReversibleFloat) -> f64;
     /// Sets the value of a managed float
     fn set_float(&mut self, id: ReversibleFloat, value: f64) -> f64;
+    /// Adds `value` to the managed float
+    fn add_float(&mut self, id: ReversibleFloat, value: f64) -> f64;
+    /// Substracts `value` of the managed float
+    fn substract_float(&mut self, id: ReversibleFloat, value: f64) -> f64;
 }
 
 /// This structure keeps track of the length of a given level of the trail as well as the number of
@@ -305,6 +309,16 @@ impl FloatManager for TrailedStateManager {
         }
         value
     }
+
+    fn add_float(&mut self, id: ReversibleFloat, value: f64) -> f64 {
+        let v = self.get_float(id) + value;
+        self.set_float(id, v)
+    }
+
+    fn substract_float(&mut self, id: ReversibleFloat, value: f64) -> f64 {
+        let v = self.get_float(id) - value;
+        self.set_float(id, v)
+    }
 }
 
 #[cfg(test)]
@@ -494,5 +508,24 @@ mod test_manager_float {
 
         mgr.restore_state();
         assert_eq!(0.3, mgr.get_float(a));
+    }
+
+    #[test]
+    fn add_and_substract_floats() {
+        let mut mgr = TrailedStateManager::new();
+        let f = mgr.manage_float(0.0);
+        assert_eq!(0.0, mgr.get_float(f));
+
+        mgr.add_float(f, 1.5);
+        assert_eq!(1.5, mgr.get_float(f));
+
+        mgr.save_state();
+
+        mgr.substract_float(f, 12.2);
+        assert_eq!(-10.7, mgr.get_float(f));
+        mgr.add_float(f, 1.0);
+        assert_eq!(-9.7, mgr.get_float(f));
+        mgr.restore_state();
+        assert_eq!(1.5, mgr.get_float(f));
     }
 }
