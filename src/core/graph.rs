@@ -139,12 +139,21 @@ impl EdgeData {
     }
 }
 
+/// Represents a set of nodes in a same distribution. This assume that the nodes of a distribution
+/// are inserted in the graph one after the other, and that there `NodeIndex` are consecutive.
+/// Since no node should be removed from the graph once constructed, this should not be a problem.
+/// Thus a distribution is identified by the first `NodeIndex` and the number of nodes in the
+/// distribution.
+#[derive(Debug, Clone, PartialEq)]
+struct Distribution(NodeIndex, usize);
+
 #[derive(Debug, Clone)]
 pub struct Graph {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<EdgeData>,
     state: TrailedStateManager,
     pub obj: ReversibleFloat,
+    distributions: Vec<Distribution>,
 }
 
 impl Graph {
@@ -156,6 +165,7 @@ impl Graph {
             edges: vec![],
             state,
             obj,
+            distributions: vec![],
         }
     }
 
@@ -182,6 +192,23 @@ impl Graph {
             relaxed: self.state.manage_boolean(false),
         });
         NodeIndex(id)
+    }
+
+    /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
+    /// nodes so that
+    ///     - The sum of their weights sum up to 1.0
+    ///     - Only one of these node can be true at a given time
+    ///     - None of the node in the distribution is part of another distribution
+    ///
+    /// Each probabilstic node should be part of one distribution.
+    pub fn add_distribution(&mut self, weights: &Vec<f64>) -> Vec<NodeIndex> {
+        debug_assert!(weights.iter().fold(0.0, |sum, w| sum + *w) == 1.0);
+        let nodes: Vec<NodeIndex> = weights
+            .iter()
+            .map(|w| self.add_node(true, Some(*w)))
+            .collect();
+        self.distributions.push(Distribution(nodes[0], nodes.len()));
+        nodes
     }
 
     /// Add an edge between the node identified by `src` to the node identified by `dst`. This
@@ -346,7 +373,7 @@ mod test_edge_data {
 
 #[cfg(test)]
 mod test_graph {
-    use crate::core::graph::{EdgeIndex, Graph, NodeIndex};
+    use crate::core::graph::{Distribution, EdgeIndex, Graph, NodeIndex};
     use crate::core::trail::*;
 
     #[test]
@@ -482,5 +509,45 @@ mod test_graph {
         g.relax_node(n1);
         g.set_node(n1, true);
         assert_eq!(0.0, g.get_objective());
+    }
+
+    #[test]
+    fn graph_add_distribution() {
+        let mut g = Graph::new();
+        assert_eq!(0, g.distributions.len());
+        let weights = vec![0.2, 0.4, 0.1, 0.3];
+        let nodes = g.add_distribution(&weights);
+        assert_eq!(
+            vec![NodeIndex(0), NodeIndex(1), NodeIndex(2), NodeIndex(3)],
+            nodes
+        );
+        assert_eq!(Distribution(NodeIndex(0), 4), g.distributions[0]);
+    }
+
+    #[test]
+    fn graph_add_multiple_distributions() {
+        let mut g = Graph::new();
+        let w1 = vec![0.1, 0.3, 0.6];
+        let w2 = vec![0.5, 0.4, 0.05, 0.05];
+        let w3 = vec![0.9, 0.1];
+
+        let n1 = g.add_distribution(&w1);
+        assert_eq!(vec![NodeIndex(0), NodeIndex(1), NodeIndex(2)], n1);
+        assert_eq!(Distribution(n1[0], 3), g.distributions[0]);
+
+        g.add_node(false, None);
+        let n2 = g.add_distribution(&w2);
+        assert_eq!(
+            vec![NodeIndex(4), NodeIndex(5), NodeIndex(6), NodeIndex(7)],
+            n2
+        );
+        assert_eq!(Distribution(n2[0], 4), g.distributions[1]);
+
+        g.add_node(false, None);
+        g.add_node(false, None);
+
+        let n3 = g.add_distribution(&w3);
+        assert_eq!(vec![NodeIndex(10), NodeIndex(11)], n3);
+        assert_eq!(Distribution(n3[0], 2), g.distributions[2]);
     }
 }
