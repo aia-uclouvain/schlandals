@@ -51,6 +51,21 @@ pub struct NodeIndex(pub usize);
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct EdgeIndex(pub usize);
 
+/// This structure represent a clause in the graph. A clause is of the form
+///     a && b && ... && d => e
+/// In the graph, this will be represented by n (the number of literals in the implicant) incoming
+/// edges in `e`.
+/// The edges of a clause are added at the same time, so a clause can be fully identified by an
+/// `EdgeIndex` (the first edge, in the example `a -> e`) and the size of the clause (n)
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Clause {
+    first: EdgeIndex,
+    size: usize,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ClauseIndex(pub usize);
+
 /// Data structure that actually holds the data of a  node in the graph
 /// A node in the graph is in four possible states: 1) Unassigned 2) True 3) False 4)
 /// Unconstrained.
@@ -87,6 +102,10 @@ pub struct NodeData {
     /// Indicates if the node is constrained or not. If the node is relaxed, then it can take
     /// either the value `true` or `false` without impacting the model count.
     relaxed: ReversibleBool,
+    /// Number of active incoming edges
+    active_incoming: ReversibleInt,
+    /// Numbre of active outgoing edges
+    active_outgoing: ReversibleInt,
 }
 
 impl NodeData {
@@ -99,6 +118,8 @@ impl NodeData {
             children: None,
             parents: None,
             relaxed: state.manage_boolean(false),
+            active_incoming: state.manage_int(0),
+            active_outgoing: state.manage_int(0),
         }
     }
 
@@ -121,6 +142,11 @@ pub struct EdgeData {
 
     /// If exists, the next outgoing edge of `src`
     pub next_outgoing: Option<EdgeIndex>,
+
+    // The clause in which this edges is
+    clause: ClauseIndex,
+    /// Is the edge active or not
+    active: ReversibleBool,
 }
 
 impl EdgeData {
@@ -129,12 +155,16 @@ impl EdgeData {
         dst: NodeIndex,
         next_incoming: Option<EdgeIndex>,
         next_outgoing: Option<EdgeIndex>,
+        clause: ClauseIndex,
+        state: &mut TrailedStateManager,
     ) -> Self {
         Self {
             src,
             dst,
             next_incoming,
             next_outgoing,
+            clause,
+            active: state.manage_boolean(true),
         }
     }
 }
@@ -144,16 +174,48 @@ impl EdgeData {
 /// Since no node should be removed from the graph once constructed, this should not be a problem.
 /// Thus a distribution is identified by the first `NodeIndex` and the number of nodes in the
 /// distribution.
-#[derive(Debug, Clone, PartialEq)]
-struct Distribution(NodeIndex, usize);
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Distribution(pub NodeIndex, pub usize);
+
+pub struct DistributionIterator {
+    node: NodeIndex,
+    remaining: usize,
+}
+
+impl IntoIterator for Distribution {
+    type Item = NodeIndex;
+    type IntoIter = DistributionIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        DistributionIterator {
+            node: self.0,
+            remaining: self.1,
+        }
+    }
+}
+
+impl Iterator for DistributionIterator {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.remaining {
+            0 => None,
+            _ => {
+                self.remaining -= 1;
+                Some(self.node)
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Graph {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<EdgeData>,
-    state: TrailedStateManager,
+    clauses: Vec<Clause>,
+    pub state: TrailedStateManager,
     pub obj: ReversibleFloat,
-    distributions: Vec<Distribution>,
+    pub distributions: Vec<Distribution>,
 }
 
 impl Graph {
@@ -163,6 +225,7 @@ impl Graph {
         Self {
             nodes: vec![],
             edges: vec![],
+            clauses: vec![],
             state,
             obj,
             distributions: vec![],
@@ -190,6 +253,8 @@ impl Graph {
             children: None,
             parents: None,
             relaxed: self.state.manage_boolean(false),
+            active_incoming: self.state.manage_int(0),
+            active_outgoing: self.state.manage_int(0),
         });
         NodeIndex(id)
     }
@@ -211,25 +276,6 @@ impl Graph {
         nodes
     }
 
-    /// Add an edge between the node identified by `src` to the node identified by `dst`. This
-    /// method returns the index of the edge.
-    pub fn add_edge(&mut self, src: NodeIndex, dst: NodeIndex) -> EdgeIndex {
-        let id = self.edges.len();
-        let source_outgoing = self.nodes[src.0].children;
-        let dest_incoming = self.nodes[dst.0].parents;
-        let edge = EdgeData {
-            src,
-            dst,
-            next_incoming: dest_incoming,
-            next_outgoing: source_outgoing,
-        };
-        let index = EdgeIndex(id);
-        self.nodes[src.0].children = Some(index);
-        self.nodes[dst.0].parents = Some(index);
-        self.edges.push(edge);
-        index
-    }
-
     /// Returns an iterator over the nodes that points to `target`
     pub fn parents(&self, target: NodeIndex) -> Parents<'_> {
         let first = self.nodes[target.0].parents;
@@ -243,6 +289,24 @@ impl Graph {
     pub fn children(&self, source: NodeIndex) -> Children<'_> {
         let first = self.nodes[source.0].children;
         Children {
+            graph: self,
+            next: first,
+        }
+    }
+
+    /// Returns an iterator over the outgoing edges of `node`
+    pub fn outgoings(&self, node: NodeIndex) -> Outgoings<'_> {
+        let first = self.nodes[node.0].children;
+        Outgoings {
+            graph: self,
+            next: first,
+        }
+    }
+
+    /// Returns an iterator over the incoming edges of `node`
+    pub fn incomings(&self, node: NodeIndex) -> Incomings<'_> {
+        let first = self.nodes[node.0].parents;
+        Incomings {
             graph: self,
             next: first,
         }
@@ -278,6 +342,90 @@ impl Graph {
     /// Returns the current objective with the assignment of the nodes in the graph
     pub fn get_objective(&self) -> f64 {
         self.state.get_float(self.obj)
+    }
+
+    /// Returns the number of active incoming edges of `node`
+    pub fn node_number_incoming(&self, node: NodeIndex) -> isize {
+        self.state.get_int(self.nodes[node.0].active_incoming)
+    }
+
+    /// Returns the number of active outgoing edges of `node`
+    pub fn node_number_outgoing(&self, node: NodeIndex) -> isize {
+        self.state.get_int(self.nodes[node.0].active_outgoing)
+    }
+
+    /// Add an edge between the node identified by `src` to the node identified by `dst`. This
+    /// method returns the index of the edge.
+    fn add_edge(&mut self, src: NodeIndex, dst: NodeIndex, clause: ClauseIndex) -> EdgeIndex {
+        let source_outgoing = self.nodes[src.0].children;
+        let dest_incoming = self.nodes[dst.0].parents;
+        let edge = EdgeData {
+            src,
+            dst,
+            next_incoming: dest_incoming,
+            next_outgoing: source_outgoing,
+            clause,
+            active: self.state.manage_boolean(true),
+        };
+        let index = EdgeIndex(self.edges.len());
+        self.nodes[src.0].children = Some(index);
+        self.state.increment(self.nodes[src.0].active_outgoing);
+        self.nodes[dst.0].parents = Some(index);
+        self.state.increment(self.nodes[dst.0].active_incoming);
+        self.edges.push(edge);
+        index
+    }
+
+    /// Add a clause to the graph. A clause is a expression of the form
+    ///     n1 && n2 && ... && nn => head
+    ///
+    /// where head, n1, ..., nn are nodes of the graph. ´head` is the head of the clause and `body`
+    /// = vec![n1, ..., nn].
+    /// This function adds n edges to the graph, one for each node in the body (as source) towards
+    /// the head of the clause
+    pub fn add_clause(&mut self, head: NodeIndex, body: &Vec<NodeIndex>) -> ClauseIndex {
+        let cid = ClauseIndex(self.clauses.len());
+        self.clauses.push(Clause {
+            first: EdgeIndex(self.edges.len()),
+            size: body.len(),
+        });
+        for node in body {
+            self.add_edge(*node, head, cid);
+        }
+        cid
+    }
+
+    /// Deactive `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
+    /// the number of outgoing edges of `edge.src`
+    pub fn deactivate_edge(&mut self, edge: EdgeIndex) {
+        let edge = self.edges[edge.0];
+        self.state.set_bool(edge.active, false);
+        self.state.decrement(self.nodes[edge.src.0].active_outgoing);
+        self.state.decrement(self.nodes[edge.dst.0].active_incoming);
+    }
+
+    /// Returns an iterator over all the clauses in which `node` is included, either as the head of
+    /// the clauses or in its body
+    pub fn node_clauses(&self, node: NodeIndex) -> impl Iterator<Item = ClauseIndex> + Sized + '_ {
+        // A bit ugly... For now dedup is not available for iterators (see
+        // https://github.com/rust-lang/rust/pull/83748)
+        // The idea is that edges are inserted by clauses, and thus all incoming edges of the same clauses
+        // will be neighbors in the linked list of incoming edges. Thus mapping the edges to their
+        // clause will yield a sequence of `ClauseIndex` sorted in decreasing order
+        let mut incomings: Vec<ClauseIndex> = self
+            .incomings(node)
+            .map(move |e| self.edges[e.0].clause)
+            .collect();
+        incomings.dedup();
+        let outgoings = self.outgoings(node).map(move |e| self.edges[e.0].clause);
+        incomings.into_iter().chain(outgoings)
+    }
+
+    /// Returns an iterator over all the `EdgeIndex` of a clause
+    pub fn clause_edges(&self, clause: Clause) -> impl Iterator<Item = EdgeIndex> + Sized + '_ {
+        let start = clause.first.0;
+        let end = start + clause.size;
+        (start..end).map(|i| EdgeIndex(i)).into_iter()
     }
 }
 
@@ -321,6 +469,46 @@ impl<'g> Iterator for Children<'g> {
     }
 }
 
+pub struct Outgoings<'g> {
+    graph: &'g Graph,
+    next: Option<EdgeIndex>,
+}
+
+impl<'g> Iterator for Outgoings<'g> {
+    type Item = EdgeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next {
+            None => None,
+            Some(eidx) => {
+                let edge = &self.graph.edges[eidx.0];
+                self.next = edge.next_outgoing;
+                Some(eidx)
+            }
+        }
+    }
+}
+
+pub struct Incomings<'g> {
+    graph: &'g Graph,
+    next: Option<EdgeIndex>,
+}
+
+impl<'g> Iterator for Incomings<'g> {
+    type Item = EdgeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next {
+            None => None,
+            Some(eidx) => {
+                let edge = &self.graph.edges[eidx.0];
+                self.next = edge.next_incoming;
+                Some(eidx)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_node_data {
     use crate::core::graph::NodeData;
@@ -346,13 +534,15 @@ mod test_node_data {
 
 #[cfg(test)]
 mod test_edge_data {
-    use crate::core::graph::{EdgeData, EdgeIndex, NodeIndex};
+    use crate::core::graph::{ClauseIndex, EdgeData, EdgeIndex, NodeIndex};
+    use crate::core::trail::TrailedStateManager;
 
     #[test]
     fn new_can_create_first() {
         let src = NodeIndex(11);
         let dst = NodeIndex(13);
-        let edge = EdgeData::new(src, dst, None, None);
+        let mut state = TrailedStateManager::new();
+        let edge = EdgeData::new(src, dst, None, None, ClauseIndex(0), &mut state);
         assert_eq!(src, edge.src);
         assert_eq!(dst, edge.dst);
         assert_eq!(None, edge.next_incoming);
@@ -365,7 +555,15 @@ mod test_edge_data {
         let dst = NodeIndex(64);
         let next_incoming = Some(EdgeIndex(3));
         let next_outgoing = Some(EdgeIndex(102));
-        let edge = EdgeData::new(src, dst, next_incoming, next_outgoing);
+        let mut state = TrailedStateManager::new();
+        let edge = EdgeData::new(
+            src,
+            dst,
+            next_incoming,
+            next_outgoing,
+            ClauseIndex(0),
+            &mut state,
+        );
         assert_eq!(next_incoming, edge.next_incoming);
         assert_eq!(next_outgoing, edge.next_outgoing);
     }
@@ -373,7 +571,7 @@ mod test_edge_data {
 
 #[cfg(test)]
 mod test_graph {
-    use crate::core::graph::{Distribution, EdgeIndex, Graph, NodeIndex};
+    use crate::core::graph::{ClauseIndex, Distribution, EdgeIndex, Graph, NodeIndex};
     use crate::core::trail::*;
 
     #[test]
@@ -398,7 +596,7 @@ mod test_graph {
         g.add_node(false, None);
         g.add_node(false, None);
         for i in 0..10 {
-            let idx = g.add_edge(NodeIndex(0), NodeIndex(1));
+            let idx = g.add_edge(NodeIndex(0), NodeIndex(1), ClauseIndex(0));
             assert_eq!(EdgeIndex(i), idx);
         }
     }
@@ -409,26 +607,38 @@ mod test_graph {
         let n1 = g.add_node(false, None);
         let n2 = g.add_node(false, None);
         let n3 = g.add_node(false, None);
-        g.add_edge(n1, n3);
-        g.add_edge(n2, n3);
+        let e1 = g.add_edge(n1, n3, ClauseIndex(0));
+        let e2 = g.add_edge(n2, n3, ClauseIndex(0));
 
         let n1_outgoing: Vec<NodeIndex> = g.children(n1).collect();
+        let n1_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n1).collect();
         let n1_incoming: Vec<NodeIndex> = g.parents(n1).collect();
+        let n1_incoming_edges: Vec<EdgeIndex> = g.incomings(n1).collect();
 
         assert_eq!(vec![n3], n1_outgoing);
+        assert_eq!(vec![e1], n1_outgoing_edges);
         assert_eq!(0, n1_incoming.len());
+        assert_eq!(0, n1_incoming_edges.len());
 
         let n2_outgoing: Vec<NodeIndex> = g.children(n2).collect();
+        let n2_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n2).collect();
         let n2_incoming: Vec<NodeIndex> = g.parents(n2).collect();
+        let n2_incoming_edges: Vec<EdgeIndex> = g.incomings(n2).collect();
 
         assert_eq!(vec![n3], n2_outgoing);
+        assert_eq!(vec![e2], n2_outgoing_edges);
         assert_eq!(0, n2_incoming.len());
+        assert_eq!(0, n2_incoming_edges.len());
 
         let n3_outgoing: Vec<NodeIndex> = g.children(n3).collect();
+        let n3_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n3).collect();
         let n3_incoming: Vec<NodeIndex> = g.parents(n3).collect();
+        let n3_incoming_edges: Vec<EdgeIndex> = g.incomings(n3).collect();
 
         assert_eq!(0, n3_outgoing.len());
+        assert_eq!(0, n3_outgoing_edges.len());
         assert_eq!(vec![n2, n1], n3_incoming);
+        assert_eq!(vec![e2, e1], n3_incoming_edges);
     }
 
     #[test]
@@ -439,9 +649,9 @@ mod test_graph {
         let n3 = g.add_node(false, None);
         let n4 = g.add_node(true, Some(0.3));
 
-        g.add_edge(n1, n2);
-        g.add_edge(n1, n3);
-        g.add_edge(n1, n4);
+        g.add_edge(n1, n2, ClauseIndex(0));
+        g.add_edge(n1, n3, ClauseIndex(0));
+        g.add_edge(n1, n4, ClauseIndex(0));
 
         let children: Vec<NodeIndex> = g.children(n1).collect();
         assert_eq!(vec![n4, n3, n2], children);
@@ -549,5 +759,181 @@ mod test_graph {
         let n3 = g.add_distribution(&w3);
         assert_eq!(vec![NodeIndex(10), NodeIndex(11)], n3);
         assert_eq!(Distribution(n3[0], 2), g.distributions[2]);
+    }
+
+    #[test]
+    fn graph_add_edges_increases_edge_counts() {
+        let mut g = Graph::new();
+        let n1 = g.add_node(false, None);
+        let n2 = g.add_node(false, None);
+        let n3 = g.add_node(false, None);
+        let n4 = g.add_node(false, None);
+
+        assert_eq!(0, g.node_number_incoming(n1));
+        assert_eq!(0, g.node_number_outgoing(n1));
+        assert_eq!(0, g.node_number_incoming(n2));
+        assert_eq!(0, g.node_number_outgoing(n2));
+        assert_eq!(0, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(0, g.node_number_incoming(n4));
+        assert_eq!(0, g.node_number_outgoing(n4));
+
+        let e1 = g.add_edge(n1, n2, ClauseIndex(0));
+        assert_eq!(0, g.node_number_incoming(n1));
+        assert_eq!(1, g.node_number_outgoing(n1));
+        assert_eq!(1, g.node_number_incoming(n2));
+        assert_eq!(0, g.node_number_outgoing(n2));
+        assert_eq!(0, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(0, g.node_number_incoming(n4));
+        assert_eq!(0, g.node_number_outgoing(n4));
+
+        let e2 = g.add_edge(n1, n3, ClauseIndex(0));
+        assert_eq!(0, g.node_number_incoming(n1));
+        assert_eq!(2, g.node_number_outgoing(n1));
+        assert_eq!(1, g.node_number_incoming(n2));
+        assert_eq!(0, g.node_number_outgoing(n2));
+        assert_eq!(1, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(0, g.node_number_incoming(n4));
+        assert_eq!(0, g.node_number_outgoing(n4));
+
+        let e3 = g.add_edge(n4, n1, ClauseIndex(0));
+        assert_eq!(1, g.node_number_incoming(n1));
+        assert_eq!(2, g.node_number_outgoing(n1));
+        assert_eq!(1, g.node_number_incoming(n2));
+        assert_eq!(0, g.node_number_outgoing(n2));
+        assert_eq!(1, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(0, g.node_number_incoming(n4));
+        assert_eq!(1, g.node_number_outgoing(n4));
+
+        let e4 = g.add_edge(n2, n4, ClauseIndex(0));
+        assert_eq!(1, g.node_number_incoming(n1));
+        assert_eq!(2, g.node_number_outgoing(n1));
+        assert_eq!(1, g.node_number_incoming(n2));
+        assert_eq!(1, g.node_number_outgoing(n2));
+        assert_eq!(1, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(1, g.node_number_incoming(n4));
+        assert_eq!(1, g.node_number_outgoing(n4));
+
+        g.deactivate_edge(e1);
+        assert_eq!(1, g.node_number_incoming(n1));
+        assert_eq!(1, g.node_number_outgoing(n1));
+        assert_eq!(0, g.node_number_incoming(n2));
+        assert_eq!(1, g.node_number_outgoing(n2));
+        assert_eq!(1, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(1, g.node_number_incoming(n4));
+        assert_eq!(1, g.node_number_outgoing(n4));
+
+        g.deactivate_edge(e2);
+        assert_eq!(1, g.node_number_incoming(n1));
+        assert_eq!(0, g.node_number_outgoing(n1));
+        assert_eq!(0, g.node_number_incoming(n2));
+        assert_eq!(1, g.node_number_outgoing(n2));
+        assert_eq!(0, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(1, g.node_number_incoming(n4));
+        assert_eq!(1, g.node_number_outgoing(n4));
+
+        g.deactivate_edge(e3);
+        assert_eq!(0, g.node_number_incoming(n1));
+        assert_eq!(0, g.node_number_outgoing(n1));
+        assert_eq!(0, g.node_number_incoming(n2));
+        assert_eq!(1, g.node_number_outgoing(n2));
+        assert_eq!(0, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(1, g.node_number_incoming(n4));
+        assert_eq!(0, g.node_number_outgoing(n4));
+
+        g.deactivate_edge(e4);
+        assert_eq!(0, g.node_number_incoming(n1));
+        assert_eq!(0, g.node_number_outgoing(n1));
+        assert_eq!(0, g.node_number_incoming(n2));
+        assert_eq!(0, g.node_number_outgoing(n2));
+        assert_eq!(0, g.node_number_incoming(n3));
+        assert_eq!(0, g.node_number_outgoing(n3));
+        assert_eq!(0, g.node_number_incoming(n4));
+        assert_eq!(0, g.node_number_outgoing(n4));
+    }
+
+    #[test]
+    fn add_clause_correctly_add_edges() {
+        let mut g: Graph = Graph::new();
+        let n1 = g.add_node(false, None);
+        let n2 = g.add_node(false, None);
+        let n3 = g.add_node(false, None);
+        let n4 = g.add_node(false, None);
+
+        // Clause n2 && n3 => n1
+        let c1 = g.add_clause(n1, &vec![n2, n3]);
+        assert_eq!(ClauseIndex(0), c1);
+        let first = g.clauses[c1.0].first.0;
+        let s = g.clauses[c1.0].size;
+        let sources = vec![n2, n3];
+        for i in first..(first + s) {
+            let edge = &g.edges[i];
+            assert_eq!(sources[i - first], edge.src);
+            assert_eq!(n1, edge.dst);
+            assert_eq!(c1, edge.clause);
+        }
+
+        // Clause n3 && n4 => n2
+        let c2 = g.add_clause(n2, &vec![n3, n4]);
+        assert_eq!(ClauseIndex(1), c2);
+        let first = g.clauses[c2.0].first.0;
+        let s = g.clauses[c2.0].size;
+        let sources = vec![n3, n4];
+        for i in first..(first + s) {
+            let edge = &g.edges[i];
+            assert_eq!(sources[i - first], edge.src);
+            assert_eq!(n2, edge.dst);
+            assert_eq!(c2, edge.clause);
+        }
+    }
+
+    #[test]
+    fn clauses_are_correctly_collected() {
+        let mut g = Graph::new();
+        let n1 = g.add_node(false, None);
+        let n2 = g.add_node(false, None);
+        let n3 = g.add_node(false, None);
+        let n4 = g.add_node(false, None);
+
+        let empty: Vec<ClauseIndex> = vec![];
+        // n1 && n2 => n3
+        let c1 = g.add_clause(n3, &vec![n1, n2]);
+        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
+        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
+        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
+        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
+        assert_eq!(vec![c1], n1_clauses);
+        assert_eq!(vec![c1], n2_clauses);
+        assert_eq!(vec![c1], n3_clauses);
+        assert_eq!(empty, n4_clauses);
+
+        // n2 && n4 => n1
+        let c2 = g.add_clause(n1, &vec![n2, n4]);
+        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
+        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
+        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
+        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
+        assert_eq!(vec![c2, c1], n1_clauses);
+        assert_eq!(vec![c2, c1], n2_clauses);
+        assert_eq!(vec![c1], n3_clauses);
+        assert_eq!(vec![c2], n4_clauses);
+
+        // n3 && n1 => n2
+        let c3 = g.add_clause(n2, &vec![n3, n1]);
+        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
+        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
+        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
+        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
+        assert_eq!(vec![c2, c3, c1], n1_clauses);
+        assert_eq!(vec![c3, c2, c1], n2_clauses);
+        assert_eq!(vec![c1, c3], n3_clauses);
+        assert_eq!(vec![c2], n4_clauses);
     }
 }
