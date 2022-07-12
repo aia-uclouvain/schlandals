@@ -15,6 +15,7 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 mod core;
+mod solver;
 fn main() {
     println!("Hello, world!");
 }
