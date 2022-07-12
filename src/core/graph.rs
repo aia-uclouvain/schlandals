@@ -41,15 +41,22 @@
 
 #![allow(dead_code)]
 use super::trail::*;
-/// This is an abstraction that represents a node index. It is used to retrieve the `NodeData` in
-/// the `Graph` representation
+
+// The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
+// They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
+// structure.
+
+/// Abstraction used as a typesafe way of retrieving `NodeData` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct NodeIndex(pub usize);
 
-/// This is an abstraction that represents an edge index. It is used to retrieve the `EdgeData` in
-/// the `Graph` representation
+/// Abstraction used as a typesafe way of retrieving `EdgeData` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct EdgeIndex(pub usize);
+
+/// Abstraction used as a typesafe way of retrieving `Clause` in the `Graph` structure
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ClauseIndex(pub usize);
 
 /// This structure represent a clause in the graph. A clause is of the form
 ///     a && b && ... && d => e
@@ -59,19 +66,22 @@ pub struct EdgeIndex(pub usize);
 /// `EdgeIndex` (the first edge, in the example `a -> e`) and the size of the clause (n)
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Clause {
-    first: EdgeIndex,
-    size: usize,
+    /// Index of the first edge of the clause in the `edges` vector in `Graph`
+    pub first: EdgeIndex,
+    /// Number of edges in the clause (i.e. size of the body)
+    pub size: usize,
+    /// Head of the clause
+    pub head: NodeIndex,
+    /// Number of active edges in the clause
+    active_edges: ReversibleInt,
 }
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct ClauseIndex(pub usize);
 
 /// Data structure that actually holds the data of a  node in the graph
 /// A node in the graph is in four possible states: 1) Unassigned 2) True 3) False 4)
-/// Unconstrained.
+/// Unconstrained
 ///
 /// In the last case, it means that the node can be either `true` or `false` without impacting the
-/// counting. If a node is relaxed, then the `relaxed` flag is set to true.
+/// counting.
 /// The value of the node is stored in the `value` field and its domain is implicitly given by the
 /// `domain_size` field.
 /// If a `domain_size = 2` then both `true` and `false` are in the domain, and the variable is
@@ -99,9 +109,6 @@ pub struct NodeData {
     pub children: Option<EdgeIndex>,
     /// If present, the index of the first incoming edge of the node
     pub parents: Option<EdgeIndex>,
-    /// Indicates if the node is constrained or not. If the node is relaxed, then it can take
-    /// either the value `true` or `false` without impacting the model count.
-    relaxed: ReversibleBool,
     /// Number of active incoming edges
     active_incoming: ReversibleInt,
     /// Numbre of active outgoing edges
@@ -117,14 +124,9 @@ impl NodeData {
             weight,
             children: None,
             parents: None,
-            relaxed: state.manage_boolean(false),
             active_incoming: state.manage_int(0),
             active_outgoing: state.manage_int(0),
         }
-    }
-
-    pub fn is_probabilistic(&self) -> bool {
-        self.probabilistic
     }
 }
 
@@ -177,41 +179,10 @@ impl EdgeData {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Distribution(pub NodeIndex, pub usize);
 
-pub struct DistributionIterator {
-    node: NodeIndex,
-    remaining: usize,
-}
-
-impl IntoIterator for Distribution {
-    type Item = NodeIndex;
-    type IntoIter = DistributionIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        DistributionIterator {
-            node: self.0,
-            remaining: self.1,
-        }
-    }
-}
-
-impl Iterator for DistributionIterator {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.remaining {
-            0 => None,
-            _ => {
-                self.remaining -= 1;
-                Some(self.node)
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Graph {
-    pub nodes: Vec<NodeData>,
-    pub edges: Vec<EdgeData>,
+    nodes: Vec<NodeData>,
+    edges: Vec<EdgeData>,
     clauses: Vec<Clause>,
     pub state: TrailedStateManager,
     pub obj: ReversibleFloat,
@@ -232,65 +203,18 @@ impl Graph {
         }
     }
 
-    pub fn nb_nodes(&self) -> usize {
-        self.nodes.len()
+    /// Returns the current objective with the assignment of the nodes in the graph
+    pub fn get_objective(&self) -> f64 {
+        self.state.get_float(self.obj)
     }
 
-    pub fn nb_edges(&self) -> usize {
-        self.edges.len()
-    }
+    // --- Methods that returns an iterator --- ///
 
-    /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
-    /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
-    /// of `weight`. This method returns the index of the node.
-    pub fn add_node(&mut self, probabilistic: bool, weight: Option<f64>) -> NodeIndex {
-        let id = self.nodes.len();
-        self.nodes.push(NodeData {
-            value: false,
-            domain_size: self.state.manage_int(2),
-            probabilistic,
-            weight,
-            children: None,
-            parents: None,
-            relaxed: self.state.manage_boolean(false),
-            active_incoming: self.state.manage_int(0),
-            active_outgoing: self.state.manage_int(0),
-        });
-        NodeIndex(id)
-    }
-
-    /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
-    /// nodes so that
-    ///     - The sum of their weights sum up to 1.0
-    ///     - Only one of these node can be true at a given time
-    ///     - None of the node in the distribution is part of another distribution
-    ///
-    /// Each probabilstic node should be part of one distribution.
-    pub fn add_distribution(&mut self, weights: &Vec<f64>) -> Vec<NodeIndex> {
-        debug_assert!(weights.iter().fold(0.0, |sum, w| sum + *w) == 1.0);
-        let nodes: Vec<NodeIndex> = weights
-            .iter()
-            .map(|w| self.add_node(true, Some(*w)))
-            .collect();
-        self.distributions.push(Distribution(nodes[0], nodes.len()));
-        nodes
-    }
-
-    /// Returns an iterator over the nodes that points to `target`
-    pub fn parents(&self, target: NodeIndex) -> Parents<'_> {
-        let first = self.nodes[target.0].parents;
-        Parents {
-            graph: self,
-            next: first,
-        }
-    }
-
-    /// Returns an iterator over the nodes pointed to by `source`
-    pub fn children(&self, source: NodeIndex) -> Children<'_> {
-        let first = self.nodes[source.0].children;
-        Children {
-            graph: self,
-            next: first,
+    /// Returns an iterator on the node indexes (`NodeIndex`)
+    pub fn nodes_iter(&self) -> Nodes {
+        Nodes {
+            limit: self.nodes.len(),
+            next: 0,
         }
     }
 
@@ -312,26 +236,93 @@ impl Graph {
         }
     }
 
+    /// Returns an iterator over all the clauses in which `node` is included, either as the head of
+    /// the clauses or in its body
+    pub fn node_clauses(&self, node: NodeIndex) -> impl Iterator<Item = ClauseIndex> + Sized + '_ {
+        // A bit ugly... For now dedup is not available for iterators (see
+        // https://github.com/rust-lang/rust/pull/83748)
+        // The idea is that edges are inserted by clauses, and thus all incoming edges of the same clauses
+        // will be neighbors in the linked list of incoming edges. Thus mapping the edges to their
+        // clause will yield a sequence of `ClauseIndex` sorted in decreasing order
+        let mut incomings: Vec<ClauseIndex> = self
+            .incomings(node)
+            .map(move |e| self.edges[e.0].clause)
+            .collect();
+        incomings.dedup();
+        let outgoings = self.outgoings(node).map(move |e| self.edges[e.0].clause);
+        incomings.into_iter().chain(outgoings)
+    }
+
+    /// Returns an iterator over all the `EdgeIndex` of a clause
+    pub fn edges_clause(&self, clause: ClauseIndex) -> EdgesClause {
+        let first = self.clauses[clause.0].first.0;
+        let limit = first + self.clauses[clause.0].size;
+        EdgesClause { limit, next: first }
+    }
+
+    // --- End iterator methods --- ///
+
+    /// Returns the edge with index `edge.0`
+    pub fn get_edge(&self, edge: EdgeIndex) -> &EdgeData {
+        &self.edges[edge.0]
+    }
+
+    // --- Node related methods --- ///
+
+    /// Returns the node with index `node.0`
+    pub fn get_node(&self, node: NodeIndex) -> &NodeData {
+        &self.nodes[node.0]
+    }
+
+    /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
+    /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
+    /// of `weight`. This method returns the index of the node.
+    pub fn add_node(&mut self, probabilistic: bool, weight: Option<f64>) -> NodeIndex {
+        let id = self.nodes.len();
+        self.nodes.push(NodeData {
+            value: false,
+            domain_size: self.state.manage_int(2),
+            probabilistic,
+            weight,
+            children: None,
+            parents: None,
+            active_incoming: self.state.manage_int(0),
+            active_outgoing: self.state.manage_int(0),
+        });
+        NodeIndex(id)
+    }
+
+    /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
+    /// nodes such that
+    ///     - The sum of their weights sum up to 1.0
+    ///     - Only one of these node can be true at a given time
+    ///     - None of the node in the distribution is part of another distribution
+    ///
+    /// Each probabilstic node should be part of one distribution.
+    pub fn add_distribution(&mut self, weights: &Vec<f64>) -> Vec<NodeIndex> {
+        debug_assert!(weights.iter().fold(0.0, |sum, w| sum + *w) == 1.0);
+        let nodes: Vec<NodeIndex> = weights
+            .iter()
+            .map(|w| self.add_node(true, Some(*w)))
+            .collect();
+        self.distributions.push(Distribution(nodes[0], nodes.len()));
+        nodes
+    }
+
     /// Sets `node` to `value`. This assumes that `node` is unassigned
+    /// `node` is probabilistic and `value` is true, then the probability of the node is added to
+    /// the current objective
     pub fn set_node(&mut self, node: NodeIndex, value: bool) {
         // TODO: Maybe would be useful to launch an error
         debug_assert!(self.state.get_int(self.nodes[node.0].domain_size) == 2);
+        // If the node is probabilistic, add its value to the objective
         let n = &self.nodes[node.0];
-        if n.probabilistic && value && !self.is_node_relaxed(node) {
+        if n.probabilistic && value {
             self.state.add_float(self.obj, n.weight.unwrap());
         }
+        // Assigning the value to the node
         self.state.decrement(self.nodes[node.0].domain_size);
         self.nodes[node.0].value = value;
-    }
-
-    /// Set the node `node` as relaxed
-    pub fn relax_node(&mut self, node: NodeIndex) {
-        self.state.set_bool(self.nodes[node.0].relaxed, true);
-    }
-
-    /// Returns true if `node` is relaxed, false otherwise
-    pub fn is_node_relaxed(&self, node: NodeIndex) -> bool {
-        self.state.get_bool(self.nodes[node.0].relaxed)
     }
 
     /// Returns true if `node` is bound to a value, false otherwise
@@ -339,9 +330,13 @@ impl Graph {
         self.state.get_int(self.nodes[node.0].domain_size) == 1
     }
 
-    /// Returns the current objective with the assignment of the nodes in the graph
-    pub fn get_objective(&self) -> f64 {
-        self.state.get_float(self.obj)
+    pub fn get_node_value(&self, node: NodeIndex) -> bool {
+        debug_assert!(self.is_node_bound(node));
+        self.nodes[node.0].value
+    }
+
+    pub fn is_node_deterministic(&self, node: NodeIndex) -> bool {
+        !self.nodes[node.0].probabilistic
     }
 
     /// Returns the number of active incoming edges of `node`
@@ -353,6 +348,10 @@ impl Graph {
     pub fn node_number_outgoing(&self, node: NodeIndex) -> isize {
         self.state.get_int(self.nodes[node.0].active_outgoing)
     }
+
+    // --- End node related methods --- //
+
+    // --- Edge related methods --- //
 
     /// Add an edge between the node identified by `src` to the node identified by `dst`. This
     /// method returns the index of the edge.
@@ -376,6 +375,36 @@ impl Graph {
         index
     }
 
+    /// Deactivate `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
+    /// the number of outgoing edges of `edge.src`
+    pub fn deactivate_edge(&mut self, edge: EdgeIndex) {
+        let edge = self.edges[edge.0];
+        self.state.set_bool(edge.active, false);
+        self.state.decrement(self.nodes[edge.src.0].active_outgoing);
+        self.state.decrement(self.nodes[edge.dst.0].active_incoming);
+        self.state
+            .decrement(self.clauses[edge.clause.0].active_edges);
+    }
+
+    /// Return true if the edge is still active
+    pub fn is_edge_active(&self, edge: EdgeIndex) -> bool {
+        self.state.get_bool(self.edges[edge.0].active)
+    }
+
+    /// Returns the source of the edge
+    pub fn get_edge_source(&self, edge: EdgeIndex) -> NodeIndex {
+        self.edges[edge.0].src
+    }
+
+    /// Returns the destination of the edge
+    pub fn get_edge_destination(&self, edge: EdgeIndex) -> NodeIndex {
+        self.edges[edge.0].dst
+    }
+
+    // --- End edge related methods --- //
+
+    // --- Clause related methods --- //
+
     /// Add a clause to the graph. A clause is a expression of the form
     ///     n1 && n2 && ... && nn => head
     ///
@@ -388,6 +417,8 @@ impl Graph {
         self.clauses.push(Clause {
             first: EdgeIndex(self.edges.len()),
             size: body.len(),
+            head,
+            active_edges: self.state.manage_int(body.len() as isize),
         });
         for node in body {
             self.add_edge(*node, head, cid);
@@ -395,79 +426,31 @@ impl Graph {
         cid
     }
 
-    /// Deactive `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
-    /// the number of outgoing edges of `edge.src`
-    pub fn deactivate_edge(&mut self, edge: EdgeIndex) {
-        let edge = self.edges[edge.0];
-        self.state.set_bool(edge.active, false);
-        self.state.decrement(self.nodes[edge.src.0].active_outgoing);
-        self.state.decrement(self.nodes[edge.dst.0].active_incoming);
-    }
-
-    /// Returns an iterator over all the clauses in which `node` is included, either as the head of
-    /// the clauses or in its body
-    pub fn node_clauses(&self, node: NodeIndex) -> impl Iterator<Item = ClauseIndex> + Sized + '_ {
-        // A bit ugly... For now dedup is not available for iterators (see
-        // https://github.com/rust-lang/rust/pull/83748)
-        // The idea is that edges are inserted by clauses, and thus all incoming edges of the same clauses
-        // will be neighbors in the linked list of incoming edges. Thus mapping the edges to their
-        // clause will yield a sequence of `ClauseIndex` sorted in decreasing order
-        let mut incomings: Vec<ClauseIndex> = self
-            .incomings(node)
-            .map(move |e| self.edges[e.0].clause)
-            .collect();
-        incomings.dedup();
-        let outgoings = self.outgoings(node).map(move |e| self.edges[e.0].clause);
-        incomings.into_iter().chain(outgoings)
-    }
-
-    /// Returns an iterator over all the `EdgeIndex` of a clause
-    pub fn clause_edges(&self, clause: Clause) -> impl Iterator<Item = EdgeIndex> + Sized + '_ {
-        let start = clause.first.0;
-        let end = start + clause.size;
-        (start..end).map(|i| EdgeIndex(i)).into_iter()
-    }
-}
-
-pub struct Parents<'g> {
-    graph: &'g Graph,
-    next: Option<EdgeIndex>,
-}
-
-impl<'g> Iterator for Parents<'g> {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next {
-            None => None,
-            Some(eidx) => {
-                let edge = &self.graph.edges[eidx.0];
-                self.next = edge.next_incoming;
-                Some(edge.src)
-            }
+    /// Deactivate all the edges in the clause
+    pub fn deactivate_clause(&mut self, clause: ClauseIndex) {
+        let edges = &self.edges;
+        let first = self.clauses[clause.0].first;
+        let size = self.clauses[clause.0].size;
+        for i in 0..size {
+            let edge = edges[first.0 + i];
+            self.state.set_bool(edge.active, false);
+            self.state.decrement(self.nodes[edge.src.0].active_outgoing);
+            self.state.decrement(self.nodes[edge.dst.0].active_incoming);
         }
     }
-}
 
-pub struct Children<'g> {
-    graph: &'g Graph,
-    next: Option<EdgeIndex>,
-}
+    /// Returns the number of active edges in the clause
+    pub fn clause_number_active_edges(&self, clause: ClauseIndex) -> isize {
+        self.state.get_int(self.clauses[clause.0].active_edges)
+    }
 
-impl<'g> Iterator for Children<'g> {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next {
-            None => None,
-            Some(eidx) => {
-                let edge = &self.graph.edges[eidx.0];
-                self.next = edge.next_outgoing;
-                Some(edge.dst)
-            }
-        }
+    /// Returns the head of the clause
+    pub fn get_clause_head(&self, clause: ClauseIndex) -> NodeIndex {
+        self.clauses[clause.0].head
     }
 }
+
+// --- ITERATORS --- //
 
 pub struct Outgoings<'g> {
     graph: &'g Graph,
@@ -509,6 +492,75 @@ impl<'g> Iterator for Incomings<'g> {
     }
 }
 
+pub struct DistributionIterator {
+    node: NodeIndex,
+    remaining: usize,
+}
+
+impl IntoIterator for Distribution {
+    type Item = NodeIndex;
+    type IntoIter = DistributionIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        DistributionIterator {
+            node: self.0,
+            remaining: self.1,
+        }
+    }
+}
+
+impl Iterator for DistributionIterator {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.remaining {
+            0 => None,
+            _ => {
+                self.remaining -= 1;
+                Some(self.node)
+            }
+        }
+    }
+}
+
+pub struct Nodes {
+    limit: usize,
+    next: usize,
+}
+
+impl Iterator for Nodes {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == self.limit {
+            None
+        } else {
+            self.next += 1;
+            Some(NodeIndex(self.next - 1))
+        }
+    }
+}
+
+pub struct EdgesClause {
+    limit: usize,
+    next: usize,
+}
+
+impl Iterator for EdgesClause {
+    type Item = EdgeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == self.limit {
+            None
+        } else {
+            self.next += 1;
+            Some(EdgeIndex(self.next - 1))
+        }
+    }
+}
+
+// --- END ITERATORS --- //
+
 #[cfg(test)]
 mod test_node_data {
     use crate::core::graph::NodeData;
@@ -518,7 +570,7 @@ mod test_node_data {
     fn new_can_create_probabilistic_node() {
         let mut state = TrailedStateManager::new();
         let node = NodeData::new(true, Some(0.4), &mut state);
-        assert_eq!(true, node.is_probabilistic());
+        assert_eq!(true, node.probabilistic);
         assert!(node.weight.is_some());
         assert_eq!(0.4, node.weight.unwrap());
     }
@@ -527,7 +579,7 @@ mod test_node_data {
     fn new_can_create_deterministic_node() {
         let mut state = TrailedStateManager::new();
         let node = NodeData::new(false, None, &mut state);
-        assert_eq!(false, node.is_probabilistic());
+        assert_eq!(false, node.probabilistic);
         assert_eq!(None, node.weight);
     }
 }
@@ -571,14 +623,13 @@ mod test_edge_data {
 
 #[cfg(test)]
 mod test_graph {
-    use crate::core::graph::{ClauseIndex, Distribution, EdgeIndex, Graph, NodeIndex};
-    use crate::core::trail::*;
+    use crate::core::graph::*;
 
     #[test]
     fn new_create_empty_graph() {
         let g = Graph::new();
-        assert_eq!(0, g.nb_nodes());
-        assert_eq!(0, g.nb_edges());
+        assert_eq!(0, g.nodes.len());
+        assert_eq!(0, g.edges.len());
     }
 
     #[test]
@@ -610,34 +661,22 @@ mod test_graph {
         let e1 = g.add_edge(n1, n3, ClauseIndex(0));
         let e2 = g.add_edge(n2, n3, ClauseIndex(0));
 
-        let n1_outgoing: Vec<NodeIndex> = g.children(n1).collect();
         let n1_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n1).collect();
-        let n1_incoming: Vec<NodeIndex> = g.parents(n1).collect();
         let n1_incoming_edges: Vec<EdgeIndex> = g.incomings(n1).collect();
 
-        assert_eq!(vec![n3], n1_outgoing);
         assert_eq!(vec![e1], n1_outgoing_edges);
-        assert_eq!(0, n1_incoming.len());
         assert_eq!(0, n1_incoming_edges.len());
 
-        let n2_outgoing: Vec<NodeIndex> = g.children(n2).collect();
         let n2_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n2).collect();
-        let n2_incoming: Vec<NodeIndex> = g.parents(n2).collect();
         let n2_incoming_edges: Vec<EdgeIndex> = g.incomings(n2).collect();
 
-        assert_eq!(vec![n3], n2_outgoing);
         assert_eq!(vec![e2], n2_outgoing_edges);
-        assert_eq!(0, n2_incoming.len());
         assert_eq!(0, n2_incoming_edges.len());
 
-        let n3_outgoing: Vec<NodeIndex> = g.children(n3).collect();
         let n3_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n3).collect();
-        let n3_incoming: Vec<NodeIndex> = g.parents(n3).collect();
         let n3_incoming_edges: Vec<EdgeIndex> = g.incomings(n3).collect();
 
-        assert_eq!(0, n3_outgoing.len());
         assert_eq!(0, n3_outgoing_edges.len());
-        assert_eq!(vec![n2, n1], n3_incoming);
         assert_eq!(vec![e2, e1], n3_incoming_edges);
     }
 
@@ -649,12 +688,13 @@ mod test_graph {
         let n3 = g.add_node(false, None);
         let n4 = g.add_node(true, Some(0.3));
 
-        g.add_edge(n1, n2, ClauseIndex(0));
-        g.add_edge(n1, n3, ClauseIndex(0));
-        g.add_edge(n1, n4, ClauseIndex(0));
+        let e1 = g.add_edge(n1, n2, ClauseIndex(0));
+        let e2 = g.add_edge(n1, n3, ClauseIndex(0));
+        let e3 = g.add_edge(n1, n4, ClauseIndex(0));
 
-        let children: Vec<NodeIndex> = g.children(n1).collect();
-        assert_eq!(vec![n4, n3, n2], children);
+        let outgoings: Vec<EdgeIndex> = g.outgoings(n1).collect();
+
+        assert_eq!(vec![e3, e2, e1], outgoings);
     }
 
     #[test]
@@ -671,20 +711,6 @@ mod test_graph {
 
         g.state.restore_state();
         assert!(!g.is_node_bound(n1));
-    }
-
-    #[test]
-    fn relaxing_nodes() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None);
-        assert!(!g.is_node_relaxed(n1));
-        g.state.save_state();
-
-        g.relax_node(n1);
-        assert!(g.is_node_relaxed(n1));
-
-        g.state.restore_state();
-        assert!(!g.is_node_relaxed(n1));
     }
 
     #[test]
@@ -713,12 +739,6 @@ mod test_graph {
         g.set_node(n2, true);
         g.set_node(n3, true);
         assert_eq!(1.0, g.get_objective());
-
-        g.state.restore_state();
-
-        g.relax_node(n1);
-        g.set_node(n1, true);
-        assert_eq!(0.0, g.get_objective());
     }
 
     #[test]
@@ -768,6 +788,13 @@ mod test_graph {
         let n2 = g.add_node(false, None);
         let n3 = g.add_node(false, None);
         let n4 = g.add_node(false, None);
+
+        g.clauses.push(Clause {
+            first: EdgeIndex(0),
+            size: 4,
+            head: NodeIndex(0),
+            active_edges: g.state.manage_int(4),
+        });
 
         assert_eq!(0, g.node_number_incoming(n1));
         assert_eq!(0, g.node_number_outgoing(n1));
@@ -935,5 +962,20 @@ mod test_graph {
         assert_eq!(vec![c3, c2, c1], n2_clauses);
         assert_eq!(vec![c1, c3], n3_clauses);
         assert_eq!(vec![c2], n4_clauses);
+    }
+
+    #[test]
+    fn test_simple_propagation() {
+        let mut g = Graph::new();
+        let n1 = g.add_node(false, None);
+        let n2 = g.add_node(false, None);
+        let n3 = g.add_node(false, None);
+        // n1 => n2 && n3 => n2
+        g.add_clause(n2, &vec![n1]);
+        g.add_clause(n2, &vec![n3]);
+
+        g.state.save_state();
+
+        g.set_node(n1, false);
     }
 }
