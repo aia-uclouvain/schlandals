@@ -290,17 +290,7 @@ impl Graph {
 
     // --- End iterator methods --- ///
 
-    /// Returns the edge with index `edge.0`
-    pub fn get_edge(&self, edge: EdgeIndex) -> &EdgeData {
-        &self.edges[edge.0]
-    }
-
     // --- Node related methods --- ///
-
-    /// Returns the node with index `node.0`
-    pub fn get_node(&self, node: NodeIndex) -> &NodeData {
-        &self.nodes[node.0]
-    }
 
     /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
     /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
@@ -459,19 +449,6 @@ impl Graph {
             self.add_edge(*node, head, cid);
         }
         cid
-    }
-
-    /// Deactivate all the edges in the clause
-    pub fn deactivate_clause(&mut self, clause: ClauseIndex) {
-        let edges = &self.edges;
-        let first = self.clauses[clause.0].first;
-        let size = self.clauses[clause.0].size;
-        for i in 0..size {
-            let edge = edges[first.0 + i];
-            self.state.set_bool(edge.active, false);
-            self.state.decrement(self.nodes[edge.src.0].active_outgoing);
-            self.state.decrement(self.nodes[edge.dst.0].active_incoming);
-        }
     }
 
     /// Returns the number of active edges in the clause
