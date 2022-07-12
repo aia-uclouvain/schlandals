@@ -22,6 +22,8 @@ use crate::core::graph::{ClauseIndex, Graph, NodeIndex};
 ///     1. If a deterministic node has no outgoing or incoming active edges, set it to,
 ///        respectively, true or false.
 ///     2. If a clause has no more active edge, set the head to true
+///     3. If a node in a distribution is set to true, then all other node in the distribution must
+///        be false
 pub trait SimplePropagator {
     /// This is the global propagation algorithm. This run on the whole graph and when the value of
     /// a node can be infered, it launches `propagate_node`.
@@ -134,20 +136,29 @@ impl SimplePropagator for Graph {
                 }
             }
         }
+        // If this is a node in a distribution which is set to true then, by definition, all other
+        // node in the distribution must be false
+        if value && !self.is_node_deterministic(node) {
+            for n in self.nodes_distribution_iter(node).filter(|x| *x != node) {
+                self.propagate_node(n, false);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod test_simple_propagator_propagation {
 
-    use crate::core::graph::{Graph, NodeIndex};
+    use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
     use crate::solver::propagator::SimplePropagator;
 
     #[test]
     fn initial_propagation_simple_implications() {
         let mut g = Graph::new();
-        let d: Vec<NodeIndex> = (0..4).map(|_| g.add_node(false, None)).collect();
-        let p: Vec<NodeIndex> = (0..4).map(|_| g.add_node(true, Some(0.1))).collect();
+        let d: Vec<NodeIndex> = (0..4).map(|_| g.add_node(false, None, None)).collect();
+        let p: Vec<NodeIndex> = (0..4)
+            .map(|i| g.add_node(true, Some(0.1), Some(DistributionIndex(i))))
+            .collect();
 
         // deterministic -> deterministic
         // d[1] -> d[0]
@@ -176,8 +187,10 @@ mod test_simple_propagator_propagation {
     #[test]
     fn initial_propagation_chained_implications() {
         let mut g = Graph::new();
-        let d: Vec<NodeIndex> = (0..6).map(|_| g.add_node(false, None)).collect();
-        let p: Vec<NodeIndex> = (0..3).map(|_| g.add_node(true, Some(0.1))).collect();
+        let d: Vec<NodeIndex> = (0..6).map(|_| g.add_node(false, None, None)).collect();
+        let p: Vec<NodeIndex> = (0..3)
+            .map(|i| g.add_node(true, Some(0.1), Some(DistributionIndex(i))))
+            .collect();
 
         // d[0] -> d[1] -> d[2]
         g.add_clause(d[1], &vec![d[0]]);
@@ -213,129 +226,143 @@ mod test_simple_propagator_propagation {
 
 #[cfg(test)]
 mod test_simple_propagataor_node_propagation {
-    use crate::core::graph::Graph;
+    use crate::core::graph::{DistributionIndex, Graph};
     use crate::core::trail::SaveAndRestore;
     use crate::solver::propagator::SimplePropagator;
 
     #[test]
     fn simple_implications() {
         let mut g = Graph::new();
-        let d = g.add_node(false, None);
-        let p1 = g.add_node(true, Some(0.4));
-        let p2 = g.add_node(true, Some(0.1));
+        let d = g.add_node(false, None, None);
+        let p1 = g.add_distribution(&vec![1.0]);
+        let p2 = g.add_distribution(&vec![1.0]);
 
         // p1 -> d -> p2
-        g.add_clause(d, &vec![p1]);
-        g.add_clause(p2, &vec![d]);
+        g.add_clause(d, &vec![p1[0]]);
+        g.add_clause(p2[0], &vec![d]);
 
         g.state.save_state();
 
-        g.propagate_node(p1, true);
+        g.propagate_node(p1[0], true);
 
         assert!(g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(g.is_node_bound(p2));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(g.is_node_bound(p2[0]));
         assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p1));
-        assert_eq!(true, g.get_node_value(p2));
+        assert_eq!(true, g.get_node_value(p1[0]));
+        assert_eq!(true, g.get_node_value(p2[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p1, false);
+        g.propagate_node(p1[0], false);
         assert!(g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(!g.is_node_bound(p2));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(!g.is_node_bound(p2[0]));
         assert_eq!(false, g.get_node_value(d));
-        assert_eq!(false, g.get_node_value(p1));
+        assert_eq!(false, g.get_node_value(p1[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p2, true);
+        g.propagate_node(p2[0], true);
         assert!(g.is_node_bound(d));
-        assert!(!g.is_node_bound(p1));
-        assert!(g.is_node_bound(p2));
+        assert!(!g.is_node_bound(p1[0]));
+        assert!(g.is_node_bound(p2[0]));
         assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p2));
+        assert_eq!(true, g.get_node_value(p2[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p2, false);
+        g.propagate_node(p2[0], false);
         assert!(g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(g.is_node_bound(p2));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(g.is_node_bound(p2[0]));
         assert_eq!(false, g.get_node_value(d));
-        assert_eq!(false, g.get_node_value(p1));
-        assert_eq!(false, g.get_node_value(p2));
+        assert_eq!(false, g.get_node_value(p1[0]));
+        assert_eq!(false, g.get_node_value(p2[0]));
     }
 
     #[test]
     fn test_multiple_edges_different_clauses() {
         let mut g = Graph::new();
-        let d = g.add_node(false, None);
-        let p1 = g.add_node(true, Some(0.4));
-        let p2 = g.add_node(true, Some(0.1));
-        let p3 = g.add_node(true, Some(0.3));
-        let p4 = g.add_node(true, Some(0.25));
+        let d = g.add_node(false, None, None);
+        let p1 = g.add_distribution(&vec![1.0]);
+        let p2 = g.add_distribution(&vec![1.0]);
+        let p3 = g.add_distribution(&vec![1.0]);
+        let p4 = g.add_distribution(&vec![1.0]);
 
         // p1 -        -> p3
         //     |-> d -|
         // p2 -       -> p4
 
-        g.add_clause(d, &vec![p1]);
-        g.add_clause(d, &vec![p2]);
-        g.add_clause(p3, &vec![d]);
-        g.add_clause(p4, &vec![d]);
+        g.add_clause(d, &vec![p1[0]]);
+        g.add_clause(d, &vec![p2[0]]);
+        g.add_clause(p3[0], &vec![d]);
+        g.add_clause(p4[0], &vec![d]);
 
         g.state.save_state();
 
-        g.propagate_node(p1, true);
+        g.propagate_node(p1[0], true);
         assert!(g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(!g.is_node_bound(p2));
-        assert!(g.is_node_bound(p3));
-        assert!(g.is_node_bound(p4));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(!g.is_node_bound(p2[0]));
+        assert!(g.is_node_bound(p3[0]));
+        assert!(g.is_node_bound(p4[0]));
         assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p1));
-        assert_eq!(true, g.get_node_value(p3));
-        assert_eq!(true, g.get_node_value(p4));
+        assert_eq!(true, g.get_node_value(p1[0]));
+        assert_eq!(true, g.get_node_value(p3[0]));
+        assert_eq!(true, g.get_node_value(p4[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p1, false);
+        g.propagate_node(p1[0], false);
         assert!(!g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(!g.is_node_bound(p2));
-        assert!(!g.is_node_bound(p3));
-        assert!(!g.is_node_bound(p4));
-        assert_eq!(false, g.get_node_value(p1));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(!g.is_node_bound(p2[0]));
+        assert!(!g.is_node_bound(p3[0]));
+        assert!(!g.is_node_bound(p4[0]));
+        assert_eq!(false, g.get_node_value(p1[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p3, true);
+        g.propagate_node(p3[0], true);
         assert!(!g.is_node_bound(d));
-        assert!(!g.is_node_bound(p1));
-        assert!(!g.is_node_bound(p2));
-        assert!(g.is_node_bound(p3));
-        assert!(!g.is_node_bound(p4));
-        assert_eq!(true, g.get_node_value(p3));
+        assert!(!g.is_node_bound(p1[0]));
+        assert!(!g.is_node_bound(p2[0]));
+        assert!(g.is_node_bound(p3[0]));
+        assert!(!g.is_node_bound(p4[0]));
+        assert_eq!(true, g.get_node_value(p3[0]));
 
         g.state.restore_state();
         g.state.save_state();
 
-        g.propagate_node(p3, false);
+        g.propagate_node(p3[0], false);
         assert!(g.is_node_bound(d));
-        assert!(g.is_node_bound(p1));
-        assert!(g.is_node_bound(p2));
-        assert!(g.is_node_bound(p3));
-        assert!(!g.is_node_bound(p4));
+        assert!(g.is_node_bound(p1[0]));
+        assert!(g.is_node_bound(p2[0]));
+        assert!(g.is_node_bound(p3[0]));
+        assert!(!g.is_node_bound(p4[0]));
         assert_eq!(false, g.get_node_value(d));
-        assert_eq!(false, g.get_node_value(p1));
-        assert_eq!(false, g.get_node_value(p2));
-        assert_eq!(false, g.get_node_value(p3));
+        assert_eq!(false, g.get_node_value(p1[0]));
+        assert_eq!(false, g.get_node_value(p2[0]));
+        assert_eq!(false, g.get_node_value(p3[0]));
+    }
+
+    #[test]
+    fn test_distribution() {
+        let mut g = Graph::new();
+        let nodes = g.add_distribution(&vec![0.1, 0.2, 0.7]);
+
+        g.propagate_node(nodes[0], true);
+        assert!(g.is_node_bound(nodes[0]));
+        assert!(g.is_node_bound(nodes[1]));
+        assert!(g.is_node_bound(nodes[2]));
+        assert_eq!(true, g.get_node_value(nodes[0]));
+        assert_eq!(false, g.get_node_value(nodes[1]));
+        assert_eq!(false, g.get_node_value(nodes[2]));
     }
 }
