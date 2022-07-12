@@ -24,6 +24,7 @@ jobs:
       uses: actions-rs/tarpaulin@v0.1
       with:
         version: 0.16.0
+        args: --ignore-tests
     - name: Upload coverage reports to Codecov with GitHub Action
       uses: codecov/codecov-action@v3
     
