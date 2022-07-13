@@ -17,23 +17,4 @@
 #![allow(dead_code)]
 mod branching;
 mod propagator;
-
-use crate::core::graph::*;
-use crate::core::trail::*;
-use crate::solver::branching::BranchingHeuristic;
-use crate::solver::propagator::SimplePropagator;
-
-pub fn solve<B: BranchingHeuristic>(graph: &mut Graph, branching_heuristic: &mut B) -> f64 {
-    if let Some(d) = branching_heuristic.branching_decision(graph) {
-        let mut obj = 0.0;
-        for node in d {
-            graph.state.save_state();
-            graph.propagate_node(node, true);
-            obj += solve(graph, branching_heuristic);
-            graph.state.restore_state();
-        }
-        obj
-    } else {
-        graph.get_objective()
-    }
-}
+mod solver;

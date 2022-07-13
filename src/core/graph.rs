@@ -122,27 +122,6 @@ pub struct NodeData {
     pub distribution: Option<DistributionIndex>,
 }
 
-impl NodeData {
-    pub fn new(
-        probabilistic: bool,
-        weight: Option<f64>,
-        state: &mut TrailedStateManager,
-        distribution: Option<DistributionIndex>,
-    ) -> Self {
-        Self {
-            value: false,
-            domain_size: state.manage_int(2),
-            probabilistic,
-            weight,
-            children: None,
-            parents: None,
-            active_incoming: state.manage_int(0),
-            active_outgoing: state.manage_int(0),
-            distribution,
-        }
-    }
-}
-
 /// Data structure that actually holds the data of an edge in the graph
 #[derive(Debug, Copy, Clone)]
 pub struct EdgeData {
@@ -164,26 +143,6 @@ pub struct EdgeData {
     active: ReversibleBool,
 }
 
-impl EdgeData {
-    pub fn new(
-        src: NodeIndex,
-        dst: NodeIndex,
-        next_incoming: Option<EdgeIndex>,
-        next_outgoing: Option<EdgeIndex>,
-        clause: ClauseIndex,
-        state: &mut TrailedStateManager,
-    ) -> Self {
-        Self {
-            src,
-            dst,
-            next_incoming,
-            next_outgoing,
-            clause,
-            active: state.manage_boolean(true),
-        }
-    }
-}
-
 /// Represents a set of nodes in a same distribution. This assume that the nodes of a distribution
 /// are inserted in the graph one after the other, and that there `NodeIndex` are consecutive.
 /// Since no node should be removed from the graph once constructed, this should not be a problem.
@@ -197,28 +156,30 @@ pub struct Graph {
     nodes: Vec<NodeData>,
     edges: Vec<EdgeData>,
     clauses: Vec<Clause>,
-    pub state: TrailedStateManager,
     pub obj: ReversibleFloat,
     pub distributions: Vec<Distribution>,
 }
 
 impl Graph {
-    pub fn new() -> Self {
-        let mut state = TrailedStateManager::new();
+    pub fn new<S: StateManager>(state: &mut S) -> Self {
         let obj = state.manage_float(0.0);
         Self {
             nodes: vec![],
             edges: vec![],
             clauses: vec![],
-            state,
             obj,
             distributions: vec![],
         }
     }
 
     /// Returns the current objective with the assignment of the nodes in the graph
-    pub fn get_objective(&self) -> f64 {
-        self.state.get_float(self.obj)
+    pub fn get_objective<S: StateManager>(&self, state: &S) -> f64 {
+        state.get_float(self.obj)
+    }
+
+    /// Returns the number of node in the graph
+    pub fn number_nodes(&self) -> usize {
+        self.nodes.len()
     }
 
     // --- Methods that returns an iterator --- ///
@@ -264,6 +225,16 @@ impl Graph {
         }
     }
 
+    /// Returns an iterator on the parents of `node`
+    pub fn parents(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.incomings(node).map(move |edge| self.edges[edge.0].src)
+    }
+
+    /// Retunrs an iterator on the children of `node`
+    pub fn children(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.outgoings(node).map(move |edge| self.edges[edge.0].dst)
+    }
+
     /// Returns an iterator over all the clauses in which `node` is included, either as the head of
     /// the clauses or in its body
     pub fn node_clauses(&self, node: NodeIndex) -> impl Iterator<Item = ClauseIndex> + Sized + '_ {
@@ -295,22 +266,23 @@ impl Graph {
     /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
     /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
     /// of `weight`. This method returns the index of the node.
-    pub fn add_node(
+    pub fn add_node<S: StateManager>(
         &mut self,
         probabilistic: bool,
         weight: Option<f64>,
         distribution: Option<DistributionIndex>,
+        state: &mut S,
     ) -> NodeIndex {
         let id = self.nodes.len();
         self.nodes.push(NodeData {
             value: false,
-            domain_size: self.state.manage_int(2),
+            domain_size: state.manage_int(2),
             probabilistic,
             weight,
             children: None,
             parents: None,
-            active_incoming: self.state.manage_int(0),
-            active_outgoing: self.state.manage_int(0),
+            active_incoming: state.manage_int(0),
+            active_outgoing: state.manage_int(0),
             distribution,
         });
         NodeIndex(id)
@@ -323,12 +295,16 @@ impl Graph {
     ///     - None of the node in the distribution is part of another distribution
     ///
     /// Each probabilstic node should be part of one distribution.
-    pub fn add_distribution(&mut self, weights: &Vec<f64>) -> Vec<NodeIndex> {
+    pub fn add_distribution<S: StateManager>(
+        &mut self,
+        weights: &Vec<f64>,
+        state: &mut S,
+    ) -> Vec<NodeIndex> {
         debug_assert!(weights.iter().fold(0.0, |sum, w| sum + *w) == 1.0);
         let distribution = DistributionIndex(self.distributions.len());
         let nodes: Vec<NodeIndex> = weights
             .iter()
-            .map(|w| self.add_node(true, Some(*w), Some(distribution)))
+            .map(|w| self.add_node(true, Some(*w), Some(distribution), state))
             .collect();
         self.distributions.push(Distribution(nodes[0], nodes.len()));
         nodes
@@ -337,26 +313,25 @@ impl Graph {
     /// Sets `node` to `value`. This assumes that `node` is unassigned
     /// `node` is probabilistic and `value` is true, then the probability of the node is added to
     /// the current objective
-    pub fn set_node(&mut self, node: NodeIndex, value: bool) {
+    pub fn set_node<S: StateManager>(&mut self, node: NodeIndex, value: bool, state: &mut S) {
         // TODO: Maybe would be useful to launch an error
-        debug_assert!(self.state.get_int(self.nodes[node.0].domain_size) == 2);
+        debug_assert!(state.get_int(self.nodes[node.0].domain_size) == 2);
         // If the node is probabilistic, add its value to the objective
         let n = &self.nodes[node.0];
         if n.probabilistic && value {
-            self.state.add_float(self.obj, n.weight.unwrap());
+            state.add_float(self.obj, n.weight.unwrap());
         }
         // Assigning the value to the node
-        self.state.decrement(self.nodes[node.0].domain_size);
+        state.decrement(self.nodes[node.0].domain_size);
         self.nodes[node.0].value = value;
     }
 
     /// Returns true if `node` is bound to a value, false otherwise
-    pub fn is_node_bound(&self, node: NodeIndex) -> bool {
-        self.state.get_int(self.nodes[node.0].domain_size) == 1
+    pub fn is_node_bound<S: StateManager>(&self, node: NodeIndex, state: &S) -> bool {
+        state.get_int(self.nodes[node.0].domain_size) == 1
     }
 
     pub fn get_node_value(&self, node: NodeIndex) -> bool {
-        debug_assert!(self.is_node_bound(node));
         self.nodes[node.0].value
     }
 
@@ -365,13 +340,13 @@ impl Graph {
     }
 
     /// Returns the number of active incoming edges of `node`
-    pub fn node_number_incoming(&self, node: NodeIndex) -> isize {
-        self.state.get_int(self.nodes[node.0].active_incoming)
+    pub fn node_number_incoming<S: StateManager>(&self, node: NodeIndex, state: &S) -> isize {
+        state.get_int(self.nodes[node.0].active_incoming)
     }
 
     /// Returns the number of active outgoing edges of `node`
-    pub fn node_number_outgoing(&self, node: NodeIndex) -> isize {
-        self.state.get_int(self.nodes[node.0].active_outgoing)
+    pub fn node_number_outgoing<S: StateManager>(&self, node: NodeIndex, state: &S) -> isize {
+        state.get_int(self.nodes[node.0].active_outgoing)
     }
 
     // --- End node related methods --- //
@@ -380,7 +355,13 @@ impl Graph {
 
     /// Add an edge between the node identified by `src` to the node identified by `dst`. This
     /// method returns the index of the edge.
-    fn add_edge(&mut self, src: NodeIndex, dst: NodeIndex, clause: ClauseIndex) -> EdgeIndex {
+    fn add_edge<S: StateManager>(
+        &mut self,
+        src: NodeIndex,
+        dst: NodeIndex,
+        clause: ClauseIndex,
+        state: &mut S,
+    ) -> EdgeIndex {
         let source_outgoing = self.nodes[src.0].children;
         let dest_incoming = self.nodes[dst.0].parents;
         let edge = EdgeData {
@@ -389,31 +370,30 @@ impl Graph {
             next_incoming: dest_incoming,
             next_outgoing: source_outgoing,
             clause,
-            active: self.state.manage_boolean(true),
+            active: state.manage_boolean(true),
         };
         let index = EdgeIndex(self.edges.len());
         self.nodes[src.0].children = Some(index);
-        self.state.increment(self.nodes[src.0].active_outgoing);
+        state.increment(self.nodes[src.0].active_outgoing);
         self.nodes[dst.0].parents = Some(index);
-        self.state.increment(self.nodes[dst.0].active_incoming);
+        state.increment(self.nodes[dst.0].active_incoming);
         self.edges.push(edge);
         index
     }
 
     /// Deactivate `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
     /// the number of outgoing edges of `edge.src`
-    pub fn deactivate_edge(&mut self, edge: EdgeIndex) {
+    pub fn deactivate_edge<S: StateManager>(&mut self, edge: EdgeIndex, state: &mut S) {
         let edge = self.edges[edge.0];
-        self.state.set_bool(edge.active, false);
-        self.state.decrement(self.nodes[edge.src.0].active_outgoing);
-        self.state.decrement(self.nodes[edge.dst.0].active_incoming);
-        self.state
-            .decrement(self.clauses[edge.clause.0].active_edges);
+        state.set_bool(edge.active, false);
+        state.decrement(self.nodes[edge.src.0].active_outgoing);
+        state.decrement(self.nodes[edge.dst.0].active_incoming);
+        state.decrement(self.clauses[edge.clause.0].active_edges);
     }
 
     /// Return true if the edge is still active
-    pub fn is_edge_active(&self, edge: EdgeIndex) -> bool {
-        self.state.get_bool(self.edges[edge.0].active)
+    pub fn is_edge_active<S: StateManager>(&self, edge: EdgeIndex, state: &mut S) -> bool {
+        state.get_bool(self.edges[edge.0].active)
     }
 
     /// Returns the source of the edge
@@ -437,23 +417,32 @@ impl Graph {
     /// = vec![n1, ..., nn].
     /// This function adds n edges to the graph, one for each node in the body (as source) towards
     /// the head of the clause
-    pub fn add_clause(&mut self, head: NodeIndex, body: &Vec<NodeIndex>) -> ClauseIndex {
+    pub fn add_clause<S: StateManager>(
+        &mut self,
+        head: NodeIndex,
+        body: &Vec<NodeIndex>,
+        state: &mut S,
+    ) -> ClauseIndex {
         let cid = ClauseIndex(self.clauses.len());
         self.clauses.push(Clause {
             first: EdgeIndex(self.edges.len()),
             size: body.len(),
             head,
-            active_edges: self.state.manage_int(body.len() as isize),
+            active_edges: state.manage_int(body.len() as isize),
         });
         for node in body {
-            self.add_edge(*node, head, cid);
+            self.add_edge(*node, head, cid, state);
         }
         cid
     }
 
     /// Returns the number of active edges in the clause
-    pub fn clause_number_active_edges(&self, clause: ClauseIndex) -> isize {
-        self.state.get_int(self.clauses[clause.0].active_edges)
+    pub fn clause_number_active_edges<S: StateManager>(
+        &self,
+        clause: ClauseIndex,
+        state: &S,
+    ) -> isize {
+        state.get_int(self.clauses[clause.0].active_edges)
     }
 
     /// Returns the head of the clause
@@ -580,7 +569,17 @@ mod test_node_data {
     #[test]
     fn new_can_create_probabilistic_node() {
         let mut state = TrailedStateManager::new();
-        let node = NodeData::new(true, Some(0.4), &mut state, Some(DistributionIndex(0)));
+        let node = NodeData {
+            value: true,
+            domain_size: state.manage_int(2),
+            probabilistic: true,
+            weight: Some(0.4),
+            children: None,
+            parents: None,
+            active_outgoing: state.manage_int(0),
+            active_incoming: state.manage_int(0),
+            distribution: Some(DistributionIndex(0)),
+        };
         assert_eq!(true, node.probabilistic);
         assert!(node.weight.is_some());
         assert_eq!(0.4, node.weight.unwrap());
@@ -589,7 +588,17 @@ mod test_node_data {
     #[test]
     fn new_can_create_deterministic_node() {
         let mut state = TrailedStateManager::new();
-        let node = NodeData::new(false, None, &mut state, Some(DistributionIndex(0)));
+        let node = NodeData {
+            value: true,
+            domain_size: state.manage_int(2),
+            probabilistic: false,
+            weight: None,
+            children: None,
+            parents: None,
+            active_outgoing: state.manage_int(0),
+            active_incoming: state.manage_int(0),
+            distribution: None,
+        };
         assert_eq!(false, node.probabilistic);
         assert_eq!(None, node.weight);
     }
@@ -598,14 +607,21 @@ mod test_node_data {
 #[cfg(test)]
 mod test_edge_data {
     use crate::core::graph::{ClauseIndex, EdgeData, EdgeIndex, NodeIndex};
-    use crate::core::trail::TrailedStateManager;
+    use crate::core::trail::*;
 
     #[test]
     fn new_can_create_first() {
         let src = NodeIndex(11);
         let dst = NodeIndex(13);
         let mut state = TrailedStateManager::new();
-        let edge = EdgeData::new(src, dst, None, None, ClauseIndex(0), &mut state);
+        let edge = EdgeData {
+            src,
+            dst,
+            next_incoming: None,
+            next_outgoing: None,
+            clause: ClauseIndex(0),
+            active: state.manage_boolean(true),
+        };
         assert_eq!(src, edge.src);
         assert_eq!(dst, edge.dst);
         assert_eq!(None, edge.next_incoming);
@@ -619,14 +635,14 @@ mod test_edge_data {
         let next_incoming = Some(EdgeIndex(3));
         let next_outgoing = Some(EdgeIndex(102));
         let mut state = TrailedStateManager::new();
-        let edge = EdgeData::new(
+        let edge = EdgeData {
             src,
             dst,
-            next_incoming,
-            next_outgoing,
-            ClauseIndex(0),
-            &mut state,
-        );
+            next_incoming: Some(EdgeIndex(3)),
+            next_outgoing: Some(EdgeIndex(102)),
+            clause: ClauseIndex(0),
+            active: state.manage_boolean(true),
+        };
         assert_eq!(next_incoming, edge.next_incoming);
         assert_eq!(next_outgoing, edge.next_outgoing);
     }
@@ -638,39 +654,43 @@ mod test_graph {
 
     #[test]
     fn new_create_empty_graph() {
-        let g = Graph::new();
+        let mut state = TrailedStateManager::new();
+        let g = Graph::new(&mut state);
         assert_eq!(0, g.nodes.len());
         assert_eq!(0, g.edges.len());
     }
 
     #[test]
     fn add_nodes_increment_index() {
-        let mut g = Graph::new();
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
         for i in 0..10 {
-            let idx = g.add_node(false, None, None);
+            let idx = g.add_node(false, None, None, &mut state);
             assert_eq!(NodeIndex(i), idx);
         }
     }
 
     #[test]
     fn add_edges_increment_index() {
-        let mut g = Graph::new();
-        g.add_node(false, None, None);
-        g.add_node(false, None, None);
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        g.add_node(false, None, None, &mut state);
+        g.add_node(false, None, None, &mut state);
         for i in 0..10 {
-            let idx = g.add_edge(NodeIndex(0), NodeIndex(1), ClauseIndex(0));
+            let idx = g.add_edge(NodeIndex(0), NodeIndex(1), ClauseIndex(0), &mut state);
             assert_eq!(EdgeIndex(i), idx);
         }
     }
 
     #[test]
     fn add_multiple_incoming_edges_to_node() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(false, None, None);
-        let n3 = g.add_node(false, None, None);
-        let e1 = g.add_edge(n1, n3, ClauseIndex(0));
-        let e2 = g.add_edge(n2, n3, ClauseIndex(0));
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(false, None, None, &mut state);
+        let n3 = g.add_node(false, None, None, &mut state);
+        let e1 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
+        let e2 = g.add_edge(n2, n3, ClauseIndex(0), &mut state);
 
         let n1_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n1).collect();
         let n1_incoming_edges: Vec<EdgeIndex> = g.incomings(n1).collect();
@@ -693,15 +713,16 @@ mod test_graph {
 
     #[test]
     fn add_multiple_outgoing_edges_to_nodes() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(true, Some(0.2), Some(DistributionIndex(0)));
-        let n3 = g.add_node(false, None, None);
-        let n4 = g.add_node(true, Some(0.3), Some(DistributionIndex(0)));
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(true, Some(0.2), Some(DistributionIndex(0)), &mut state);
+        let n3 = g.add_node(false, None, None, &mut state);
+        let n4 = g.add_node(true, Some(0.3), Some(DistributionIndex(0)), &mut state);
 
-        let e1 = g.add_edge(n1, n2, ClauseIndex(0));
-        let e2 = g.add_edge(n1, n3, ClauseIndex(0));
-        let e3 = g.add_edge(n1, n4, ClauseIndex(0));
+        let e1 = g.add_edge(n1, n2, ClauseIndex(0), &mut state);
+        let e2 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
+        let e3 = g.add_edge(n1, n4, ClauseIndex(0), &mut state);
 
         let outgoings: Vec<EdgeIndex> = g.outgoings(n1).collect();
 
@@ -710,54 +731,57 @@ mod test_graph {
 
     #[test]
     fn setting_nodes_values() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        assert!(!g.is_node_bound(n1));
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        assert!(!g.is_node_bound(n1, &state));
 
-        g.state.save_state();
+        state.save_state();
 
-        g.set_node(n1, true);
-        assert!(g.is_node_bound(n1));
+        g.set_node(n1, true, &mut state);
+        assert!(g.is_node_bound(n1, &state));
         assert!(g.nodes[n1.0].value);
 
-        g.state.restore_state();
-        assert!(!g.is_node_bound(n1));
+        state.restore_state();
+        assert!(!g.is_node_bound(n1, &state));
     }
 
     #[test]
     fn incremental_computation_of_objective() {
-        let mut g = Graph::new();
-        assert_eq!(0.0, g.get_objective());
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(true, Some(0.4), Some(DistributionIndex(0)));
-        let n3 = g.add_node(true, Some(0.6), Some(DistributionIndex(0)));
-        assert_eq!(0.0, g.get_objective());
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        assert_eq!(0.0, g.get_objective(&state));
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(true, Some(0.4), Some(DistributionIndex(0)), &mut state);
+        let n3 = g.add_node(true, Some(0.6), Some(DistributionIndex(0)), &mut state);
+        assert_eq!(0.0, g.get_objective(&state));
 
-        g.state.save_state();
+        state.save_state();
 
-        g.set_node(n1, true);
-        assert_eq!(0.0, g.get_objective());
+        g.set_node(n1, true, &mut state);
+        assert_eq!(0.0, g.get_objective(&state));
 
-        g.set_node(n2, true);
-        assert_eq!(0.4, g.get_objective());
+        g.set_node(n2, true, &mut state);
+        assert_eq!(0.4, g.get_objective(&state));
 
-        g.state.restore_state();
+        state.restore_state();
 
-        assert_eq!(0.0, g.get_objective());
+        assert_eq!(0.0, g.get_objective(&state));
 
-        g.state.save_state();
+        state.save_state();
 
-        g.set_node(n2, true);
-        g.set_node(n3, true);
-        assert_eq!(1.0, g.get_objective());
+        g.set_node(n2, true, &mut state);
+        g.set_node(n3, true, &mut state);
+        assert_eq!(1.0, g.get_objective(&state));
     }
 
     #[test]
     fn graph_add_distribution() {
-        let mut g = Graph::new();
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
         assert_eq!(0, g.distributions.len());
         let weights = vec![0.2, 0.4, 0.1, 0.3];
-        let nodes = g.add_distribution(&weights);
+        let nodes = g.add_distribution(&weights, &mut state);
         assert_eq!(
             vec![NodeIndex(0), NodeIndex(1), NodeIndex(2), NodeIndex(3)],
             nodes
@@ -767,146 +791,149 @@ mod test_graph {
 
     #[test]
     fn graph_add_multiple_distributions() {
-        let mut g = Graph::new();
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
         let w1 = vec![0.1, 0.3, 0.6];
         let w2 = vec![0.5, 0.4, 0.05, 0.05];
         let w3 = vec![0.9, 0.1];
 
-        let n1 = g.add_distribution(&w1);
+        let n1 = g.add_distribution(&w1, &mut state);
         assert_eq!(vec![NodeIndex(0), NodeIndex(1), NodeIndex(2)], n1);
         assert_eq!(Distribution(n1[0], 3), g.distributions[0]);
 
-        g.add_node(false, None, None);
-        let n2 = g.add_distribution(&w2);
+        g.add_node(false, None, None, &mut state);
+        let n2 = g.add_distribution(&w2, &mut state);
         assert_eq!(
             vec![NodeIndex(4), NodeIndex(5), NodeIndex(6), NodeIndex(7)],
             n2
         );
         assert_eq!(Distribution(n2[0], 4), g.distributions[1]);
 
-        g.add_node(false, None, None);
-        g.add_node(false, None, None);
+        g.add_node(false, None, None, &mut state);
+        g.add_node(false, None, None, &mut state);
 
-        let n3 = g.add_distribution(&w3);
+        let n3 = g.add_distribution(&w3, &mut state);
         assert_eq!(vec![NodeIndex(10), NodeIndex(11)], n3);
         assert_eq!(Distribution(n3[0], 2), g.distributions[2]);
     }
 
     #[test]
     fn graph_add_edges_increases_edge_counts() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(false, None, None);
-        let n3 = g.add_node(false, None, None);
-        let n4 = g.add_node(false, None, None);
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(false, None, None, &mut state);
+        let n3 = g.add_node(false, None, None, &mut state);
+        let n4 = g.add_node(false, None, None, &mut state);
 
         g.clauses.push(Clause {
             first: EdgeIndex(0),
             size: 4,
             head: NodeIndex(0),
-            active_edges: g.state.manage_int(4),
+            active_edges: state.manage_int(4),
         });
 
-        assert_eq!(0, g.node_number_incoming(n1));
-        assert_eq!(0, g.node_number_outgoing(n1));
-        assert_eq!(0, g.node_number_incoming(n2));
-        assert_eq!(0, g.node_number_outgoing(n2));
-        assert_eq!(0, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(0, g.node_number_incoming(n4));
-        assert_eq!(0, g.node_number_outgoing(n4));
+        assert_eq!(0, g.node_number_incoming(n1, &state));
+        assert_eq!(0, g.node_number_outgoing(n1, &state));
+        assert_eq!(0, g.node_number_incoming(n2, &state));
+        assert_eq!(0, g.node_number_outgoing(n2, &state));
+        assert_eq!(0, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(0, g.node_number_incoming(n4, &state));
+        assert_eq!(0, g.node_number_outgoing(n4, &state));
 
-        let e1 = g.add_edge(n1, n2, ClauseIndex(0));
-        assert_eq!(0, g.node_number_incoming(n1));
-        assert_eq!(1, g.node_number_outgoing(n1));
-        assert_eq!(1, g.node_number_incoming(n2));
-        assert_eq!(0, g.node_number_outgoing(n2));
-        assert_eq!(0, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(0, g.node_number_incoming(n4));
-        assert_eq!(0, g.node_number_outgoing(n4));
+        let e1 = g.add_edge(n1, n2, ClauseIndex(0), &mut state);
+        assert_eq!(0, g.node_number_incoming(n1, &state));
+        assert_eq!(1, g.node_number_outgoing(n1, &state));
+        assert_eq!(1, g.node_number_incoming(n2, &state));
+        assert_eq!(0, g.node_number_outgoing(n2, &state));
+        assert_eq!(0, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(0, g.node_number_incoming(n4, &state));
+        assert_eq!(0, g.node_number_outgoing(n4, &state));
 
-        let e2 = g.add_edge(n1, n3, ClauseIndex(0));
-        assert_eq!(0, g.node_number_incoming(n1));
-        assert_eq!(2, g.node_number_outgoing(n1));
-        assert_eq!(1, g.node_number_incoming(n2));
-        assert_eq!(0, g.node_number_outgoing(n2));
-        assert_eq!(1, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(0, g.node_number_incoming(n4));
-        assert_eq!(0, g.node_number_outgoing(n4));
+        let e2 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
+        assert_eq!(0, g.node_number_incoming(n1, &state));
+        assert_eq!(2, g.node_number_outgoing(n1, &state));
+        assert_eq!(1, g.node_number_incoming(n2, &state));
+        assert_eq!(0, g.node_number_outgoing(n2, &state));
+        assert_eq!(1, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(0, g.node_number_incoming(n4, &state));
+        assert_eq!(0, g.node_number_outgoing(n4, &state));
 
-        let e3 = g.add_edge(n4, n1, ClauseIndex(0));
-        assert_eq!(1, g.node_number_incoming(n1));
-        assert_eq!(2, g.node_number_outgoing(n1));
-        assert_eq!(1, g.node_number_incoming(n2));
-        assert_eq!(0, g.node_number_outgoing(n2));
-        assert_eq!(1, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(0, g.node_number_incoming(n4));
-        assert_eq!(1, g.node_number_outgoing(n4));
+        let e3 = g.add_edge(n4, n1, ClauseIndex(0), &mut state);
+        assert_eq!(1, g.node_number_incoming(n1, &state));
+        assert_eq!(2, g.node_number_outgoing(n1, &state));
+        assert_eq!(1, g.node_number_incoming(n2, &state));
+        assert_eq!(0, g.node_number_outgoing(n2, &state));
+        assert_eq!(1, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(0, g.node_number_incoming(n4, &state));
+        assert_eq!(1, g.node_number_outgoing(n4, &state));
 
-        let e4 = g.add_edge(n2, n4, ClauseIndex(0));
-        assert_eq!(1, g.node_number_incoming(n1));
-        assert_eq!(2, g.node_number_outgoing(n1));
-        assert_eq!(1, g.node_number_incoming(n2));
-        assert_eq!(1, g.node_number_outgoing(n2));
-        assert_eq!(1, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(1, g.node_number_incoming(n4));
-        assert_eq!(1, g.node_number_outgoing(n4));
+        let e4 = g.add_edge(n2, n4, ClauseIndex(0), &mut state);
+        assert_eq!(1, g.node_number_incoming(n1, &state));
+        assert_eq!(2, g.node_number_outgoing(n1, &state));
+        assert_eq!(1, g.node_number_incoming(n2, &state));
+        assert_eq!(1, g.node_number_outgoing(n2, &state));
+        assert_eq!(1, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(1, g.node_number_incoming(n4, &state));
+        assert_eq!(1, g.node_number_outgoing(n4, &state));
 
-        g.deactivate_edge(e1);
-        assert_eq!(1, g.node_number_incoming(n1));
-        assert_eq!(1, g.node_number_outgoing(n1));
-        assert_eq!(0, g.node_number_incoming(n2));
-        assert_eq!(1, g.node_number_outgoing(n2));
-        assert_eq!(1, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(1, g.node_number_incoming(n4));
-        assert_eq!(1, g.node_number_outgoing(n4));
+        g.deactivate_edge(e1, &mut state);
+        assert_eq!(1, g.node_number_incoming(n1, &state));
+        assert_eq!(1, g.node_number_outgoing(n1, &state));
+        assert_eq!(0, g.node_number_incoming(n2, &state));
+        assert_eq!(1, g.node_number_outgoing(n2, &state));
+        assert_eq!(1, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(1, g.node_number_incoming(n4, &state));
+        assert_eq!(1, g.node_number_outgoing(n4, &state));
 
-        g.deactivate_edge(e2);
-        assert_eq!(1, g.node_number_incoming(n1));
-        assert_eq!(0, g.node_number_outgoing(n1));
-        assert_eq!(0, g.node_number_incoming(n2));
-        assert_eq!(1, g.node_number_outgoing(n2));
-        assert_eq!(0, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(1, g.node_number_incoming(n4));
-        assert_eq!(1, g.node_number_outgoing(n4));
+        g.deactivate_edge(e2, &mut state);
+        assert_eq!(1, g.node_number_incoming(n1, &state));
+        assert_eq!(0, g.node_number_outgoing(n1, &state));
+        assert_eq!(0, g.node_number_incoming(n2, &state));
+        assert_eq!(1, g.node_number_outgoing(n2, &state));
+        assert_eq!(0, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(1, g.node_number_incoming(n4, &state));
+        assert_eq!(1, g.node_number_outgoing(n4, &state));
 
-        g.deactivate_edge(e3);
-        assert_eq!(0, g.node_number_incoming(n1));
-        assert_eq!(0, g.node_number_outgoing(n1));
-        assert_eq!(0, g.node_number_incoming(n2));
-        assert_eq!(1, g.node_number_outgoing(n2));
-        assert_eq!(0, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(1, g.node_number_incoming(n4));
-        assert_eq!(0, g.node_number_outgoing(n4));
+        g.deactivate_edge(e3, &mut state);
+        assert_eq!(0, g.node_number_incoming(n1, &state));
+        assert_eq!(0, g.node_number_outgoing(n1, &state));
+        assert_eq!(0, g.node_number_incoming(n2, &state));
+        assert_eq!(1, g.node_number_outgoing(n2, &state));
+        assert_eq!(0, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(1, g.node_number_incoming(n4, &state));
+        assert_eq!(0, g.node_number_outgoing(n4, &state));
 
-        g.deactivate_edge(e4);
-        assert_eq!(0, g.node_number_incoming(n1));
-        assert_eq!(0, g.node_number_outgoing(n1));
-        assert_eq!(0, g.node_number_incoming(n2));
-        assert_eq!(0, g.node_number_outgoing(n2));
-        assert_eq!(0, g.node_number_incoming(n3));
-        assert_eq!(0, g.node_number_outgoing(n3));
-        assert_eq!(0, g.node_number_incoming(n4));
-        assert_eq!(0, g.node_number_outgoing(n4));
+        g.deactivate_edge(e4, &mut state);
+        assert_eq!(0, g.node_number_incoming(n1, &state));
+        assert_eq!(0, g.node_number_outgoing(n1, &state));
+        assert_eq!(0, g.node_number_incoming(n2, &state));
+        assert_eq!(0, g.node_number_outgoing(n2, &state));
+        assert_eq!(0, g.node_number_incoming(n3, &state));
+        assert_eq!(0, g.node_number_outgoing(n3, &state));
+        assert_eq!(0, g.node_number_incoming(n4, &state));
+        assert_eq!(0, g.node_number_outgoing(n4, &state));
     }
 
     #[test]
     fn add_clause_correctly_add_edges() {
-        let mut g: Graph = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(false, None, None);
-        let n3 = g.add_node(false, None, None);
-        let n4 = g.add_node(false, None, None);
+        let mut state = TrailedStateManager::new();
+        let mut g: Graph = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(false, None, None, &mut state);
+        let n3 = g.add_node(false, None, None, &mut state);
+        let n4 = g.add_node(false, None, None, &mut state);
 
         // Clause n2 && n3 => n1
-        let c1 = g.add_clause(n1, &vec![n2, n3]);
+        let c1 = g.add_clause(n1, &vec![n2, n3], &mut state);
         assert_eq!(ClauseIndex(0), c1);
         let first = g.clauses[c1.0].first.0;
         let s = g.clauses[c1.0].size;
@@ -919,7 +946,7 @@ mod test_graph {
         }
 
         // Clause n3 && n4 => n2
-        let c2 = g.add_clause(n2, &vec![n3, n4]);
+        let c2 = g.add_clause(n2, &vec![n3, n4], &mut state);
         assert_eq!(ClauseIndex(1), c2);
         let first = g.clauses[c2.0].first.0;
         let s = g.clauses[c2.0].size;
@@ -934,15 +961,16 @@ mod test_graph {
 
     #[test]
     fn clauses_are_correctly_collected() {
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None);
-        let n2 = g.add_node(false, None, None);
-        let n3 = g.add_node(false, None, None);
-        let n4 = g.add_node(false, None, None);
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n1 = g.add_node(false, None, None, &mut state);
+        let n2 = g.add_node(false, None, None, &mut state);
+        let n3 = g.add_node(false, None, None, &mut state);
+        let n4 = g.add_node(false, None, None, &mut state);
 
         let empty: Vec<ClauseIndex> = vec![];
         // n1 && n2 => n3
-        let c1 = g.add_clause(n3, &vec![n1, n2]);
+        let c1 = g.add_clause(n3, &vec![n1, n2], &mut state);
         let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
         let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
         let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
@@ -953,7 +981,7 @@ mod test_graph {
         assert_eq!(empty, n4_clauses);
 
         // n2 && n4 => n1
-        let c2 = g.add_clause(n1, &vec![n2, n4]);
+        let c2 = g.add_clause(n1, &vec![n2, n4], &mut state);
         let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
         let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
         let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
@@ -964,7 +992,7 @@ mod test_graph {
         assert_eq!(vec![c2], n4_clauses);
 
         // n3 && n1 => n2
-        let c3 = g.add_clause(n2, &vec![n3, n1]);
+        let c3 = g.add_clause(n2, &vec![n3, n1], &mut state);
         let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
         let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
         let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();

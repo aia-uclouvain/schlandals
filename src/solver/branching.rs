@@ -45,17 +45,19 @@ impl BranchingHeuristic for LinearBranching {
 mod test_simple_branching {
     use super::{BranchingHeuristic, LinearBranching};
     use crate::core::graph::Graph;
+    use crate::core::trail::TrailedStateManager;
 
     #[test]
     fn test_branching_distribution_order() {
-        let mut g = Graph::new();
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
         let w1 = vec![0.3, 0.2, 0.5];
         let w2 = vec![0.1, 0.1, 0.1, 0.7];
         let w3 = vec![0.4, 0.6];
 
-        g.add_distribution(&w1);
-        g.add_distribution(&w2);
-        g.add_distribution(&w3);
+        g.add_distribution(&w1, &mut state);
+        g.add_distribution(&w2, &mut state);
+        g.add_distribution(&w3, &mut state);
 
         let mut b = LinearBranching::new();
         let distributions = g.distributions.clone();
