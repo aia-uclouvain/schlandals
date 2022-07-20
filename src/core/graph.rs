@@ -41,13 +41,14 @@
 
 #![allow(dead_code)]
 use super::trail::*;
+use std::marker::Sized;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
 // structure.
 
 /// Abstraction used as a typesafe way of retrieving a `NodeData` in the `Graph` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct NodeIndex(pub usize);
 
 /// Abstraction used as a typesafe way of retrieving a `EdgeData` in the `Graph` structure
@@ -59,7 +60,7 @@ pub struct EdgeIndex(pub usize);
 pub struct ClauseIndex(pub usize);
 
 /// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Graph` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct DistributionIndex(pub usize);
 
 /// This structure represent a clause in the graph. A clause is of the form
@@ -157,7 +158,7 @@ pub struct Graph {
     edges: Vec<EdgeData>,
     clauses: Vec<Clause>,
     pub obj: ReversibleFloat,
-    pub distributions: Vec<Distribution>,
+    distributions: Vec<Distribution>,
 }
 
 impl Graph {
@@ -182,6 +183,16 @@ impl Graph {
         self.nodes.len()
     }
 
+    /// Returns the number of distribution in the graph
+    pub fn number_distributions(&self) -> usize {
+        self.distributions.len()
+    }
+
+    /// Returns the distribution of a node if ane
+    pub fn get_distribution(&self, node: NodeIndex) -> Option<DistributionIndex> {
+        self.nodes[node.0].distribution
+    }
+
     // --- Methods that returns an iterator --- ///
 
     /// Returns an iterator on the node indexes (`NodeIndex`)
@@ -190,6 +201,16 @@ impl Graph {
             limit: self.nodes.len(),
             next: 0,
         }
+    }
+
+    pub fn distribution_iter(
+        &self,
+        distribution: DistributionIndex,
+    ) -> impl Iterator<Item = NodeIndex> {
+        let start = self.distributions[distribution.0].0 .0;
+        let size = self.distributions[distribution.0].1;
+        let end = start + size;
+        (start..end).map(|i| NodeIndex(i))
     }
 
     /// Returns an iterator on the node in the same distribution as `node`
@@ -226,13 +247,25 @@ impl Graph {
     }
 
     /// Returns an iterator on the parents of `node`
-    pub fn parents(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.incomings(node).map(move |edge| self.edges[edge.0].src)
+    pub fn active_parents<'s, S: StateManager>(
+        &'s self,
+        node: NodeIndex,
+        state: &'s S,
+    ) -> impl Iterator<Item = NodeIndex> + 's {
+        self.incomings(node)
+            .filter(move |edge| self.is_edge_active(*edge, state))
+            .map(move |edge| self.edges[edge.0].src)
     }
 
     /// Retunrs an iterator on the children of `node`
-    pub fn children(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.outgoings(node).map(move |edge| self.edges[edge.0].dst)
+    pub fn active_children<'s, S: StateManager>(
+        &'s self,
+        node: NodeIndex,
+        state: &'s S,
+    ) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.outgoings(node)
+            .filter(move |edge| self.is_edge_active(*edge, state))
+            .map(move |edge| self.edges[edge.0].dst)
     }
 
     /// Returns an iterator over all the clauses in which `node` is included, either as the head of
@@ -392,7 +425,7 @@ impl Graph {
     }
 
     /// Return true if the edge is still active
-    pub fn is_edge_active<S: StateManager>(&self, edge: EdgeIndex, state: &mut S) -> bool {
+    pub fn is_edge_active<S: StateManager>(&self, edge: EdgeIndex, state: &S) -> bool {
         state.get_bool(self.edges[edge.0].active)
     }
 

@@ -14,38 +14,75 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::core::trail::*;
 use crate::solver::branching::BranchingHeuristic;
 use crate::solver::propagator::SimplePropagator;
+use rustc_hash::FxHashMap;
 
-pub struct Solver {
-    state: TrailedStateManager,
+pub struct Solver<S, C, B>
+where
+    S: StateManager,
+    C: ComponentExtractor,
+    B: BranchingHeuristic,
+{
+    graph: Graph,
+    state: S,
+    component_extractor: C,
+    branching_heuristic: B,
+    cache: FxHashMap<u64, f64>,
 }
 
-impl Solver {
-    pub fn new() -> Self {
+impl<S, C, B> Solver<S, C, B>
+where
+    S: StateManager,
+    C: ComponentExtractor,
+    B: BranchingHeuristic,
+{
+    pub fn new(graph: Graph, state: S, component_extractor: C, branching_heuristic: B) -> Self {
         Self {
-            state: TrailedStateManager::new(),
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic,
+            cache: FxHashMap::default(),
         }
     }
 
-    pub fn solve<B: BranchingHeuristic>(
-        &mut self,
-        graph: &mut Graph,
-        branching_heuristic: &mut B,
-    ) -> f64 {
-        if let Some(d) = branching_heuristic.branching_decision(graph) {
-            let mut obj = 0.0;
-            for node in d {
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> f64 {
+        let hash = self.component_extractor.get_component_hash(component);
+        let should_compute = self.cache.contains_key(&hash);
+        if should_compute {
+            let count = self.solve_component(component);
+            self.cache.insert(hash, count);
+        }
+        *self.cache.get(&hash).unwrap()
+    }
+
+    fn solve_component(&mut self, component: ComponentIndex) -> f64 {
+        let mut branching = B::from_component(&self.component_extractor, component);
+        let mut obj = 0.0;
+        while let Some(d) = branching.branching_decision() {
+            for node in self.graph.distribution_iter(d) {
                 self.state.save_state();
-                graph.propagate_node(node, true, &mut self.state);
-                obj += self.solve(graph, branching_heuristic);
+                self.graph.propagate_node(node, true, &mut self.state);
+                self.component_extractor
+                    .detect_components(&self.graph, &mut self.state, component);
+                for sub_component in self.component_extractor.components_iter(&self.state) {
+                    obj += self.get_cached_component_or_compute(sub_component);
+                }
                 self.state.restore_state();
             }
-            obj
-        } else {
-            graph.get_objective(&self.state)
         }
+        obj
+    }
+
+    pub fn solve(&mut self) -> f64 {
+        let mut obj = 0.0;
+        for component in self.component_extractor.components_iter(&self.state) {
+            obj += self.get_cached_component_or_compute(component);
+        }
+        obj
     }
 }
