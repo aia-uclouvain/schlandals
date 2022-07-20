@@ -34,19 +34,30 @@ use std::hash::Hasher;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ComponentIndex(pub usize);
 
+/// This trait describes how components extractor must be implemented. An extractor of components
+/// is a data structure that can, during the search, gives a list of the connected components (as
+/// described above) in the graph
 pub trait ComponentExtractor {
+    /// This function is responsible of updating the data structure with the new connected
+    /// components in `g` gien its current assignments.
     fn detect_components<S: StateManager>(
         &mut self,
         g: &Graph,
         state: &mut S,
         component: ComponentIndex,
     );
+    /// Returns the nodes of a given component
     fn get_component(&self, component: ComponentIndex) -> &[NodeIndex];
+    /// Returns the hash of a given component. This is the job of the implementing data structure
+    /// to ensure that the same component gives the same hash, even if it appears in another part
+    /// of the search tree
     fn get_component_hash(&self, component: ComponentIndex) -> u64;
+    /// Returns the distributions in a given component
     fn get_component_distributions(
         &self,
         component: ComponentIndex,
     ) -> &FxHashSet<DistributionIndex>;
+    /// Returns an iterator over the current components
     fn components_iter<S: StateManager>(&self, state: &S) -> ComponentIterator;
 }
 
@@ -71,13 +82,37 @@ impl Iterator for ComponentIterator {
     }
 }
 
+/// This structure is an extractor of component that works by doing a DFS on the component to
+/// extract sub-components. It works by keeping all the `NodeIndex` in a single vector (the `nodes`
+/// vector) so that all the nodes of a component are in a contiguous part of the vectors.
+/// Thus in that case a component is simply two integers
+///     1. The index of the first node in the component
+///     2. The size of the component
+///
+/// Since the DFS is done using the `Graph` structure (i.e. following the edges of a node), a
+/// second vector for the position of each node is kept.
+/// Finally in order to be safe during the search and more specifically the backtrack, the nodes in
+/// `nodes` are moved inside the component.
+/// For instance let us assume that we have two components, the `nodes` vector might looks like
+/// [0, 2, 4, 1 | 5, 7 ] (the | is the separation between the two components, and integers
+/// represent the nodes).
+/// If now the first component is split in two, the nodes are moved in the sub-vectors spanning the
+/// first four indexes. Thus (assuming 0 and 1 are in the same component and 2 and 4 in another),
+/// this is a valid representation of the new vector [0, 1 | 2, 4 | 5, 7] while this is not
+/// [2, 4 | 5, 7 | 0, 1]
 pub struct DFSComponentExtractor {
+    /// The vector containing the nodes. All nodes in a component are in a contiguous part of this
+    /// vector
     nodes: Vec<NodeIndex>,
+    /// The vector mapping for each `NodeIndex` its position in `nodes`
     positions: Vec<usize>,
     /// Holds the components computed by the extractor during the search
     components: Vec<Component>,
+    /// Holds the distribution in each component of `components`
     distributions: Vec<FxHashSet<DistributionIndex>>,
+    /// The index of the first component of the current node in the search tree
     base: ReversibleInt,
+    /// The first index which is not a component of the current node in the search tree
     limit: ReversibleInt,
 }
 
@@ -110,22 +145,29 @@ impl DFSComponentExtractor {
         state: &mut S,
     ) {
         let node_pos = self.positions[node.0];
+        // If the node is bound, it is not part of any component so we can return. The other
+        // condition states that if the position of the node is between the start of the component
+        // being build, and the last node that was added in the component, then it has already
+        // been processed.
         if g.is_node_bound(node, state)
             || comp_start <= node_pos && node_pos < (comp_start + *comp_size)
         {
             return;
         }
-        // The new component of this node
+
+        // If the node is probabilistic, add its distribution to the set of distribution for this
+        // component
         if !g.is_node_deterministic(node) {
             let distribution = g.get_distribution(node).unwrap();
             self.distributions.last_mut().unwrap().insert(distribution);
         }
-        // Swap the NodeIndex in the range of the component in the vector
-        // Current position of `node` in the vector `nodes`
+
+        // This effectively add the node in the component.
         let current_pos = self.positions[node.0];
+        // The node is placed at the end of the component
         let new_pos = comp_start + *comp_size;
-        let moved_node = self.nodes[new_pos];
         if new_pos != current_pos {
+            let moved_node = self.nodes[new_pos];
             self.nodes.as_mut_slice().swap(new_pos, current_pos);
             self.positions[node.0] = new_pos;
             self.positions[moved_node.0] = current_pos;
@@ -172,6 +214,14 @@ impl ComponentExtractor for DFSComponentExtractor {
                 self.explore_component(g, node, start, &mut comp_size, state);
                 self.components.push(Component(start, comp_size));
                 let ns = &self.nodes;
+                // Here we sort the nodes in the `nodes` vector to ensure that the hash of the
+                // component is the same everywhere in the search tree. This is due to the fact
+                // that hashing the same sequence of bytes in a different order will result in a
+                // different hash.
+                // This is probably not ideal but as a first solution it is fine.
+                // We could add in each component a pointer to the node with the lowest index and
+                // start a DFS on the graph from that. This should give a unique hash to the same
+                // component.
                 self.positions[start..(start + comp_size)].sort_by(|n1, n2| ns[*n1].cmp(&ns[*n2]));
                 self.nodes[start..(start + comp_size)].sort();
                 start += comp_size;
