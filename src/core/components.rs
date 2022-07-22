@@ -210,6 +210,7 @@ impl ComponentExtractor for DFSComponentExtractor {
             let node = self.nodes[start];
             if !g.is_node_bound(node, state) {
                 let mut comp_size = 0;
+                self.distributions.push(FxHashSet::default());
                 self.explore_component(g, node, start, &mut comp_size, state);
                 self.components.push(Component(start, comp_size));
                 let ns = &self.nodes;
