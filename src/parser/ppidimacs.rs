@@ -87,21 +87,34 @@ pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) 
                 }
             }
             let split = l.split_whitespace().collect::<Vec<&str>>();
-            if split[0].starts_with("-") {
-                panic!(
-                    "[Parsing error at line {}] The head of a clause should be a positive literal",
-                    line_count
-                );
-            }
-            for i in 1..split.len() {
-                if !split[i].starts_with("-") {
-                    panic!("[Parsing error at line {}] The literals in the implicant of a clause should be negative", line_count);
-                }
-            }
-            let head = NodeIndex(split[0].parse::<usize>().unwrap());
-            let body = split[1..]
+            let positive_literals = split
                 .iter()
-                .map(|token| NodeIndex((token.parse::<isize>().unwrap() * -1) as usize))
+                .filter(|x| !x.starts_with("-"))
+                .map(|x| x.parse::<usize>().unwrap())
+                .collect::<Vec<usize>>();
+            let negative_literals = split
+                .iter()
+                .filter(|x| x.starts_with("-"))
+                .map(|x| x.parse::<isize>().unwrap() * -1)
+                .collect::<Vec<isize>>();
+            if positive_literals.len() > 1 {
+                panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
+            }
+            let head = if positive_literals.len() == 0 {
+                // There is no head in this clause, so it is just a clause of the form
+                //      n1 && n2 && ... && nn =>
+                //  which, in our model implies that the head is false (otherwise it does not
+                //  constrain the problem)
+                let n = g.add_node(false, None, None, state);
+                g.set_node(n, false, state);
+                n
+            } else {
+                NodeIndex(positive_literals[0])
+            };
+            let body = negative_literals
+                .iter()
+                .copied()
+                .map(|x| NodeIndex(x as usize))
                 .collect::<Vec<NodeIndex>>();
             g.add_clause(head, &body, state);
         }
