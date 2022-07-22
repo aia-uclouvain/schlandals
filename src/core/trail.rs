@@ -20,8 +20,6 @@
 //! This code is taken from [maxi-cp-rs](https://github.com/xgillard/maxicp-rs) (only the parts
 //! that interest us)
 
-#![allow(dead_code)]
-
 /// The identifier of a managed integer resource
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReversibleInt(usize);

@@ -25,7 +25,6 @@
 //! must implement the `ComponentExtractor` trait and compute the connected components when
 //! `find_components` is called. This can be done incrementally or not.
 
-#![allow(dead_code)]
 use super::graph::{DistributionIndex, Graph, NodeIndex};
 use super::trail::{ReversibleInt, StateManager};
 use rustc_hash::{FxHashSet, FxHasher};

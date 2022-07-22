@@ -15,7 +15,34 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 mod core;
+mod parser;
 mod solver;
+
+use clap::Parser;
+use std::path::PathBuf;
+
+use crate::core::components::DFSComponentExtractor;
+use crate::core::trail::TrailedStateManager;
+use parser::ppidimacs::graph_from_ppidimacs;
+use solver::branching::LinearBranching;
+use solver::solver::Solver;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short, long, value_parser)]
+    input: PathBuf,
+}
+
 fn main() {
-    println!("Hello, world!");
+    let args = Args::parse();
+    let mut state = TrailedStateManager::new();
+    let graph = graph_from_ppidimacs(&args.input, &mut state);
+    let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
+    let branching_heuristic = LinearBranching::new();
+    let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, LinearBranching> =
+        Solver::new(graph, state, component_extractor, branching_heuristic);
+    println!("Input file {:?}", args.input);
+    let value = solver.solve();
+    println!("Solution is {}", value);
 }

@@ -17,34 +17,58 @@
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::DistributionIndex;
 
-pub trait BranchingHeuristic {
-    fn branching_decision(&mut self) -> Option<DistributionIndex>;
-    fn from_component<C: ComponentExtractor>(extractor: &C, component: ComponentIndex) -> Self;
-}
-
-pub struct LinearBranching {
+pub struct BranchingDecision {
     distributions: Vec<DistributionIndex>,
     next: usize,
 }
 
-impl BranchingHeuristic for LinearBranching {
-    fn from_component<C: ComponentExtractor>(extractor: &C, component: ComponentIndex) -> Self {
-        Self {
-            distributions: extractor
-                .get_component_distributions(component)
-                .iter()
-                .copied()
-                .collect(),
-            next: 0,
-        }
-    }
+impl Iterator for BranchingDecision {
+    type Item = DistributionIndex;
 
-    fn branching_decision(&mut self) -> Option<DistributionIndex> {
-        if self.next == self.distributions.len() {
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next >= self.distributions.len() {
             None
         } else {
             self.next += 1;
             Some(self.distributions[self.next - 1])
+        }
+    }
+}
+
+pub trait BranchingHeuristic {
+    fn decision_from_component<C: ComponentExtractor>(
+        &self,
+        extractor: &C,
+        component: ComponentIndex,
+    ) -> Option<BranchingDecision>;
+}
+
+pub struct LinearBranching {}
+
+impl LinearBranching {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl BranchingHeuristic for LinearBranching {
+    fn decision_from_component<C: ComponentExtractor>(
+        &self,
+        extractor: &C,
+        component: ComponentIndex,
+    ) -> Option<BranchingDecision> {
+        let distributions = extractor
+            .get_component_distributions(component)
+            .iter()
+            .copied()
+            .collect::<Vec<DistributionIndex>>();
+        if distributions.len() == 0 {
+            None
+        } else {
+            Some(BranchingDecision {
+                distributions,
+                next: 0,
+            })
         }
     }
 }
@@ -74,11 +98,15 @@ mod test_simple_branching {
         g.add_clause(n, &nd3, &mut state);
 
         let c = DFSComponentExtractor::new(&g, &mut state);
-        let mut b = LinearBranching::from_component(&c, ComponentIndex(0));
-        b.distributions.sort();
-        assert_eq!(DistributionIndex(0), b.branching_decision().unwrap());
-        assert_eq!(DistributionIndex(1), b.branching_decision().unwrap());
-        assert_eq!(DistributionIndex(2), b.branching_decision().unwrap());
-        assert_eq!(None, b.branching_decision());
+        let b = LinearBranching::new();
+        let decisions = b
+            .decision_from_component(&c, ComponentIndex(0))
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<DistributionIndex>>();
+        assert_eq!(3, decisions.len());
+        assert_eq!(DistributionIndex(0), decisions[0]);
+        assert_eq!(DistributionIndex(1), decisions[1]);
+        assert_eq!(DistributionIndex(2), decisions[2]);
     }
 }

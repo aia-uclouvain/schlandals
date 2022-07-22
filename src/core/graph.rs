@@ -39,9 +39,7 @@
 //!     Once the graph is constructed, no edge/node should be removed from it. Thus this
 //!     implementation does not have problems like dangling indexes.
 
-#![allow(dead_code)]
 use super::trail::*;
-use std::marker::Sized;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
@@ -244,28 +242,6 @@ impl Graph {
             graph: self,
             next: first,
         }
-    }
-
-    /// Returns an iterator on the parents of `node`
-    pub fn active_parents<'s, S: StateManager>(
-        &'s self,
-        node: NodeIndex,
-        state: &'s S,
-    ) -> impl Iterator<Item = NodeIndex> + 's {
-        self.incomings(node)
-            .filter(move |edge| self.is_edge_active(*edge, state))
-            .map(move |edge| self.edges[edge.0].src)
-    }
-
-    /// Retunrs an iterator on the children of `node`
-    pub fn active_children<'s, S: StateManager>(
-        &'s self,
-        node: NodeIndex,
-        state: &'s S,
-    ) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.outgoings(node)
-            .filter(move |edge| self.is_edge_active(*edge, state))
-            .map(move |edge| self.edges[edge.0].dst)
     }
 
     /// Returns an iterator over all the clauses in which `node` is included, either as the head of

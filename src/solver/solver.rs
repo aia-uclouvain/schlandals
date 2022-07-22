@@ -61,21 +61,30 @@ where
     }
 
     fn solve_component(&mut self, component: ComponentIndex) -> f64 {
-        let mut branching = B::from_component(&self.component_extractor, component);
-        let mut obj = 0.0;
-        while let Some(d) = branching.branching_decision() {
-            for node in self.graph.distribution_iter(d) {
-                self.state.save_state();
-                self.graph.propagate_node(node, true, &mut self.state);
-                self.component_extractor
-                    .detect_components(&self.graph, &mut self.state, component);
-                for sub_component in self.component_extractor.components_iter(&self.state) {
-                    obj += self.get_cached_component_or_compute(sub_component);
+        let decisions = self
+            .branching_heuristic
+            .decision_from_component(&self.component_extractor, component);
+        if let Some(branching) = decisions {
+            let mut obj = 0.0;
+            for d in branching {
+                for node in self.graph.distribution_iter(d) {
+                    self.state.save_state();
+                    self.graph.propagate_node(node, true, &mut self.state);
+                    self.component_extractor.detect_components(
+                        &self.graph,
+                        &mut self.state,
+                        component,
+                    );
+                    for sub_component in self.component_extractor.components_iter(&self.state) {
+                        obj += self.get_cached_component_or_compute(sub_component);
+                    }
+                    self.state.restore_state();
                 }
-                self.state.restore_state();
             }
+            obj
+        } else {
+            self.graph.get_objective(&self.state)
         }
-        obj
     }
 
     pub fn solve(&mut self) -> f64 {
