@@ -52,7 +52,7 @@ where
 
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> f64 {
         let hash = self.component_extractor.get_component_hash(component);
-        let should_compute = self.cache.contains_key(&hash);
+        let should_compute = !self.cache.contains_key(&hash);
         if should_compute {
             let count = self.solve_component(component);
             self.cache.insert(hash, count);
