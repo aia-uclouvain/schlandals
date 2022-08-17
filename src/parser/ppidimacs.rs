@@ -44,11 +44,13 @@
 
 use crate::core::graph::{Graph, NodeIndex};
 use crate::core::trail::StateManager;
+use crate::solver::propagator::SimplePropagator;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) -> Graph {
+    let mut node_to_propagate: Vec<(NodeIndex, bool)> = Vec::new();
     let mut g = Graph::new(state);
     let file = File::open(filepath).unwrap();
     let reader = BufReader::new(file);
@@ -71,7 +73,7 @@ pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) 
             let split = l
                 .split_whitespace()
                 .skip(1)
-                .map(|token| token.parse::<f64>().unwrap())
+                .map(|token| token.parse::<f64>().unwrap().log2())
                 .collect::<Vec<f64>>();
             g.add_distribution(&split, state);
         } else {
@@ -106,7 +108,7 @@ pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) 
                 //  which, in our model implies that the head is false (otherwise it does not
                 //  constrain the problem)
                 let n = g.add_node(false, None, None, state);
-                g.set_node(n, false, state);
+                node_to_propagate.push((n, false));
                 n
             } else {
                 NodeIndex(positive_literals[0])
@@ -120,5 +122,9 @@ pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) 
         }
         line_count += 1;
     }
+    for (node, value) in node_to_propagate {
+        g.propagate_node(node, value, state);
+    }
+    g.propagate(state);
     g
 }

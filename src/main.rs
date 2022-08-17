@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use crate::core::components::DFSComponentExtractor;
 use crate::core::trail::TrailedStateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
-use solver::branching::LinearBranching;
+use solver::branching::FirstBranching;
 use solver::solver::Solver;
 
 #[derive(Parser, Debug)]
@@ -39,10 +39,10 @@ fn main() {
     let mut state = TrailedStateManager::new();
     let graph = graph_from_ppidimacs(&args.input, &mut state);
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
-    let branching_heuristic = LinearBranching::new();
-    let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, LinearBranching> =
+    let branching_heuristic = FirstBranching::default();
+    let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, FirstBranching> =
         Solver::new(graph, state, component_extractor, branching_heuristic);
     println!("Input file {:?}", args.input);
     let value = solver.solve();
-    println!("Solution is {}", value);
+    println!("Solution is {} (prob {})", value, 2_f64.powf(value));
 }

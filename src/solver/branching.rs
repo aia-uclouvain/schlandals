@@ -14,99 +14,43 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::DistributionIndex;
 
-pub struct BranchingDecision {
-    distributions: Vec<DistributionIndex>,
-    next: usize,
+/// Trait that defined the methods that a branching decision structure must implement.
+pub trait BranchingDecision {
+    /// This function takes some distributions and returns an option with the next distribution to
+    /// branch on (or None if `distributions.len() == 0`)
+    fn branch_on(&mut self, distributions: &[DistributionIndex]) -> Option<DistributionIndex>;
 }
 
-impl Iterator for BranchingDecision {
-    type Item = DistributionIndex;
+/// A simple branching algorithm that selects the first distribution
+#[derive(Default)]
+pub struct FirstBranching;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next >= self.distributions.len() {
-            None
-        } else {
-            self.next += 1;
-            Some(self.distributions[self.next - 1])
-        }
-    }
-}
-
-pub trait BranchingHeuristic {
-    fn decision_from_component<C: ComponentExtractor>(
-        &self,
-        extractor: &C,
-        component: ComponentIndex,
-    ) -> Option<BranchingDecision>;
-}
-
-pub struct LinearBranching {}
-
-impl LinearBranching {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl BranchingHeuristic for LinearBranching {
-    fn decision_from_component<C: ComponentExtractor>(
-        &self,
-        extractor: &C,
-        component: ComponentIndex,
-    ) -> Option<BranchingDecision> {
-        let distributions = extractor
-            .get_component_distributions(component)
-            .iter()
-            .copied()
-            .collect::<Vec<DistributionIndex>>();
+impl BranchingDecision for FirstBranching {
+    fn branch_on(&mut self, distributions: &[DistributionIndex]) -> Option<DistributionIndex> {
         if distributions.len() == 0 {
             None
         } else {
-            Some(BranchingDecision {
-                distributions,
-                next: 0,
-            })
+            Some(distributions[0])
         }
     }
 }
 
 #[cfg(test)]
 mod test_simple_branching {
-    use super::{BranchingHeuristic, LinearBranching};
-    use crate::core::components::{ComponentIndex, DFSComponentExtractor};
-    use crate::core::graph::{DistributionIndex, Graph};
-    use crate::core::trail::TrailedStateManager;
+    use super::{BranchingDecision, FirstBranching};
+    use crate::core::graph::DistributionIndex;
 
     #[test]
     fn test_branching_distribution_order() {
-        let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
-        let w1 = vec![0.3, 0.2, 0.5];
-        let w2 = vec![0.1, 0.1, 0.1, 0.7];
-        let w3 = vec![0.4, 0.6];
-
-        let nd1 = g.add_distribution(&w1, &mut state);
-        let nd2 = g.add_distribution(&w2, &mut state);
-        let nd3 = g.add_distribution(&w3, &mut state);
-
-        let n = g.add_node(false, None, None, &mut state);
-        g.add_clause(n, &nd1, &mut state);
-        g.add_clause(n, &nd2, &mut state);
-        g.add_clause(n, &nd3, &mut state);
-
-        let c = DFSComponentExtractor::new(&g, &mut state);
-        let b = LinearBranching::new();
-        let decisions = b
-            .decision_from_component(&c, ComponentIndex(0))
-            .unwrap()
-            .into_iter()
-            .collect::<Vec<DistributionIndex>>();
-        assert_eq!(3, decisions.len());
-        assert_eq!(DistributionIndex(0), decisions[0]);
-        assert_eq!(DistributionIndex(1), decisions[1]);
-        assert_eq!(DistributionIndex(2), decisions[2]);
+        let mut distributions: Vec<DistributionIndex> =
+            (0..5).map(|i| DistributionIndex(i)).collect();
+        let mut b = FirstBranching::default();
+        for i in 0..5 {
+            assert_eq!(Some(DistributionIndex(i)), b.branch_on(&mut distributions));
+            distributions.remove(0);
+        }
+        assert_eq!(None, b.branch_on(&mut distributions));
     }
 }

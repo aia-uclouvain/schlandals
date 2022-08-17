@@ -143,19 +143,35 @@ pub struct EdgeData {
 }
 
 /// Represents a set of nodes in a same distribution. This assume that the nodes of a distribution
-/// are inserted in the graph one after the other, and that there `NodeIndex` are consecutive.
+/// are inserted in the graph one after the other (i.e. that their `NodeIndex` are consecutive).
 /// Since no node should be removed from the graph once constructed, this should not be a problem.
 /// Thus a distribution is identified by the first `NodeIndex` and the number of nodes in the
 /// distribution.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Distribution(pub NodeIndex, pub usize);
+pub struct Distribution {
+    /// First node in the distribution
+    pub first: NodeIndex,
+    /// Number of node in the distribution
+    pub size: usize,
+    /// Number of active edges in the distribution. This is the sum of the active ingoing/outgoing
+    /// edges of all nodes of the distribution
+    active_edges: ReversibleInt,
+    /// Number of nodes set to false in the distribution
+    nodes_false: ReversibleInt,
+}
 
+/// Data structure representing the Graph.
 #[derive(Debug, Clone)]
 pub struct Graph {
+    /// Vector containing the nodes of the graph
     nodes: Vec<NodeData>,
+    /// Vector containing the edges of the graph
     edges: Vec<EdgeData>,
+    /// Vector containing the clauses of the graph
     clauses: Vec<Clause>,
+    /// Objective of the graph. This is the sum of all probabilistic nodes set to true
     pub obj: ReversibleFloat,
+    /// Vector containing the distributions of the graph
     distributions: Vec<Distribution>,
 }
 
@@ -201,12 +217,13 @@ impl Graph {
         }
     }
 
+    /// Returns an iterator over all the nodes in the distribution identified by `distribution`
     pub fn distribution_iter(
         &self,
         distribution: DistributionIndex,
     ) -> impl Iterator<Item = NodeIndex> {
-        let start = self.distributions[distribution.0].0 .0;
-        let size = self.distributions[distribution.0].1;
+        let start = self.distributions[distribution.0].first.0;
+        let size = self.distributions[distribution.0].size;
         let end = start + size;
         (start..end).map(|i| NodeIndex(i))
     }
@@ -220,8 +237,8 @@ impl Graph {
             }
         } else {
             let distribution = self.nodes[node.0].distribution.unwrap();
-            let next = self.distributions[distribution.0].0 .0;
-            let limit = next + self.distributions[distribution.0].1;
+            let next = self.distributions[distribution.0].first.0;
+            let limit = next + self.distributions[distribution.0].size;
             DistributionIterator { limit, next }
         }
     }
@@ -309,14 +326,41 @@ impl Graph {
         weights: &Vec<f64>,
         state: &mut S,
     ) -> Vec<NodeIndex> {
-        debug_assert!(weights.iter().fold(0.0, |sum, w| sum + *w) == 1.0);
         let distribution = DistributionIndex(self.distributions.len());
         let nodes: Vec<NodeIndex> = weights
             .iter()
             .map(|w| self.add_node(true, Some(*w), Some(distribution), state))
             .collect();
-        self.distributions.push(Distribution(nodes[0], nodes.len()));
+        self.distributions.push(Distribution {
+            first: nodes[0],
+            size: nodes.len(),
+            active_edges: state.manage_int(0),
+            nodes_false: state.manage_int(0),
+        });
         nodes
+    }
+
+    /// Gets the number of active edges of a distribution
+    pub fn get_distribution_number_active_edges<S: StateManager>(
+        &self,
+        distribution: DistributionIndex,
+        state: &S,
+    ) -> isize {
+        state.get_int(self.distributions[distribution.0].active_edges)
+    }
+
+    /// Gets the number of nodes set to false in a distribution
+    pub fn get_distribution_false_nodes<S: StateManager>(
+        &self,
+        distribution: DistributionIndex,
+        state: &S,
+    ) -> isize {
+        state.get_int(self.distributions[distribution.0].nodes_false)
+    }
+
+    /// Gets the number of nodes in a distribution
+    pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
+        self.distributions[distribution.0].size
     }
 
     /// Sets `node` to `value`. This assumes that `node` is unassigned
@@ -327,8 +371,15 @@ impl Graph {
         debug_assert!(state.get_int(self.nodes[node.0].domain_size) == 2);
         // If the node is probabilistic, add its value to the objective
         let n = &self.nodes[node.0];
-        if n.probabilistic && value {
-            state.add_float(self.obj, n.weight.unwrap());
+        if n.probabilistic {
+            // If the node is set to true, then its weight is added to the objective. If not, then
+            // the counter of node set to false for the distribution of `node` is incremented
+            if value {
+                state.add_float(self.obj, n.weight.unwrap());
+            } else {
+                let distribution = self.get_distribution(node).unwrap();
+                state.increment(self.distributions[distribution.0].nodes_false);
+            }
         }
         // Assigning the value to the node
         state.decrement(self.nodes[node.0].domain_size);
@@ -340,12 +391,19 @@ impl Graph {
         state.get_int(self.nodes[node.0].domain_size) == 1
     }
 
+    /// Gets the value assigned to a node
     pub fn get_node_value(&self, node: NodeIndex) -> bool {
         self.nodes[node.0].value
     }
 
+    /// Returns true if the node is deterministic and false otherwise
     pub fn is_node_deterministic(&self, node: NodeIndex) -> bool {
         !self.nodes[node.0].probabilistic
+    }
+
+    /// Returns true if the node is probabilistic and false otherwise
+    pub fn is_node_probabilistic(&self, node: NodeIndex) -> bool {
+        !self.is_node_deterministic(node)
     }
 
     /// Returns the number of active incoming edges of `node`
@@ -387,6 +445,14 @@ impl Graph {
         self.nodes[dst.0].parents = Some(index);
         state.increment(self.nodes[dst.0].active_incoming);
         self.edges.push(edge);
+        if self.is_node_probabilistic(src) {
+            let src_distribution = self.get_distribution(src).unwrap();
+            state.increment(self.distributions[src_distribution.0].active_edges);
+        }
+        if self.is_node_probabilistic(dst) {
+            let dst_distribution = self.get_distribution(dst).unwrap();
+            state.increment(self.distributions[dst_distribution.0].active_edges);
+        }
         index
     }
 
@@ -398,6 +464,16 @@ impl Graph {
         state.decrement(self.nodes[edge.src.0].active_outgoing);
         state.decrement(self.nodes[edge.dst.0].active_incoming);
         state.decrement(self.clauses[edge.clause.0].active_edges);
+        // If the source or the destination are probabilistic, decrement the counter of active
+        // edges in their distribution
+        if self.is_node_probabilistic(edge.src) {
+            let distribution = self.get_distribution(edge.src).unwrap();
+            state.decrement(self.distributions[distribution.0].active_edges);
+        }
+        if self.is_node_probabilistic(edge.dst) {
+            let distribution = self.get_distribution(edge.dst).unwrap();
+            state.decrement(self.distributions[distribution.0].active_edges);
+        }
     }
 
     /// Return true if the edge is still active
@@ -429,7 +505,7 @@ impl Graph {
     pub fn add_clause<S: StateManager>(
         &mut self,
         head: NodeIndex,
-        body: &Vec<NodeIndex>,
+        body: &[NodeIndex],
         state: &mut S,
     ) -> ClauseIndex {
         let cid = ClauseIndex(self.clauses.len());
@@ -526,8 +602,8 @@ impl IntoIterator for Distribution {
 
     fn into_iter(self) -> Self::IntoIter {
         DistributionIterator {
-            limit: self.0 .0 + self.1,
-            next: self.0 .0,
+            limit: self.first.0 + self.size,
+            next: self.first.0,
         }
     }
 }
@@ -725,9 +801,9 @@ mod test_graph {
         let mut state = TrailedStateManager::new();
         let mut g = Graph::new(&mut state);
         let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(true, Some(0.2), Some(DistributionIndex(0)), &mut state);
+        let n2 = g.add_distribution(&vec![0.2], &mut state)[0];
         let n3 = g.add_node(false, None, None, &mut state);
-        let n4 = g.add_node(true, Some(0.3), Some(DistributionIndex(0)), &mut state);
+        let n4 = g.add_distribution(&vec![0.3], &mut state)[0];
 
         let e1 = g.add_edge(n1, n2, ClauseIndex(0), &mut state);
         let e2 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
@@ -795,7 +871,12 @@ mod test_graph {
             vec![NodeIndex(0), NodeIndex(1), NodeIndex(2), NodeIndex(3)],
             nodes
         );
-        assert_eq!(Distribution(NodeIndex(0), 4), g.distributions[0]);
+        assert_eq!(1, g.distributions.len());
+        let distribution = g.distributions[0];
+        assert_eq!(NodeIndex(0), distribution.first);
+        assert_eq!(4, distribution.size);
+        assert_eq!(0, state.get_int(distribution.active_edges));
+        assert_eq!(0, state.get_int(distribution.nodes_false));
     }
 
     #[test]
@@ -808,7 +889,12 @@ mod test_graph {
 
         let n1 = g.add_distribution(&w1, &mut state);
         assert_eq!(vec![NodeIndex(0), NodeIndex(1), NodeIndex(2)], n1);
-        assert_eq!(Distribution(n1[0], 3), g.distributions[0]);
+        assert_eq!(1, g.distributions.len());
+        let distribution = g.distributions[0];
+        assert_eq!(n1[0], distribution.first);
+        assert_eq!(3, distribution.size);
+        assert_eq!(0, state.get_int(distribution.active_edges));
+        assert_eq!(0, state.get_int(distribution.nodes_false));
 
         g.add_node(false, None, None, &mut state);
         let n2 = g.add_distribution(&w2, &mut state);
@@ -816,14 +902,24 @@ mod test_graph {
             vec![NodeIndex(4), NodeIndex(5), NodeIndex(6), NodeIndex(7)],
             n2
         );
-        assert_eq!(Distribution(n2[0], 4), g.distributions[1]);
+        assert_eq!(2, g.distributions.len());
+        let distribution = g.distributions[1];
+        assert_eq!(n2[0], distribution.first);
+        assert_eq!(4, distribution.size);
+        assert_eq!(0, state.get_int(distribution.active_edges));
+        assert_eq!(0, state.get_int(distribution.nodes_false));
 
         g.add_node(false, None, None, &mut state);
         g.add_node(false, None, None, &mut state);
 
         let n3 = g.add_distribution(&w3, &mut state);
         assert_eq!(vec![NodeIndex(10), NodeIndex(11)], n3);
-        assert_eq!(Distribution(n3[0], 2), g.distributions[2]);
+        assert_eq!(3, g.distributions.len());
+        let distribution = g.distributions[2];
+        assert_eq!(n3[0], distribution.first);
+        assert_eq!(2, distribution.size);
+        assert_eq!(0, state.get_int(distribution.active_edges));
+        assert_eq!(0, state.get_int(distribution.nodes_false));
     }
 
     #[test]
