@@ -125,12 +125,6 @@ pub struct TrailedStateManager {
     floats: Vec<FloatState>,
 }
 
-impl Default for TrailedStateManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TrailedStateManager {
     pub fn new() -> Self {
         Self {
