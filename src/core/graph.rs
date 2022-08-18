@@ -1108,3 +1108,59 @@ mod test_graph {
         assert_eq!(vec![c2], n4_clauses);
     }
 }
+
+#[cfg(test)]
+mod test_graph_iterators {
+
+    use crate::core::graph::*;
+
+    #[test]
+    fn nodes_iterator() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let nodes: Vec<NodeIndex> = (0..10)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect();
+        let iterated: Vec<NodeIndex> = g.nodes_iter().collect();
+        assert_eq!(nodes, iterated);
+    }
+
+    #[test]
+    fn distributions_iterator() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let distributions: Vec<Vec<NodeIndex>> = (0..5)
+            .map(|_| g.add_distribution(&vec![0.3, 0.5, 0.2], &mut state))
+            .collect();
+        for d in 0..5 {
+            let iterated: Vec<NodeIndex> = g.distribution_iter(DistributionIndex(d)).collect();
+            assert_eq!(distributions[d], iterated);
+            for n in 0..3 {
+                let iterated_from_nodes: Vec<NodeIndex> =
+                    g.nodes_distribution_iter(NodeIndex(d * 3 + n)).collect();
+                assert_eq!(distributions[d], iterated_from_nodes);
+            }
+        }
+    }
+
+    #[test]
+    fn clause_iterator() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n: Vec<NodeIndex> = (0..5)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect();
+        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
+        g.add_clause(n[1], &vec![n[3]], &mut state);
+        g.add_clause(n[3], &vec![n[4]], &mut state);
+
+        let clauses: Vec<Vec<ClauseIndex>> = (0..5)
+            .map(|i| g.node_clauses(NodeIndex(i)).collect())
+            .collect();
+        assert_eq!(vec![ClauseIndex(0)], clauses[0]);
+        assert_eq!(vec![ClauseIndex(1), ClauseIndex(0)], clauses[1]);
+        assert_eq!(vec![ClauseIndex(0)], clauses[2]);
+        assert_eq!(vec![ClauseIndex(2), ClauseIndex(1)], clauses[3]);
+        assert_eq!(vec![ClauseIndex(2)], clauses[4]);
+    }
+}

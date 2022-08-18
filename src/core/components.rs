@@ -156,48 +156,46 @@ impl DFSComponentExtractor {
         // condition states that if the position of the node is between the start of the component
         // being build, and the last node that was added in the component, then it has already
         // been processed.
-        if g.is_node_bound(node, state)
-            || comp_start <= node_pos && node_pos < (comp_start + *comp_size)
+        if !(g.is_node_bound(node, state)
+            || comp_start <= node_pos && node_pos < (comp_start + *comp_size))
         {
-            return;
-        }
+            // The node is swap with the node at position comp_sart + comp_size
+            let current_pos = self.positions[node.0];
+            let new_pos = comp_start + *comp_size;
+            // Only move the nodes if it is not already in position
+            // Not sure if this optimization is worth in practice
+            if new_pos != current_pos {
+                let moved_node = self.nodes[new_pos];
+                self.nodes.as_mut_slice().swap(new_pos, current_pos);
+                self.positions[node.0] = new_pos;
+                self.positions[moved_node.0] = current_pos;
+            }
+            *comp_size += 1;
 
-        // The node is swap with the node at position comp_sart + comp_size
-        let current_pos = self.positions[node.0];
-        let new_pos = comp_start + *comp_size;
-        // Only move the nodes if it is not already in position
-        // Not sure if this optimization is worth in practice
-        if new_pos != current_pos {
-            let moved_node = self.nodes[new_pos];
-            self.nodes.as_mut_slice().swap(new_pos, current_pos);
-            self.positions[node.0] = new_pos;
-            self.positions[moved_node.0] = current_pos;
-        }
-        *comp_size += 1;
-
-        // If the node is probabilistic, add its distribution to the set of distribution for this
-        // component
-        // And we need to add the nodes in the distribution in the component
-        if g.is_node_probabilistic(node) {
-            let distribution = g.get_distribution(node).unwrap();
-            self.distributions.last_mut().unwrap().insert(distribution);
-            for n in g.distribution_iter(distribution) {
-                if n != node {
-                    self.explore_component(g, n, comp_start, comp_size, state);
+            // If the node is probabilistic, add its distribution to the set of distribution for this
+            // component
+            // And we need to add the nodes in the distribution in the component
+            if g.is_node_probabilistic(node) {
+                let distribution = g.get_distribution(node).unwrap();
+                self.distributions.last_mut().unwrap().insert(distribution);
+                for n in g.distribution_iter(distribution) {
+                    if n != node {
+                        self.explore_component(g, n, comp_start, comp_size, state);
+                    }
                 }
             }
-        }
 
-        // Recursively explore the nodes in the connected components (i.e. linked by a clause)
-        for clause in g.node_clauses(node) {
-            for edge in g.edges_clause(clause) {
-                let src = g.get_edge_source(edge);
-                let dst = g.get_edge_destination(edge);
-                if src != node && !g.is_node_bound(src, state) {
-                    self.explore_component(g, src, comp_start, comp_size, state);
-                }
-                if dst != node && !g.is_node_bound(dst, state) {
-                    self.explore_component(g, dst, comp_start, comp_size, state);
+            // Recursively explore the nodes in the connected components (i.e. linked by a clause)
+            for clause in g.node_clauses(node) {
+                for edge in g.edges_clause(clause) {
+                    let src = g.get_edge_source(edge);
+                    let dst = g.get_edge_destination(edge);
+                    if src != node && !g.is_node_bound(src, state) {
+                        self.explore_component(g, src, comp_start, comp_size, state);
+                    }
+                    if dst != node && !g.is_node_bound(dst, state) {
+                        self.explore_component(g, dst, comp_start, comp_size, state);
+                    }
                 }
             }
         }
@@ -285,9 +283,50 @@ impl ComponentExtractor for DFSComponentExtractor {
 #[cfg(test)]
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex, DFSComponentExtractor};
-    use crate::core::graph::{Graph, NodeIndex};
-    use crate::core::trail::{SaveAndRestore, TrailedStateManager};
-    use rustc_hash::FxHashSet;
+    use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
+    use crate::core::trail::{IntManager, SaveAndRestore, TrailedStateManager};
+    use rustc_hash::{FxHashSet, FxHasher};
+    use std::hash::Hasher;
+
+    #[test]
+    fn test_initialiaztion_extractor() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n = (0..5)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect::<Vec<NodeIndex>>();
+        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
+        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+
+        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        assert_eq!(5, component_extractor.nodes.len());
+        assert_eq!(5, component_extractor.positions.len());
+        assert_eq!(0, component_extractor.distributions[0].len());
+        assert_eq!(1, state.get_int(component_extractor.base));
+        assert_eq!(2, state.get_int(component_extractor.limit));
+        assert_eq!(1, component_extractor.number_components(&state));
+    }
+
+    #[test]
+    fn test_initialization_extractor_distribution() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n = (0..5)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect::<Vec<NodeIndex>>();
+        let d = g.add_distribution(&vec![0.3, 0.4, 0.3], &mut state);
+        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
+        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        g.add_clause(n[1], &vec![d[0]], &mut state);
+        g.add_clause(n[3], &vec![d[1], d[2]], &mut state);
+        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        assert_eq!(8, component_extractor.nodes.len());
+        assert_eq!(8, component_extractor.positions.len());
+        assert_eq!(1, component_extractor.distributions[0].len());
+        assert_eq!(1, state.get_int(component_extractor.base));
+        assert_eq!(2, state.get_int(component_extractor.limit));
+        assert_eq!(1, component_extractor.number_components(&state));
+    }
 
     #[test]
     fn test_initialization_single_component() {
@@ -304,6 +343,7 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
+        assert_eq!(1, component_extractor.number_components(&state));
         let nodes = component_extractor
             .get_component(components[0])
             .iter()
@@ -328,6 +368,7 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(2, components.len());
+        assert_eq!(2, component_extractor.number_components(&state));
         let n_c1 = component_extractor
             .get_component(components[0])
             .iter()
@@ -367,12 +408,14 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
+        assert_eq!(1, component_extractor.number_components(&state));
 
         g.set_node(n[1], true, &mut state);
         component_extractor.detect_components(&g, &mut state, components[0]);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
+        assert_eq!(2, component_extractor.number_components(&state));
         assert_eq!(2, components.len());
     }
 
@@ -391,6 +434,7 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
+        assert_eq!(1, component_extractor.number_components(&state));
 
         state.save_state();
 
@@ -400,11 +444,96 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(2, components.len());
+        assert_eq!(2, component_extractor.number_components(&state));
 
         state.restore_state();
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
+        assert_eq!(1, component_extractor.number_components(&state));
+    }
+
+    #[test]
+    fn test_hash() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n = (0..5)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect::<Vec<NodeIndex>>();
+        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
+        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
+        assert_eq!(1, components.len());
+
+        let comp = components[0];
+        let mut hasher = FxHasher::default();
+        for i in 0..5 {
+            hasher.write_usize(i);
+        }
+        assert_eq!(
+            hasher.finish(),
+            component_extractor.get_component_hash(comp)
+        );
+
+        g.set_node(n[1], false, &mut state);
+
+        component_extractor.detect_components(&g, &mut state, comp);
+        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
+        assert_eq!(2, components.len());
+        let mut hasher_comp1 = FxHasher::default();
+        hasher_comp1.write_usize(0);
+        hasher_comp1.write_usize(2);
+        assert_eq!(
+            hasher_comp1.finish(),
+            component_extractor.get_component_hash(components[0])
+        );
+
+        let mut hasher_comp2 = FxHasher::default();
+        hasher_comp2.write_usize(3);
+        hasher_comp2.write_usize(4);
+        assert_eq!(
+            hasher_comp2.finish(),
+            component_extractor.get_component_hash(components[1])
+        );
+    }
+
+    #[test]
+    fn distributions_in_components() {
+        let mut state = TrailedStateManager::new();
+        let mut g = Graph::new(&mut state);
+        let n = (0..2)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect::<Vec<NodeIndex>>();
+        let d1 = g.add_distribution(&vec![0.3, 0.3, 0.4], &mut state);
+        let d2 = g.add_distribution(&vec![0.5, 0.5], &mut state);
+        let d3 = g.add_distribution(&vec![0.3, 0.7], &mut state);
+
+        g.add_clause(n[0], &d1, &mut state);
+        g.add_clause(d2[0], &vec![n[0], n[1]], &mut state);
+        g.add_clause(n[1], &d3, &mut state);
+
+        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
+        assert_eq!(1, components.len());
+        let distributions = component_extractor.get_component_distributions(components[0]);
+        assert_eq!(3, distributions.len());
+        assert!(distributions.contains(&DistributionIndex(0)));
+        assert!(distributions.contains(&DistributionIndex(1)));
+        assert!(distributions.contains(&DistributionIndex(2)));
+
+        g.set_node(n[0], false, &mut state);
+
+        component_extractor.detect_components(&g, &mut state, components[0]);
+        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
+        assert_eq!(2, components.len());
+        let distribution_comp1 = component_extractor.get_component_distributions(components[0]);
+        assert_eq!(2, distribution_comp1.len());
+        assert!(distribution_comp1.contains(&DistributionIndex(1)));
+        assert!(distribution_comp1.contains(&DistributionIndex(2)));
+        let distribution_comp2 = component_extractor.get_component_distributions(components[1]);
+        assert_eq!(1, distribution_comp2.len());
+        assert!(distribution_comp2.contains(&DistributionIndex(0)));
     }
 }

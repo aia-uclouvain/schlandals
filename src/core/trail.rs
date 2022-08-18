@@ -390,6 +390,52 @@ mod test_manager_integer {
 
     use crate::core::trail::*;
 
+    fn is_float_close(f1: f64, f2: f64) -> bool {
+        (f1 - f2).abs() <= 0.0001
+    }
+
+    #[test]
+    fn int_manager_return_values() {
+        let mut mgr = TrailedStateManager::new();
+        let ints: Vec<ReversibleInt> = (0..10).map(|i| mgr.manage_int(i as isize)).collect();
+        for i in 0..10 {
+            assert_eq!(ReversibleInt(i), ints[i]);
+            let x = mgr.set_int(ints[i], i as isize + 1);
+            assert_eq!(i as isize + 1, x);
+            assert_eq!(x + 1, mgr.increment(ints[i]));
+            assert_eq!(x, mgr.decrement(ints[i]));
+        }
+    }
+
+    #[test]
+    fn floats_manager_return_values() {
+        let mut mgr = TrailedStateManager::new();
+        let floats: Vec<ReversibleFloat> = (0..10).map(|i| mgr.manage_float(i as f64)).collect();
+        for i in 0..10 {
+            assert_eq!(ReversibleFloat(i), floats[i]);
+            let x = mgr.set_float(floats[i], i as f64 / 10.0);
+            assert!(is_float_close(i as f64 / 10.0, x));
+            let increment = 1.42;
+            assert!(is_float_close(
+                x + increment,
+                mgr.add_float(floats[i], increment)
+            ));
+            assert!(is_float_close(x, mgr.substract_float(floats[i], increment)));
+        }
+    }
+
+    #[test]
+    fn bool_manager_return_values() {
+        let mut mgr = TrailedStateManager::new();
+        let bools: Vec<ReversibleBool> = (0..10).map(|i| mgr.manage_boolean(i % 2 == 0)).collect();
+        for i in 0..10 {
+            assert_eq!(ReversibleBool(ReversibleInt(i)), bools[i]);
+            let x = i % 3 == 0;
+            assert_eq!(x, mgr.set_bool(bools[i], i % 3 == 0));
+            assert_eq!(!x, mgr.flip_bool(bools[i]));
+        }
+    }
+
     #[test]
     fn set_and_restore_works() {
         let mut mgr = TrailedStateManager::new();
