@@ -36,8 +36,8 @@
 //! edge identified by e2.
 //!
 //! # Note:
-//!     Once the graph is constructed, no edge/node should be removed from it. Thus this
-//!     implementation does not have problems like dangling indexes.
+//! Once the graph is constructed, no edge/node should be removed from it. Thus this
+//! implementation does not have problems like dangling indexes.
 
 use super::trail::*;
 
@@ -91,8 +91,8 @@ pub struct Clause {
 /// unassgined. If `domain_size = 1` then the value is assigned to the value in the `value` field.
 ///
 /// # Note:
-///     This might not be the best design, but it seems that a full handling of domain etc (like in
-///     a cp solver) is a bit overkill since at the moment we only need BoolVar.
+/// This might not be the best design, but it seems that a full handling of domain etc (like in
+/// a cp solver) is a bit overkill since at the moment we only need BoolVar.
 #[derive(Debug, Copy, Clone)]
 pub struct NodeData {
     /// The value assigned to the node. Should only be read when `domain_size = 1`

@@ -18,23 +18,23 @@
 //! PPIDIMACS for "Positive Probabilistic Implications DIMACS".
 //! An example of valid file is given next
 //!
-//!     c This line is a comment
-//!     c We define a problem in cfn form with 7 variables, 3 clauses and 2 probabilistic variables
-//!     p cfn 7 3
-//!     c This define the probabilistic variables as well as their weights
-//!     c A line starting with d means that we define a distribution.
-//!     c The line of a distribution must sum up to 1
-//!     c A distribution is a succession of pair variable-weight
-//!     c The indexe of the distribution are consecutive, the following distribution has two nodes
-//!     c indexed 0 and 1
-//!     d 0.3 0.7
-//!     c Nodes with index 2 and 3
-//!     d 0.4 0.6
-//!     c This define the clauses as in the DIMACS-cfn format
-//!     c This clause is 0 and 5 => 4
-//!     4 -0 -5
-//!     5 -1 -2
-//!     6 -3 -4
+//! c This line is a comment
+//! c We define a problem in cfn form with 7 variables, 3 clauses and 2 probabilistic variables
+//! p cfn 7 3
+//! c This define the probabilistic variables as well as their weights
+//! c A line starting with d means that we define a distribution.
+//! c The line of a distribution must sum up to 1
+//! c A distribution is a succession of pair variable-weight
+//! c The indexe of the distribution are consecutive, the following distribution has two nodes
+//! c indexed 0 and 1
+//! d 0.3 0.7
+//! c Nodes with index 2 and 3
+//! d 0.4 0.6
+//! c This define the clauses as in the DIMACS-cfn format
+//! c This clause is 0 and 5 => 4
+//! 4 -0 -5
+//! 5 -1 -2
+//! 6 -3 -4
 //!     
 //! The following restrictions are imposed on the clauses
 //!     1. All clauses must be implications with positive literals. This means that in CFN the
@@ -127,4 +127,30 @@ pub fn graph_from_ppidimacs<S: StateManager>(filepath: &PathBuf, state: &mut S) 
     }
     g.propagate(state);
     g
+}
+
+#[cfg(test)]
+mod test_ppidimacs_parsing {
+
+    use super::graph_from_ppidimacs;
+    use crate::core::graph::NodeIndex;
+    use crate::core::trail::TrailedStateManager;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_file() {
+        let mut file = PathBuf::new();
+        let mut state = TrailedStateManager::new();
+        file.push("test.ppidimacs");
+        let g = graph_from_ppidimacs(&file, &mut state);
+        // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
+        assert_eq!(17, g.number_nodes());
+        assert_eq!(5, g.number_distributions());
+
+        let nodes: Vec<NodeIndex> = g.nodes_iter().collect();
+        let distributions_weights = vec![0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.1, 0.9, 0.5, 0.5];
+        for i in 0..10 {
+            assert!(g.is_node_probabilistic(nodes[i]));
+        }
+    }
 }

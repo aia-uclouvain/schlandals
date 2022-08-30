@@ -1,0 +1,35 @@
+c Simple bayesian network with three variables A B C with each 2 values
+c B is dependent on A and C is depedent on B (this is a chain)
+c Some probabilities
+c P(B=1) = 0.56
+p cfn 16 11
+c --- Start of the distributions ---
+c a0  a1
+d 0.2 0.8
+c a0b0 a0b1
+d 0.3 0.7
+c a1b0 a1b1
+d 0.4 0.6
+c b0c0 b0c1
+d 0.1 0.9
+c b1c0 b1c1
+d 0.5 0.5
+c --- End of the distributions ---
+c --- Distributions indexes run from 0 to 9 (included), deterministic variables from 10 to 15 (included)
+c --- va0 = 10, va1 = 11, vb0 = 12, vb1 = 13, vc1 = 14, vc2 = 15
+c --- Clauses ---
+c Clauses for cpt P(A)
+10 -0
+11 -1
+c Clauses for cpt P(B | A)
+12 -10 -2
+12 -11 -4
+13 -10 -3
+13 -11 -5
+c Clauses for cpt P(C | B)
+14 -12 -6
+14 -13 -8
+15 -12 -7
+15 -13 -9
+c Clauses for vb1 = F
+-13
