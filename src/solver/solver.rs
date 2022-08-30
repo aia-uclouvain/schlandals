@@ -57,9 +57,12 @@ where
         let should_compute = !self.cache.contains_key(&hash);
         if should_compute {
             let count = self.solve_component(component);
-            self.cache.insert(hash, count);
+            self.cache
+                .insert(hash, count - self.graph.get_objective(&self.state));
+            count
+        } else {
+            *self.cache.get(&hash).unwrap() + self.graph.get_objective(&self.state)
         }
-        *self.cache.get(&hash).unwrap()
     }
 
     /// Computes the projected weighted model count of the component
@@ -110,9 +113,13 @@ where
 
     pub fn solve(&mut self) -> f64 {
         let mut obj: f64 = f64::NEG_INFINITY;
-        for component in self.component_extractor.components_iter(&self.state) {
-            let o = self.get_cached_component_or_compute(component);
-            obj = (2_f64.powf(obj) + 2_f64.powf(o)).log2();
+        if self.component_extractor.number_components(&self.state) == 0 {
+            obj = self.graph.get_objective(&self.state);
+        } else {
+            for component in self.component_extractor.components_iter(&self.state) {
+                let o = self.get_cached_component_or_compute(component);
+                obj = (2_f64.powf(obj) + 2_f64.powf(o)).log2();
+            }
         }
         obj
     }
