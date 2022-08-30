@@ -141,14 +141,13 @@ mod test_ppidimacs_parsing {
     fn test_file() {
         let mut file = PathBuf::new();
         let mut state = TrailedStateManager::new();
-        file.push("test.ppidimacs");
+        file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
         let g = graph_from_ppidimacs(&file, &mut state);
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
         assert_eq!(17, g.number_nodes());
         assert_eq!(5, g.number_distributions());
 
         let nodes: Vec<NodeIndex> = g.nodes_iter().collect();
-        let distributions_weights = vec![0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.1, 0.9, 0.5, 0.5];
         for i in 0..10 {
             assert!(g.is_node_probabilistic(nodes[i]));
         }
