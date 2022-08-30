@@ -105,31 +105,6 @@ impl SimplePropagator for Graph {
             return;
         }
         self.set_node(node, value, state);
-        if self.is_node_probabilistic(node) {
-            if value {
-                // If this is a node in a distribution which is set to true then, by definition, all other
-                // node in the distribution must be false
-                for n in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                    self.propagate_node(n, false, state);
-                }
-            } else {
-                // If this node is set to false, then check if there are only one remaining node in
-                // the distribution. If that is the case (and the distribution is not
-                // unconstrained), then set all the last node to true
-                let distribution = self.get_distribution(node).unwrap();
-                if self.get_distribution_size(distribution) as isize
-                    - self.get_distribution_false_nodes(distribution, state)
-                    == 1
-                {
-                    for n in self.nodes_distribution_iter(node) {
-                        if !self.is_node_bound(n, state) {
-                            self.propagate_node(n, true, state);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
         let clauses = self.node_clauses(node).collect::<Vec<ClauseIndex>>();
         for clause in clauses {
             let head = self.get_clause_head(clause);
@@ -240,6 +215,31 @@ impl SimplePropagator for Graph {
                             if !self.is_node_bound(src, state) {
                                 self.propagate_node(src, false, state);
                             }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if self.is_node_probabilistic(node) {
+            if value {
+                // If this is a node in a distribution which is set to true then, by definition, all other
+                // node in the distribution must be false
+                for n in self.nodes_distribution_iter(node).filter(|x| *x != node) {
+                    self.propagate_node(n, false, state);
+                }
+            } else {
+                // If this node is set to false, then check if there are only one remaining node in
+                // the distribution. If that is the case (and the distribution is not
+                // unconstrained), then set all the last node to true
+                let distribution = self.get_distribution(node).unwrap();
+                if self.get_distribution_size(distribution) as isize
+                    - self.get_distribution_false_nodes(distribution, state)
+                    == 1
+                {
+                    for n in self.nodes_distribution_iter(node) {
+                        if !self.is_node_bound(n, state) {
+                            self.propagate_node(n, true, state);
                             break;
                         }
                     }
