@@ -83,22 +83,31 @@ where
                     continue;
                 }
                 self.state.save_state();
-                self.graph.propagate_node(node, true, &mut self.state);
-                self.component_extractor
-                    .detect_components(&self.graph, &mut self.state, component);
-                if self.component_extractor.number_components(&self.state) == 0 {
-                    // If there are no component in the graph, then the objective of the branch is
-                    // the graph objective.
-                    branch_obj = (2_f64.powf(branch_obj)
-                        + 2_f64.powf(self.graph.get_objective(&self.state)))
-                    .log2();
-                } else {
-                    // Otherwise visit recursively each sub-component and add their objective
-                    // to the branch objective
-                    for sub_component in self.component_extractor.components_iter(&self.state) {
-                        let sub_component_obj = self.get_cached_component_or_compute(sub_component);
-                        branch_obj =
-                            (2_f64.powf(branch_obj) + 2_f64.powf(sub_component_obj)).log2();
+                if self
+                    .graph
+                    .propagate_node(node, true, &mut self.state)
+                    .is_ok()
+                {
+                    self.component_extractor.detect_components(
+                        &self.graph,
+                        &mut self.state,
+                        component,
+                    );
+                    if self.component_extractor.number_components(&self.state) == 0 {
+                        // If there are no component in the graph, then the objective of the branch is
+                        // the graph objective.
+                        branch_obj = (2_f64.powf(branch_obj)
+                            + 2_f64.powf(self.graph.get_objective(&self.state)))
+                        .log2();
+                    } else {
+                        // Otherwise visit recursively each sub-component and add their objective
+                        // to the branch objective
+                        for sub_component in self.component_extractor.components_iter(&self.state) {
+                            let sub_component_obj =
+                                self.get_cached_component_or_compute(sub_component);
+                            branch_obj =
+                                (2_f64.powf(branch_obj) + 2_f64.powf(sub_component_obj)).log2();
+                        }
                     }
                 }
                 self.state.restore_state();
@@ -117,6 +126,14 @@ where
             obj = self.graph.get_objective(&self.state);
         } else {
             for component in self.component_extractor.components_iter(&self.state) {
+                println!(
+                    "Solving component with nodes {:?}",
+                    self.component_extractor
+                        .get_component(component)
+                        .iter()
+                        .map(|n| n.0)
+                        .collect::<Vec<usize>>()
+                );
                 let o = self.get_cached_component_or_compute(component);
                 obj = (2_f64.powf(obj) + 2_f64.powf(o)).log2();
             }

@@ -17,6 +17,11 @@
 use crate::core::graph::{ClauseIndex, Graph, NodeIndex};
 use crate::core::trail::StateManager;
 
+#[derive(Debug)]
+pub struct Unsat;
+
+pub type PropagationResult<T> = Result<T, Unsat>;
+
 /// This is a simple propagator that makes very basic local assumption and propagate them to the
 /// graph in a DFS manner.
 /// The following rules are enforced
@@ -31,7 +36,7 @@ use crate::core::trail::StateManager;
 pub trait SimplePropagator {
     /// This is the global propagation algorithm. This run on the whole graph and when the value of
     /// a node can be infered, it launches `propagate_node`.
-    fn propagate<S: StateManager>(&mut self, state: &mut S);
+    fn propagate<S: StateManager>(&mut self, state: &mut S) -> PropagationResult<()>;
     /// Implements de propagator logics when `node` is set to `value`. This breaks down as follows
     ///
     /// case 1: `value = true`:
@@ -60,191 +65,223 @@ pub trait SimplePropagator {
     ///        all other literals in the body are set to true. In order to be a model, the last one
     ///        must be false
     ///         
-    fn propagate_node<S: StateManager>(&mut self, node: NodeIndex, value: bool, state: &mut S);
+    fn propagate_node<S: StateManager>(
+        &mut self,
+        node: NodeIndex,
+        value: bool,
+        state: &mut S,
+    ) -> PropagationResult<()>;
 }
 
 impl SimplePropagator for Graph {
-    fn propagate<S: StateManager>(&mut self, state: &mut S) {
+    fn propagate<S: StateManager>(&mut self, state: &mut S) -> PropagationResult<()> {
         for node in self.nodes_iter() {
             if !self.is_node_bound(node, state) {
                 if self.is_node_deterministic(node) && self.node_number_incoming(node, state) == 0 {
-                    self.propagate_node(node, false, state);
+                    if self.propagate_node(node, false, state).is_err() {
+                        return PropagationResult::Err(Unsat);
+                    }
                 } else if self.is_node_deterministic(node)
                     && self.node_number_outgoing(node, state) == 0
                 {
-                    self.propagate_node(node, true, state);
+                    if self.propagate_node(node, true, state).is_err() {
+                        return PropagationResult::Err(Unsat);
+                    }
                 }
                 if self.is_node_probabilistic(node) {
                     let distribution = self.get_distribution(node).unwrap();
                     if self.get_distribution_number_active_edges(distribution, state) == 0 {
                         for n in self.distribution_iter(distribution) {
-                            if !self.is_node_bound(n, state) {
-                                self.set_node(n, false, state);
+                            if self.propagate_node(n, false, state).is_err() {
+                                return PropagationResult::Err(Unsat);
                             }
                         }
                     }
                 }
             }
         }
+        PropagationResult::Ok(())
     }
 
-    fn propagate_node<S: StateManager>(&mut self, node: NodeIndex, value: bool, state: &mut S) {
+    fn propagate_node<S: StateManager>(
+        &mut self,
+        node: NodeIndex,
+        value: bool,
+        state: &mut S,
+    ) -> PropagationResult<()> {
         // If the node is already bound, check that it must not be set to another value, otherwise
         // an error needs to be thrown. For now the code panic, but it might change afterwads. The
         // reason for the panic is that normally the propagation rules are consistent and we should
         // never want to put a node in two different states (true/false)
         if self.is_node_bound(node, state) {
-            if !value == self.get_node_value(node) {
-                panic!(
-                    "Trying to set node {:?} to {} but it's already in state {}",
-                    node,
-                    value,
-                    self.get_node_value(node)
-                );
-            }
-            return;
-        }
-        self.set_node(node, value, state);
-        let clauses = self.node_clauses(node).collect::<Vec<ClauseIndex>>();
-        for clause in clauses {
-            let head = self.get_clause_head(clause);
-
-            // First cases, the clause can be deactivated. This happens when the head of a clause
-            // is true, or one of the literals in the body is false
-            if (value && head == node) || (!value && head != node) {
-                for edge in self.edges_clause(clause) {
-                    self.deactivate_edge(edge, state);
-                    let src = self.get_edge_source(edge);
-                    let dst = self.get_edge_destination(edge);
-
-                    // If the source of the edge is not bound, check if we can determine a value
-                    // for it
-                    if !self.is_node_bound(src, state) {
-                        // The source is a deterministic node that only appears as head of clauses
-                        // (no outgoing edges). Thus we can set it to true without impacting the
-                        // model count
-                        if self.is_node_deterministic(src)
-                            && self.node_number_outgoing(src, state) == 0
-                        {
-                            self.propagate_node(src, true, state);
-                        }
-                        // The source is a probabilistic node with no outgoing/incoming edges. Then
-                        // we can check if there are still active edges in the distribution. If
-                        // not, then the distribution does not impact the model count anymore and
-                        // every of its unset nodes can be set to false
-                        if self.is_node_probabilistic(src)
-                            && self.node_number_outgoing(src, state) == 0
-                            && self.node_number_incoming(src, state) == 0
-                        {
-                            let distribution = self.get_distribution(src).unwrap();
-                            if self.get_distribution_number_active_edges(distribution, state) == 0 {
-                                for node in self.nodes_distribution_iter(src) {
-                                    if !self.is_node_bound(node, state) {
-                                        self.set_node(node, false, state);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Same as above, but for the dst node
-                    if !self.is_node_bound(dst, state) {
-                        if self.is_node_deterministic(dst)
-                            && self.node_number_incoming(dst, state) == 0
-                        {
-                            self.propagate_node(dst, false, state);
-                        }
-                        if self.is_node_probabilistic(dst)
-                            && self.node_number_outgoing(dst, state) == 0
-                            && self.node_number_incoming(dst, state) == 0
-                        {
-                            let distribution = self.get_distribution(dst).unwrap();
-                            if self.get_distribution_number_active_edges(distribution, state) == 0 {
-                                for node in self.nodes_distribution_iter(dst) {
-                                    if !self.is_node_bound(node, state) {
-                                        self.set_node(node, false, state);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if value {
-                // The node is assigned to true, but is not the head of the clause. In this case,
-                // the edge node->h is deactivated. Unfortunately for now we have to go through the
-                // list of all edges in the clause to find the edge to deactivate.
-                for edge in self.edges_clause(clause) {
-                    let src = self.get_edge_source(edge);
-                    if src == node {
-                        self.deactivate_edge(edge, state);
-                        // If the clause has no more active edges but the head is unbound it means
-                        // that all literals in the body are set to true. Then the head must be
-                        // true.
-                        if self.clause_number_active_edges(clause, state) == 0
-                            && !self.is_node_bound(head, state)
-                        {
-                            self.propagate_node(head, true, state);
-                        }
-                        // If there are still 1 active edge in the clause and the head is set to
-                        // false, then the last literals in the body must be set to false (only way
-                        // to have a model)
-                        if self.clause_number_active_edges(clause, state) == 1
-                            && self.is_node_bound(head, state)
-                            && !self.get_node_value(head)
-                        {
-                            // Again, we go through the list of edges, still ugly.
-                            for edge in self.edges_clause(clause) {
-                                if self.is_edge_active(edge, state) {
-                                    let s = self.get_edge_source(edge);
-                                    self.propagate_node(s, false, state);
-                                    break;
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-            } else if !value {
-                // The node is assigned to false, but is the head of the clause. Thus the body
-                // needs to evaluate to false. There is nothing to do expect if there are only one
-                // literal left unassigned in the implicant
-                if self.clause_number_active_edges(clause, state) == 1 {
-                    for edge in self.edges_clause(clause) {
-                        if self.is_edge_active(edge, state) {
-                            let src = self.get_edge_source(edge);
-                            // This must be the last active edge
-                            if !self.is_node_bound(src, state) {
-                                self.propagate_node(src, false, state);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if self.is_node_probabilistic(node) {
-            if value {
-                // If this is a node in a distribution which is set to true then, by definition, all other
-                // node in the distribution must be false
-                for n in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                    self.propagate_node(n, false, state);
-                }
+            if self.get_node_value(node) != value {
+                PropagationResult::Err(Unsat)
             } else {
-                // If this node is set to false, then check if there are only one remaining node in
-                // the distribution. If that is the case (and the distribution is not
-                // unconstrained), then set all the last node to true
-                let distribution = self.get_distribution(node).unwrap();
-                if self.get_distribution_size(distribution) as isize
-                    - self.get_distribution_false_nodes(distribution, state)
-                    == 1
-                {
-                    for n in self.nodes_distribution_iter(node) {
-                        if !self.is_node_bound(n, state) {
-                            self.propagate_node(n, true, state);
+                PropagationResult::Ok(())
+            }
+        } else {
+            self.set_node(node, value, state);
+            let clauses = self.node_clauses(node).collect::<Vec<ClauseIndex>>();
+
+            for clause in clauses {
+                let head = self.get_clause_head(clause);
+
+                // First cases, the clause can be deactivated. This happens when the head of a clause
+                // is true, or one of the literals in the body is false
+                if (value && head == node) || (!value && head != node) {
+                    for edge in self.edges_clause(clause) {
+                        self.deactivate_edge(edge, state);
+                        let src = self.get_edge_source(edge);
+                        let dst = self.get_edge_destination(edge);
+
+                        // If the source of the edge is not bound, check if we can determine a value
+                        // for it
+                        if !self.is_node_bound(src, state) {
+                            // The source is a deterministic node that only appears as head of clauses
+                            // (no outgoing edges). Thus we can set it to true without impacting the
+                            // model count
+                            if self.is_node_deterministic(src)
+                                && self.node_number_outgoing(src, state) == 0
+                            {
+                                if self.propagate_node(src, true, state).is_err() {
+                                    return PropagationResult::Err(Unsat);
+                                }
+                            }
+                            // The source is a probabilistic node with no outgoing/incoming edges. Then
+                            // we can check if there are still active edges in the distribution. If
+                            // not, then the distribution does not impact the model count anymore and
+                            // every of its unset nodes can be set to false
+                            if self.is_node_probabilistic(src)
+                                && self.node_number_outgoing(src, state) == 0
+                                && self.node_number_incoming(src, state) == 0
+                            {
+                                let distribution = self.get_distribution(src).unwrap();
+                                if self.get_distribution_number_active_edges(distribution, state)
+                                    == 0
+                                {
+                                    for node in self.nodes_distribution_iter(src) {
+                                        if !self.is_node_bound(node, state) {
+                                            self.set_node(node, false, state);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Same as above, but for the dst node
+                        if !self.is_node_bound(dst, state) {
+                            if self.is_node_deterministic(dst)
+                                && self.node_number_incoming(dst, state) == 0
+                            {
+                                if self.propagate_node(dst, false, state).is_err() {
+                                    return PropagationResult::Err(Unsat);
+                                }
+                            }
+                            if self.is_node_probabilistic(dst)
+                                && self.node_number_outgoing(dst, state) == 0
+                                && self.node_number_incoming(dst, state) == 0
+                            {
+                                let distribution = self.get_distribution(dst).unwrap();
+                                if self.get_distribution_number_active_edges(distribution, state)
+                                    == 0
+                                {
+                                    for node in self.nodes_distribution_iter(dst) {
+                                        if !self.is_node_bound(node, state) {
+                                            self.set_node(node, false, state);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if value {
+                    // The node is assigned to true, but is not the head of the clause. In this case,
+                    // the edge node->h is deactivated. Unfortunately for now we have to go through the
+                    // list of all edges in the clause to find the edge to deactivate.
+                    for edge in self.edges_clause(clause) {
+                        let src = self.get_edge_source(edge);
+                        if src == node {
+                            self.deactivate_edge(edge, state);
+                            // If the clause has no more active edges but the head is unbound it means
+                            // that all literals in the body are set to true. Then the head must be
+                            // true.
+                            if self.clause_number_active_edges(clause, state) == 0
+                                && !self.is_node_bound(head, state)
+                            {
+                                if self.propagate_node(head, true, state).is_err() {
+                                    return PropagationResult::Err(Unsat);
+                                }
+                            }
+                            // If there are still 1 active edge in the clause and the head is set to
+                            // false, then the last literals in the body must be set to false (only way
+                            // to have a model)
+                            if self.clause_number_active_edges(clause, state) == 1
+                                && self.is_node_bound(head, state)
+                                && !self.get_node_value(head)
+                            {
+                                // Again, we go through the list of edges, still ugly.
+                                for edge in self.edges_clause(clause) {
+                                    if self.is_edge_active(edge, state) {
+                                        let s = self.get_edge_source(edge);
+                                        if self.propagate_node(s, false, state).is_err() {
+                                            return PropagationResult::Err(Unsat);
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
                             break;
+                        }
+                    }
+                } else if !value {
+                    // The node is assigned to false, but is the head of the clause. Thus the body
+                    // needs to evaluate to false. There is nothing to do expect if there are only one
+                    // literal left unassigned in the implicant
+                    if self.clause_number_active_edges(clause, state) == 1 {
+                        for edge in self.edges_clause(clause) {
+                            if self.is_edge_active(edge, state) {
+                                let src = self.get_edge_source(edge);
+                                // This must be the last active edge
+                                if !self.is_node_bound(src, state) {
+                                    if self.propagate_node(src, false, state).is_err() {
+                                        return PropagationResult::Err(Unsat);
+                                    }
+                                }
+                                break;
+                            }
                         }
                     }
                 }
             }
+            if self.is_node_probabilistic(node) {
+                if value {
+                    // If this is a node in a distribution which is set to true then, by definition, all other
+                    // node in the distribution must be false
+                    for n in self.nodes_distribution_iter(node).filter(|x| *x != node) {
+                        if self.propagate_node(n, false, state).is_err() {
+                            return PropagationResult::Err(Unsat);
+                        }
+                    }
+                } else {
+                    // If this node is set to false, then check if there are only one remaining node in
+                    // the distribution. If that is the case (and the distribution is not
+                    // unconstrained), then set all the last node to true
+                    let distribution = self.get_distribution(node).unwrap();
+                    if self.get_distribution_size(distribution) as isize
+                        - self.get_distribution_false_nodes(distribution, state)
+                        == 1
+                    {
+                        for n in self.nodes_distribution_iter(node) {
+                            if !self.is_node_bound(n, state) {
+                                if self.propagate_node(n, true, state).is_err() {
+                                    return PropagationResult::Err(Unsat);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            PropagationResult::Ok(())
         }
     }
 }
@@ -280,7 +317,7 @@ mod test_simple_propagator_propagation {
         // p[2] -> p[3]
         g.add_clause(p[3], &vec![p[2]], &mut state);
 
-        g.propagate(&mut state);
+        g.propagate(&mut state).unwrap();
         assert!(g.is_node_bound(d[0], &state));
         assert!(g.is_node_bound(d[1], &state));
         assert!(g.is_node_bound(d[2], &state));
@@ -314,7 +351,7 @@ mod test_simple_propagator_propagation {
         g.add_clause(d[5], &vec![p[1]], &mut state);
         g.add_clause(p[2], &vec![d[5]], &mut state);
 
-        g.propagate(&mut state);
+        g.propagate(&mut state).unwrap();
 
         assert!(g.is_node_bound(d[0], &state));
         assert!(g.is_node_bound(d[1], &state));
@@ -359,7 +396,7 @@ mod test_simple_propagator_node_propagation {
 
         state.save_state();
 
-        g.propagate_node(p1[0], true, &mut state);
+        g.propagate_node(p1[0], true, &mut state).unwrap();
 
         assert!(g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
@@ -371,7 +408,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p1[0], false, &mut state);
+        g.propagate_node(p1[0], false, &mut state).unwrap();
         assert!(g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
         assert!(!g.is_node_bound(p2[0], &state));
@@ -381,7 +418,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p2[0], true, &mut state);
+        g.propagate_node(p2[0], true, &mut state).unwrap();
         assert!(g.is_node_bound(d, &state));
         assert!(!g.is_node_bound(p1[0], &state));
         assert!(g.is_node_bound(p2[0], &state));
@@ -391,7 +428,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p2[0], false, &mut state);
+        g.propagate_node(p2[0], false, &mut state).unwrap();
         assert!(g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
         assert!(g.is_node_bound(p2[0], &state));
@@ -430,7 +467,7 @@ mod test_simple_propagator_node_propagation {
 
         state.save_state();
 
-        g.propagate_node(p1[0], true, &mut state);
+        g.propagate_node(p1[0], true, &mut state).unwrap();
         assert!(g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
         assert!(!g.is_node_bound(p2[0], &state));
@@ -444,7 +481,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p1[0], false, &mut state);
+        g.propagate_node(p1[0], false, &mut state).unwrap();
         assert!(!g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
         assert!(!g.is_node_bound(p2[0], &state));
@@ -455,7 +492,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p3[0], true, &mut state);
+        g.propagate_node(p3[0], true, &mut state).unwrap();
         assert!(!g.is_node_bound(d, &state));
         assert!(!g.is_node_bound(p1[0], &state));
         assert!(!g.is_node_bound(p2[0], &state));
@@ -466,7 +503,7 @@ mod test_simple_propagator_node_propagation {
         state.restore_state();
         state.save_state();
 
-        g.propagate_node(p3[0], false, &mut state);
+        g.propagate_node(p3[0], false, &mut state).unwrap();
         assert!(g.is_node_bound(d, &state));
         assert!(g.is_node_bound(p1[0], &state));
         assert!(g.is_node_bound(p2[0], &state));
@@ -484,7 +521,7 @@ mod test_simple_propagator_node_propagation {
         let mut g = Graph::new(&mut state);
         let nodes = g.add_distribution(&vec![0.1, 0.2, 0.7], &mut state);
 
-        g.propagate_node(nodes[0], true, &mut state);
+        g.propagate_node(nodes[0], true, &mut state).unwrap();
         assert!(g.is_node_bound(nodes[0], &state));
         assert!(g.is_node_bound(nodes[1], &state));
         assert!(g.is_node_bound(nodes[2], &state));
@@ -501,13 +538,13 @@ mod test_simple_propagator_node_propagation {
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
         g.add_clause(nodes[0], &nodes[1..], &mut state);
-        g.propagate_node(NodeIndex(0), false, &mut state);
+        g.propagate_node(NodeIndex(0), false, &mut state).unwrap();
         assert!(g.is_node_bound(NodeIndex(0), &state));
         assert_eq!(false, g.get_node_value(NodeIndex(0)));
         assert!(!g.is_node_bound(NodeIndex(1), &state));
         assert!(!g.is_node_bound(NodeIndex(2), &state));
 
-        g.propagate_node(NodeIndex(1), true, &mut state);
+        g.propagate_node(NodeIndex(1), true, &mut state).unwrap();
         assert!(g.is_node_bound(NodeIndex(0), &state));
         assert_eq!(false, g.get_node_value(NodeIndex(0)));
         assert!(g.is_node_bound(NodeIndex(1), &state));
