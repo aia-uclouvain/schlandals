@@ -39,13 +39,13 @@ fn main() {
     let mut state = TrailedStateManager::new();
     match graph_from_ppidimacs(&args.input, &mut state) {
         Err(_) => println!("Initial model Unsat"),
-        Ok(graph) => {
+        Ok((graph, v)) => {
             let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
             let branching_heuristic = FirstBranching::default();
             let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, FirstBranching> =
                 Solver::new(graph, state, component_extractor, branching_heuristic);
             println!("Input file {:?}", args.input);
-            let value = solver.solve();
+            let value = solver.solve(v);
             println!("Solution is {} (prob {})", value, 2_f64.powf(value));
         }
     };

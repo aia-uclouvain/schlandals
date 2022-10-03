@@ -152,12 +152,8 @@ impl DFSComponentExtractor {
         state: &mut S,
     ) {
         let node_pos = self.positions[node.0];
-        // If the node is bound, it is not part of any component so we can return. The other
-        // condition states that if the position of the node is between the start of the component
-        // being build, and the last node that was added in the component, then it has already
-        // been processed.
-        if !(g.is_node_bound(node, state)
-            || comp_start <= node_pos && node_pos < (comp_start + *comp_size))
+        if !g.is_node_bound(node, state)
+            && !(comp_start <= node_pos && node_pos < (comp_start + *comp_size))
         {
             // The node is swap with the node at position comp_sart + comp_size
             let current_pos = self.positions[node.0];
@@ -190,10 +186,10 @@ impl DFSComponentExtractor {
                 for edge in g.edges_clause(clause) {
                     let src = g.get_edge_source(edge);
                     let dst = g.get_edge_destination(edge);
-                    if src != node && !g.is_node_bound(src, state) {
+                    if src != node {
                         self.explore_component(g, src, comp_start, comp_size, state);
                     }
-                    if dst != node && !g.is_node_bound(dst, state) {
+                    if dst != node {
                         self.explore_component(g, dst, comp_start, comp_size, state);
                     }
                 }
@@ -291,7 +287,7 @@ mod test_dfs_component {
     #[test]
     fn test_initialiaztion_extractor() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -310,7 +306,7 @@ mod test_dfs_component {
     #[test]
     fn test_initialization_extractor_distribution() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -331,7 +327,7 @@ mod test_dfs_component {
     #[test]
     fn test_initialization_single_component() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -356,7 +352,7 @@ mod test_dfs_component {
     #[test]
     fn test_initialization_multiple_components() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -396,7 +392,7 @@ mod test_dfs_component {
     #[test]
     fn test_breaking_components() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -422,7 +418,7 @@ mod test_dfs_component {
     #[test]
     fn test_breaking_component_but_backtrack() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -457,7 +453,7 @@ mod test_dfs_component {
     #[test]
     fn test_hash() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -502,7 +498,7 @@ mod test_dfs_component {
     #[test]
     fn distributions_in_components() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n = (0..2)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();

@@ -169,27 +169,18 @@ pub struct Graph {
     edges: Vec<EdgeData>,
     /// Vector containing the clauses of the graph
     clauses: Vec<Clause>,
-    /// Objective of the graph. This is the sum of all probabilistic nodes set to true
-    pub obj: ReversibleFloat,
     /// Vector containing the distributions of the graph
     distributions: Vec<Distribution>,
 }
 
 impl Graph {
-    pub fn new<S: StateManager>(state: &mut S) -> Self {
-        let obj = state.manage_float(0.0);
+    pub fn new() -> Self {
         Self {
             nodes: vec![],
             edges: vec![],
             clauses: vec![],
-            obj,
             distributions: vec![],
         }
-    }
-
-    /// Returns the current objective with the assignment of the nodes in the graph
-    pub fn get_objective<S: StateManager>(&self, state: &S) -> f64 {
-        state.get_float(self.obj)
     }
 
     /// Returns the number of node in the graph
@@ -374,9 +365,7 @@ impl Graph {
         if n.probabilistic {
             // If the node is set to true, then its weight is added to the objective. If not, then
             // the counter of node set to false for the distribution of `node` is incremented
-            if value {
-                state.add_float(self.obj, n.weight.unwrap());
-            } else {
+            if !value {
                 let distribution = self.get_distribution(node).unwrap();
                 state.increment(self.distributions[distribution.0].nodes_false);
             }
@@ -394,6 +383,11 @@ impl Graph {
     /// Gets the value assigned to a node
     pub fn get_node_value(&self, node: NodeIndex) -> bool {
         self.nodes[node.0].value
+    }
+
+    /// Returns the weight of the node
+    pub fn get_node_weight(&self, node: NodeIndex) -> Option<f64> {
+        self.nodes[node.0].weight
     }
 
     /// Returns true if the node is deterministic and false otherwise
@@ -533,6 +527,26 @@ impl Graph {
     /// Returns the head of the clause
     pub fn get_clause_head(&self, clause: ClauseIndex) -> NodeIndex {
         self.clauses[clause.0].head
+    }
+
+    pub fn get_first_active_edge<S: StateManager>(
+        &self,
+        clause: ClauseIndex,
+        state: &S,
+    ) -> Option<EdgeIndex> {
+        self.edges_clause(clause)
+            .filter(|edge| self.is_edge_active(*edge, state))
+            .next()
+    }
+
+    pub fn get_edge_with_implicant(
+        &self,
+        clause: ClauseIndex,
+        implicant: NodeIndex,
+    ) -> Option<EdgeIndex> {
+        self.edges_clause(clause)
+            .filter(|edge| self.get_edge_source(*edge) == implicant)
+            .next()
     }
 }
 
@@ -739,8 +753,7 @@ mod test_graph {
 
     #[test]
     fn new_create_empty_graph() {
-        let mut state = TrailedStateManager::new();
-        let g = Graph::new(&mut state);
+        let g = Graph::new();
         assert_eq!(0, g.nodes.len());
         assert_eq!(0, g.edges.len());
     }
@@ -748,7 +761,7 @@ mod test_graph {
     #[test]
     fn add_nodes_increment_index() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         for i in 0..10 {
             let idx = g.add_node(false, None, None, &mut state);
             assert_eq!(NodeIndex(i), idx);
@@ -758,7 +771,7 @@ mod test_graph {
     #[test]
     fn add_edges_increment_index() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         g.add_node(false, None, None, &mut state);
         g.add_node(false, None, None, &mut state);
         for i in 0..10 {
@@ -770,7 +783,7 @@ mod test_graph {
     #[test]
     fn add_multiple_incoming_edges_to_node() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
         let n3 = g.add_node(false, None, None, &mut state);
@@ -799,7 +812,7 @@ mod test_graph {
     #[test]
     fn add_multiple_outgoing_edges_to_nodes() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_distribution(&vec![0.2], &mut state)[0];
         let n3 = g.add_node(false, None, None, &mut state);
@@ -817,7 +830,7 @@ mod test_graph {
     #[test]
     fn setting_nodes_values() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         assert!(!g.is_node_bound(n1, &state));
 
@@ -832,38 +845,9 @@ mod test_graph {
     }
 
     #[test]
-    fn incremental_computation_of_objective() {
-        let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
-        assert_eq!(0.0, g.get_objective(&state));
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(true, Some(0.4), Some(DistributionIndex(0)), &mut state);
-        let n3 = g.add_node(true, Some(0.6), Some(DistributionIndex(0)), &mut state);
-        assert_eq!(0.0, g.get_objective(&state));
-
-        state.save_state();
-
-        g.set_node(n1, true, &mut state);
-        assert_eq!(0.0, g.get_objective(&state));
-
-        g.set_node(n2, true, &mut state);
-        assert_eq!(0.4, g.get_objective(&state));
-
-        state.restore_state();
-
-        assert_eq!(0.0, g.get_objective(&state));
-
-        state.save_state();
-
-        g.set_node(n2, true, &mut state);
-        g.set_node(n3, true, &mut state);
-        assert_eq!(1.0, g.get_objective(&state));
-    }
-
-    #[test]
     fn graph_add_distribution() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         assert_eq!(0, g.distributions.len());
         let weights = vec![0.2, 0.4, 0.1, 0.3];
         let nodes = g.add_distribution(&weights, &mut state);
@@ -882,7 +866,7 @@ mod test_graph {
     #[test]
     fn graph_add_multiple_distributions() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let w1 = vec![0.1, 0.3, 0.6];
         let w2 = vec![0.5, 0.4, 0.05, 0.05];
         let w3 = vec![0.9, 0.1];
@@ -925,7 +909,7 @@ mod test_graph {
     #[test]
     fn graph_add_edges_increases_edge_counts() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
         let n3 = g.add_node(false, None, None, &mut state);
@@ -1031,7 +1015,7 @@ mod test_graph {
     #[test]
     fn add_clause_correctly_add_edges() {
         let mut state = TrailedStateManager::new();
-        let mut g: Graph = Graph::new(&mut state);
+        let mut g: Graph = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
         let n3 = g.add_node(false, None, None, &mut state);
@@ -1067,7 +1051,7 @@ mod test_graph {
     #[test]
     fn clauses_are_correctly_collected() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
         let n3 = g.add_node(false, None, None, &mut state);
@@ -1117,7 +1101,7 @@ mod test_graph_iterators {
     #[test]
     fn nodes_iterator() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let nodes: Vec<NodeIndex> = (0..10)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect();
@@ -1128,7 +1112,7 @@ mod test_graph_iterators {
     #[test]
     fn distributions_iterator() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let distributions: Vec<Vec<NodeIndex>> = (0..5)
             .map(|_| g.add_distribution(&vec![0.3, 0.5, 0.2], &mut state))
             .collect();
@@ -1146,7 +1130,7 @@ mod test_graph_iterators {
     #[test]
     fn clause_iterator() {
         let mut state = TrailedStateManager::new();
-        let mut g = Graph::new(&mut state);
+        let mut g = Graph::new();
         let n: Vec<NodeIndex> = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect();

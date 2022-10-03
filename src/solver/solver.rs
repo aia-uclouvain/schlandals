@@ -54,14 +54,13 @@ where
     /// returns it immediately and if not compute it
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> f64 {
         let hash = self.component_extractor.get_component_hash(component);
-        let should_compute = !self.cache.contains_key(&hash);
+        let should_compute = !self.cache.contains_key(&hash) || true;
         if should_compute {
             let count = self.solve_component(component);
-            self.cache
-                .insert(hash, count - self.graph.get_objective(&self.state));
+            self.cache.insert(hash, count);
             count
         } else {
-            *self.cache.get(&hash).unwrap() + self.graph.get_objective(&self.state)
+            *self.cache.get(&hash).unwrap()
         }
     }
 
@@ -76,67 +75,48 @@ where
                 .collect::<Vec<DistributionIndex>>(),
         );
         if let Some(distribution) = decision {
+            let mut branch_objectives: Vec<f64> = vec![];
+            let mut max_objective = f64::NEG_INFINITY;
             // The branch objective starts at minus infinity because we use log-probabilities
-            let mut branch_obj = f64::NEG_INFINITY;
             for node in self.graph.distribution_iter(distribution) {
-                if self.graph.is_node_bound(node, &self.state) {
-                    continue;
-                }
                 self.state.save_state();
-                if self
-                    .graph
-                    .propagate_node(node, true, &mut self.state)
-                    .is_ok()
-                {
-                    self.component_extractor.detect_components(
-                        &self.graph,
-                        &mut self.state,
-                        component,
-                    );
-                    if self.component_extractor.number_components(&self.state) == 0 {
-                        // If there are no component in the graph, then the objective of the branch is
-                        // the graph objective.
-                        branch_obj = (2_f64.powf(branch_obj)
-                            + 2_f64.powf(self.graph.get_objective(&self.state)))
-                        .log2();
-                    } else {
-                        // Otherwise visit recursively each sub-component and add their objective
-                        // to the branch objective
+                match self.graph.propagate_node(node, true, &mut self.state) {
+                    Err(_) => {}
+                    Ok(v) => {
+                        self.component_extractor.detect_components(
+                            &self.graph,
+                            &mut self.state,
+                            component,
+                        );
+                        let mut o = v;
                         for sub_component in self.component_extractor.components_iter(&self.state) {
-                            let sub_component_obj =
-                                self.get_cached_component_or_compute(sub_component);
-                            branch_obj =
-                                (2_f64.powf(branch_obj) + 2_f64.powf(sub_component_obj)).log2();
+                            o += self.get_cached_component_or_compute(sub_component);
+                        }
+                        branch_objectives.push(o);
+                        if o > max_objective {
+                            max_objective = o;
                         }
                     }
-                }
+                };
                 self.state.restore_state();
             }
-            branch_obj
+            let r = max_objective
+                + branch_objectives
+                    .iter()
+                    .map(|o| 2_f64.powf(o - max_objective))
+                    .sum::<f64>()
+                    .log2();
+            r
         } else {
-            // If no more decision to make, then the objective of the graph is the probability of
-            // the branch
-            self.graph.get_objective(&self.state)
+            0.0
         }
     }
 
-    pub fn solve(&mut self) -> f64 {
-        let mut obj: f64 = f64::NEG_INFINITY;
-        if self.component_extractor.number_components(&self.state) == 0 {
-            obj = self.graph.get_objective(&self.state);
-        } else {
-            for component in self.component_extractor.components_iter(&self.state) {
-                println!(
-                    "Solving component with nodes {:?}",
-                    self.component_extractor
-                        .get_component(component)
-                        .iter()
-                        .map(|n| n.0)
-                        .collect::<Vec<usize>>()
-                );
-                let o = self.get_cached_component_or_compute(component);
-                obj = (2_f64.powf(obj) + 2_f64.powf(o)).log2();
-            }
+    pub fn solve(&mut self, current_proba: f64) -> f64 {
+        let mut obj = current_proba;
+        for component in self.component_extractor.components_iter(&self.state) {
+            let o = self.get_cached_component_or_compute(component);
+            obj += o;
         }
         obj
     }

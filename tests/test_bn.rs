@@ -59,10 +59,10 @@ fn test_abc_chain_c1() {
 fn solve_instance(filename: &'static str) -> f64 {
     let mut state = TrailedStateManager::new();
     let path = PathBuf::from(filename);
-    let graph = graph_from_ppidimacs(&path, &mut state).unwrap();
+    let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
     let branching_heuristic = FirstBranching::default();
     let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, FirstBranching> =
         Solver::new(graph, state, component_extractor, branching_heuristic);
-    solver.solve()
+    solver.solve(v)
 }

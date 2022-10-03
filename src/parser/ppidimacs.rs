@@ -44,7 +44,7 @@
 
 use crate::core::graph::{Graph, NodeIndex};
 use crate::core::trail::StateManager;
-use crate::solver::propagator::{PropagationResult, SimplePropagator, Unsat};
+use crate::solver::propagator::{PropagationResult, SimplePropagator};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -52,9 +52,9 @@ use std::path::PathBuf;
 pub fn graph_from_ppidimacs<S: StateManager>(
     filepath: &PathBuf,
     state: &mut S,
-) -> PropagationResult<Graph> {
+) -> PropagationResult<(Graph, f64)> {
     let mut node_to_propagate: Vec<(NodeIndex, bool)> = Vec::new();
-    let mut g = Graph::new(state);
+    let mut g = Graph::new();
     let file = File::open(filepath).unwrap();
     let reader = BufReader::new(file);
     let mut number_nodes: Option<usize> = None;
@@ -125,18 +125,14 @@ pub fn graph_from_ppidimacs<S: StateManager>(
         }
         line_count += 1;
     }
+    let mut v = 0.0;
     for (node, value) in node_to_propagate {
         if !g.is_node_bound(node, state) {
-            if g.propagate_node(node, value, state).is_err() {
-                return PropagationResult::Err(Unsat);
-            }
+            v += g.propagate_node(node, value, state)?;
         }
     }
-    if g.propagate(state).is_err() {
-        PropagationResult::Err(Unsat)
-    } else {
-        PropagationResult::Ok(g)
-    }
+    g.propagate(state)?;
+    PropagationResult::Ok((g, v))
 }
 
 #[cfg(test)]
@@ -152,7 +148,7 @@ mod test_ppidimacs_parsing {
         let mut file = PathBuf::new();
         let mut state = TrailedStateManager::new();
         file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
-        let g = graph_from_ppidimacs(&file, &mut state).unwrap();
+        let (g, _) = graph_from_ppidimacs(&file, &mut state).unwrap();
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
         assert_eq!(17, g.number_nodes());
         assert_eq!(5, g.number_distributions());
