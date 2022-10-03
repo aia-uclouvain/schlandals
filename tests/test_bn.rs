@@ -56,6 +56,55 @@ fn test_abc_chain_c1() {
         solve_instance("tests/instances/bayesian_networks/abc_chain_c1.ppidimacs")
     );
 }
+
+#[test]
+fn test_parents_2_a_true() {
+    assert_f64_near!(
+        0.2_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_p1_true.ppidimacs")
+    );
+}
+
+#[test]
+fn test_parents_2_a_false() {
+    assert_f64_near!(
+        0.8_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_p1_false.ppidimacs")
+    );
+}
+
+#[test]
+fn test_parents_2_b_true() {
+    assert_f64_near!(
+        0.6_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_p2_true.ppidimacs")
+    );
+}
+
+#[test]
+fn test_parents_2_b_false() {
+    assert_f64_near!(
+        0.4_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_p2_false.ppidimacs")
+    );
+}
+
+#[test]
+fn test_parents_2_c_true() {
+    assert_f64_near!(
+        0.396_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_true.ppidimacs")
+    );
+}
+
+#[test]
+fn test_parents_2_c_false() {
+    assert_f64_near!(
+        0.604_f64.log2(),
+        solve_instance("tests/instances/bayesian_networks/2_parents_false.ppidimacs")
+    );
+}
+
 fn solve_instance(filename: &'static str) -> f64 {
     let mut state = TrailedStateManager::new();
     let path = PathBuf::from(filename);
