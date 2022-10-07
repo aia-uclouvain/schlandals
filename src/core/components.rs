@@ -184,13 +184,15 @@ impl DFSComponentExtractor {
             // Recursively explore the nodes in the connected components (i.e. linked by a clause)
             for clause in g.node_clauses(node) {
                 for edge in g.edges_clause(clause) {
-                    let src = g.get_edge_source(edge);
-                    let dst = g.get_edge_destination(edge);
-                    if src != node {
-                        self.explore_component(g, src, comp_start, comp_size, state);
-                    }
-                    if dst != node {
-                        self.explore_component(g, dst, comp_start, comp_size, state);
+                    if g.is_edge_active(edge, state) {
+                        let src = g.get_edge_source(edge);
+                        let dst = g.get_edge_destination(edge);
+                        if src != node {
+                            self.explore_component(g, src, comp_start, comp_size, state);
+                        }
+                        if dst != node {
+                            self.explore_component(g, dst, comp_start, comp_size, state);
+                        }
                     }
                 }
             }
