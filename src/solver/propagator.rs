@@ -157,21 +157,9 @@ impl SimplePropagator for Graph {
                 }
             }
         }
-        if self.is_node_probabilistic(node) {
-            let distribution = self.get_distribution(node).unwrap();
-            if value {
-                for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                    propagation_prob += self.propagate_node(other, false, state)?;
-                }
-            } else if self.get_distribution_false_nodes(distribution, state) as usize
-                == self.get_distribution_size(distribution) - 1
-            {
-                for other in self.nodes_distribution_iter(node) {
-                    if !self.is_node_bound(other, state) {
-                        propagation_prob += self.propagate_node(other, true, state)?;
-                        break;
-                    }
-                }
+        if value && self.is_node_probabilistic(node) {
+            for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
+                propagation_prob += self.propagate_node(other, false, state)?;
             }
         }
         PropagationResult::Ok(propagation_prob)
