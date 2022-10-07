@@ -331,29 +331,6 @@ impl Graph {
         nodes
     }
 
-    /// Gets the number of active edges of a distribution
-    pub fn get_distribution_number_active_edges<S: StateManager>(
-        &self,
-        distribution: DistributionIndex,
-        state: &S,
-    ) -> isize {
-        state.get_int(self.distributions[distribution.0].active_edges)
-    }
-
-    /// Gets the number of nodes set to false in a distribution
-    pub fn get_distribution_false_nodes<S: StateManager>(
-        &self,
-        distribution: DistributionIndex,
-        state: &S,
-    ) -> isize {
-        state.get_int(self.distributions[distribution.0].nodes_false)
-    }
-
-    /// Gets the number of nodes in a distribution
-    pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
-        self.distributions[distribution.0].size
-    }
-
     /// Sets `node` to `value`. This assumes that `node` is unassigned
     /// `node` is probabilistic and `value` is true, then the probability of the node is added to
     /// the current objective
