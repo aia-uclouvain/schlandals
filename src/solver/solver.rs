@@ -54,6 +54,7 @@ where
     /// returns it immediately and if not compute it
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> f64 {
         let hash = self.component_extractor.get_component_hash(component);
+        // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
         let should_compute = !self.cache.contains_key(&hash) || true;
         if should_compute {
             let count = self.solve_component(component);
@@ -92,9 +93,11 @@ where
                         for sub_component in self.component_extractor.components_iter(&self.state) {
                             o += self.get_cached_component_or_compute(sub_component);
                         }
-                        branch_objectives.push(o);
-                        if o > max_objective {
-                            max_objective = o;
+                        if o != f64::NEG_INFINITY {
+                            branch_objectives.push(o);
+                            if o > max_objective {
+                                max_objective = o;
+                            }
                         }
                     }
                 };
