@@ -77,12 +77,10 @@ impl SimplePropagator for Graph {
     fn propagate<S: StateManager>(&mut self, state: &mut S) -> PropagationResult<f64> {
         let mut v = 0.0;
         for node in self.nodes_iter() {
-            if !self.is_node_bound(node, state) {
-                if self.is_node_deterministic(node) && self.node_number_incoming(node, state) == 0 {
+            if !self.is_node_bound(node, state) && self.is_node_deterministic(node) {
+                if self.node_number_incoming(node, state) == 0 {
                     v += self.propagate_node(node, false, state)?;
-                } else if self.is_node_deterministic(node)
-                    && self.node_number_outgoing(node, state) == 0
-                {
+                } else if self.node_number_outgoing(node, state) == 0 {
                     v += self.propagate_node(node, true, state)?;
                 }
             }
@@ -110,12 +108,16 @@ impl SimplePropagator for Graph {
             0.0
         };
 
-        let clauses = self.node_clauses(node).collect::<Vec<ClauseIndex>>();
+        let clauses = self
+            .node_clauses(node)
+            .filter(|clause| self.is_clause_active(*clause, state))
+            .collect::<Vec<ClauseIndex>>();
         for clause in clauses {
             let head = self.get_clause_head(clause);
             if (value && node == head) || (!value && node != head) {
                 // The clause can be deactivated. That means that each edge is deactivated and
                 // the sources/destinations are propagated if necessary
+                self.deactivate_clause(clause, state);
                 for edge in self.edges_clause(clause) {
                     if self.is_edge_active(edge, state) {
                         self.deactivate_edge(edge, state);
@@ -143,7 +145,7 @@ impl SimplePropagator for Graph {
                 // The whole clause can not be deactivated. However, we can still reason about the
                 // edges in the clause
                 let nb_active_edge = self.clause_number_active_edges(clause, state);
-                if value && nb_active_edge == 0 && !self.is_node_bound(head, state) {
+                if value && nb_active_edge == 0 {
                     // The head is not true, but there are no more unassigned implicants. And
                     // they are all true.
                     propagation_prob += self.propagate_node(head, true, state)?;
@@ -157,9 +159,25 @@ impl SimplePropagator for Graph {
                 }
             }
         }
-        if value && self.is_node_probabilistic(node) {
-            for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                propagation_prob += self.propagate_node(other, false, state)?;
+        if self.is_node_probabilistic(node) {
+            if value {
+                for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
+                    propagation_prob += self.propagate_node(other, false, state)?;
+                }
+            } else {
+                let distribution = self.get_distribution(node).unwrap();
+                let number_assigned =
+                    self.get_distribution_false_nodes(distribution, state) as usize;
+                let number_nodes = self.get_distribution_size(distribution);
+                if number_assigned == number_nodes - 1 {
+                    // Only 1 node not assigned in the distribution -> set to true
+                    for other in self.nodes_distribution_iter(node) {
+                        if !self.is_node_bound(other, state) {
+                            propagation_prob += self.propagate_node(other, true, state)?;
+                            break;
+                        }
+                    }
+                }
             }
         }
         PropagationResult::Ok(propagation_prob)

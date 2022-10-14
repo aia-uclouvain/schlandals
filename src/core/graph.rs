@@ -77,6 +77,7 @@ pub struct Clause {
     pub head: NodeIndex,
     /// Number of active edges in the clause
     active_edges: ReversibleInt,
+    active: ReversibleBool,
 }
 
 /// Data structure that actually holds the data of a  node in the graph
@@ -331,6 +332,20 @@ impl Graph {
         nodes
     }
 
+    /// Gets the number of nodes set to false in a distribution
+    pub fn get_distribution_false_nodes<S: StateManager>(
+        &self,
+        distribution: DistributionIndex,
+        state: &S,
+    ) -> isize {
+        state.get_int(self.distributions[distribution.0].nodes_false)
+    }
+
+    /// Gets the number of nodes in a distribution
+    pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
+        self.distributions[distribution.0].size
+    }
+
     /// Sets `node` to `value`. This assumes that `node` is unassigned
     /// `node` is probabilistic and `value` is true, then the probability of the node is added to
     /// the current objective
@@ -485,6 +500,7 @@ impl Graph {
             size: body.len(),
             head,
             active_edges: state.manage_int(body.len() as isize),
+            active: state.manage_boolean(true),
         });
         for node in body {
             self.add_edge(*node, head, cid, state);
@@ -499,6 +515,14 @@ impl Graph {
         state: &S,
     ) -> isize {
         state.get_int(self.clauses[clause.0].active_edges)
+    }
+
+    pub fn deactivate_clause<S: StateManager>(&self, clause: ClauseIndex, state: &mut S) {
+        state.set_bool(self.clauses[clause.0].active, false);
+    }
+
+    pub fn is_clause_active<S: StateManager>(&self, clause: ClauseIndex, state: &S) -> bool {
+        state.get_bool(self.clauses[clause.0].active)
     }
 
     /// Returns the head of the clause
@@ -897,6 +921,7 @@ mod test_graph {
             size: 4,
             head: NodeIndex(0),
             active_edges: state.manage_int(4),
+            active: state.manage_boolean(true),
         });
 
         assert_eq!(0, g.node_number_incoming(n1, &state));
