@@ -1,6 +1,6 @@
 use schlandals;
 use schlandals::branching::FirstBranching;
-use schlandals::components::DFSComponentExtractor;
+use schlandals::components::{DFSComponentExtractor, NoComponentExtractor};
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::solver::Solver;
 use schlandals::trail::TrailedStateManager;
@@ -105,13 +105,53 @@ fn test_parents_2_c_false() {
     );
 }
 
+#[test]
+fn test_parents_2_great_children_d_true() {
+    assert_f64_near!(
+        0.6792_f64.log2(),
+        solve_instance(
+            "tests/instances/bayesian_networks/2_parents_great_children_D_true.ppidimacs"
+        )
+    );
+}
+
+#[test]
+fn test_parents_2_great_children_d_false() {
+    assert_f64_near!(
+        0.3208_f64.log2(),
+        solve_instance(
+            "tests/instances/bayesian_networks/2_parents_great_children_D_false.ppidimacs"
+        )
+    );
+}
+
+#[test]
+fn test_parents_2_great_children_e_true() {
+    assert_f64_near!(
+        0.5188_f64.log2(),
+        solve_instance(
+            "tests/instances/bayesian_networks/2_parents_great_children_E_true.ppidimacs"
+        )
+    );
+}
+
+#[test]
+fn test_parents_2_great_children_e_false() {
+    assert_f64_near!(
+        0.4812_f64.log2(),
+        solve_instance(
+            "tests/instances/bayesian_networks/2_parents_great_children_E_false.ppidimacs"
+        )
+    );
+}
+
 fn solve_instance(filename: &'static str) -> f64 {
     let mut state = TrailedStateManager::new();
     let path = PathBuf::from(filename);
     let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
+    //let component_extractor = NoComponentExtractor::new(&graph);
     let branching_heuristic = FirstBranching::default();
-    let mut solver: Solver<TrailedStateManager, DFSComponentExtractor, FirstBranching> =
-        Solver::new(graph, state, component_extractor, branching_heuristic);
+    let mut solver = Solver::new(graph, state, component_extractor, branching_heuristic);
     solver.solve(v)
 }
