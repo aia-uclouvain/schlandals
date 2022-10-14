@@ -274,6 +274,79 @@ impl ComponentExtractor for DFSComponentExtractor {
     }
 }
 
+/// This structure is used to implement a simple component detector that always returns one
+/// component with all the unassigned node in it. It is used to isolate bugs annd should not be
+/// used for real data sets (as it performences will be terrible)
+pub struct NoComponentExtractor {
+    components: Vec<Vec<NodeIndex>>,
+    distributions: Vec<FxHashSet<DistributionIndex>>,
+}
+
+impl NoComponentExtractor {
+    pub fn new(g: &Graph) -> Self {
+        let mut components: Vec<Vec<NodeIndex>> = vec![];
+        let nodes = g.nodes_iter().collect();
+        components.push(nodes);
+        let mut distributions: Vec<FxHashSet<DistributionIndex>> = vec![];
+        let ds = (0..g.number_distributions())
+            .map(|i| DistributionIndex(i))
+            .collect::<FxHashSet<DistributionIndex>>();
+        distributions.push(ds);
+        Self {
+            components,
+            distributions,
+        }
+    }
+}
+
+impl ComponentExtractor for NoComponentExtractor {
+    fn detect_components<S: StateManager>(
+        &mut self,
+        g: &Graph,
+        state: &mut S,
+        _component: ComponentIndex,
+    ) {
+        let mut nodes: Vec<NodeIndex> = vec![];
+        let mut distributions: FxHashSet<DistributionIndex> = FxHashSet::default();
+        for n in g.nodes_iter() {
+            if !g.is_node_bound(n, state) {
+                nodes.push(n);
+                if g.is_node_probabilistic(n) {
+                    distributions.insert(g.get_distribution(n).unwrap());
+                }
+            }
+        }
+        self.components.push(nodes);
+        self.distributions.push(distributions);
+    }
+
+    fn get_component(&self, component: ComponentIndex) -> &[NodeIndex] {
+        &self.components[component.0]
+    }
+
+    fn get_component_hash(&self, _component: ComponentIndex) -> u64 {
+        0_u64
+    }
+
+    fn get_component_distributions(
+        &self,
+        component: ComponentIndex,
+    ) -> &FxHashSet<DistributionIndex> {
+        &self.distributions[component.0]
+    }
+
+    fn components_iter<S: StateManager>(&self, _state: &S) -> ComponentIterator {
+        ComponentIterator {
+            limit: self.components.len(),
+            next: self.components.len() - 1,
+        }
+    }
+
+    fn number_components<S: StateManager>(&self, _state: &S) -> usize {
+        1
+    }
+}
+
 #[cfg(test)]
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex, DFSComponentExtractor};
