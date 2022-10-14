@@ -103,13 +103,12 @@ where
                 };
                 self.state.restore_state();
             }
-            let r = max_objective
+            max_objective
                 + branch_objectives
                     .iter()
                     .map(|o| 2_f64.powf(o - max_objective))
                     .sum::<f64>()
-                    .log2();
-            r
+                    .log2()
         } else {
             0.0
         }
