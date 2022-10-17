@@ -66,7 +66,7 @@ pub trait ComponentExtractor {
 /// A Component is identified by two integers. The first is the index in the vector of nodes at
 /// which the component starts, and the second is the size of the component.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Component(pub usize, pub usize);
+pub struct Component(pub usize, pub usize, pub u64);
 
 pub struct ComponentIterator {
     limit: usize,
@@ -121,16 +121,20 @@ pub struct DFSComponentExtractor {
     base: ReversibleInt,
     /// The first index which is not a component of the current node in the search tree
     limit: ReversibleInt,
+    nodes_bits: Vec<u64>,
+    edges_bits: Vec<u64>,
 }
 
 impl DFSComponentExtractor {
     pub fn new<S: StateManager>(g: &Graph, state: &mut S) -> Self {
         let nodes = (0..g.number_nodes()).map(|i| NodeIndex(i)).collect();
         let positions = (0..g.number_nodes()).collect();
-        let components = vec![Component(0, g.number_nodes())];
+        let components = vec![Component(0, g.number_nodes(), 0)];
         let first_distributions = (0..g.number_distributions())
             .map(|i| DistributionIndex(i))
             .collect::<FxHashSet<DistributionIndex>>();
+        let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
+        let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
         let mut extractor = Self {
             nodes,
             positions,
@@ -138,6 +142,8 @@ impl DFSComponentExtractor {
             distributions: vec![first_distributions],
             base: state.manage_int(0),
             limit: state.manage_int(1),
+            nodes_bits,
+            edges_bits,
         };
         extractor.detect_components(g, state, ComponentIndex(0));
         extractor
@@ -150,11 +156,13 @@ impl DFSComponentExtractor {
         comp_start: usize,
         comp_size: &mut usize,
         state: &mut S,
+        hash: &mut u64,
     ) {
         let node_pos = self.positions[node.0];
         if !g.is_node_bound(node, state)
             && !(comp_start <= node_pos && node_pos < (comp_start + *comp_size))
         {
+            *hash ^= self.nodes_bits[node.0];
             // The node is swap with the node at position comp_sart + comp_size
             let current_pos = self.positions[node.0];
             let new_pos = comp_start + *comp_size;
@@ -176,7 +184,7 @@ impl DFSComponentExtractor {
                 self.distributions.last_mut().unwrap().insert(distribution);
                 for n in g.distribution_iter(distribution) {
                     if n != node {
-                        self.explore_component(g, n, comp_start, comp_size, state);
+                        self.explore_component(g, n, comp_start, comp_size, state, hash);
                     }
                 }
             }
@@ -185,10 +193,13 @@ impl DFSComponentExtractor {
             for clause in g.node_clauses(node) {
                 for edge in g.edges_clause(clause) {
                     if g.is_edge_active(edge, state) {
+                        if node == g.get_edge_source(edge) {
+                            *hash ^= self.edges_bits[edge.0];
+                        }
                         let src = g.get_edge_source(edge);
                         let dst = g.get_edge_destination(edge);
-                        self.explore_component(g, src, comp_start, comp_size, state);
-                        self.explore_component(g, dst, comp_start, comp_size, state);
+                        self.explore_component(g, src, comp_start, comp_size, state, hash);
+                        self.explore_component(g, dst, comp_start, comp_size, state, hash);
                     }
                 }
             }
@@ -215,20 +226,9 @@ impl ComponentExtractor for DFSComponentExtractor {
             if !g.is_node_bound(node, state) {
                 let mut comp_size = 0;
                 self.distributions.push(FxHashSet::default());
-                self.explore_component(g, node, start, &mut comp_size, state);
-                self.components.push(Component(start, comp_size));
-                // Here we sort the nodes in the `nodes` vector to ensure that the hash of the
-                // component is the same everywhere in the search tree. This is due to the fact
-                // that hashing the same sequence of bytes in a different order will result in a
-                // different hash.
-                // This is probably not ideal but as a first solution it is fine.
-                // We could add in each component a pointer to the node with the lowest index and
-                // start a DFS on the graph from that. This should give a unique hash to the same
-                // component.
-                self.nodes[start..(start + comp_size)].sort();
-                for i in start..start + comp_size {
-                    self.positions[self.nodes[i].0] = i;
-                }
+                let mut hash: u64 = 0;
+                self.explore_component(g, node, start, &mut comp_size, state, &mut hash);
+                self.components.push(Component(start, comp_size, hash));
                 start += comp_size;
             } else {
                 start += 1;
@@ -246,10 +246,7 @@ impl ComponentExtractor for DFSComponentExtractor {
     /// Returns the hash of a component
     fn get_component_hash(&self, component: ComponentIndex) -> u64 {
         let mut hasher = FxHasher::default();
-        let comp = self.components[component.0];
-        for node in &self.nodes[comp.0..(comp.0 + comp.1)] {
-            hasher.write_usize(node.0);
-        }
+        hasher.write_u64(self.components[component.0].2);
         hasher.finish()
     }
 
@@ -522,51 +519,6 @@ mod test_dfs_component {
     }
 
     #[test]
-    fn test_hash() {
-        let mut state = TrailedStateManager::new();
-        let mut g = Graph::new();
-        let n = (0..5)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect::<Vec<NodeIndex>>();
-        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
-        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
-        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
-        assert_eq!(1, components.len());
-
-        let comp = components[0];
-        let mut hasher = FxHasher::default();
-        for i in 0..5 {
-            hasher.write_usize(i);
-        }
-        assert_eq!(
-            hasher.finish(),
-            component_extractor.get_component_hash(comp)
-        );
-
-        g.set_node(n[1], false, &mut state);
-
-        component_extractor.detect_components(&g, &mut state, comp);
-        let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
-        assert_eq!(2, components.len());
-        let mut hasher_comp1 = FxHasher::default();
-        hasher_comp1.write_usize(0);
-        hasher_comp1.write_usize(2);
-        assert_eq!(
-            hasher_comp1.finish(),
-            component_extractor.get_component_hash(components[0])
-        );
-
-        let mut hasher_comp2 = FxHasher::default();
-        hasher_comp2.write_usize(3);
-        hasher_comp2.write_usize(4);
-        assert_eq!(
-            hasher_comp2.finish(),
-            component_extractor.get_component_hash(components[1])
-        );
-    }
-
-    #[test]
     fn distributions_in_components() {
         let mut state = TrailedStateManager::new();
         let mut g = Graph::new();
@@ -596,11 +548,11 @@ mod test_dfs_component {
         let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
         assert_eq!(2, components.len());
         let distribution_comp1 = component_extractor.get_component_distributions(components[0]);
-        assert_eq!(2, distribution_comp1.len());
-        assert!(distribution_comp1.contains(&DistributionIndex(1)));
-        assert!(distribution_comp1.contains(&DistributionIndex(2)));
+        assert_eq!(1, distribution_comp1.len());
+        assert!(distribution_comp1.contains(&DistributionIndex(0)));
         let distribution_comp2 = component_extractor.get_component_distributions(components[1]);
-        assert_eq!(1, distribution_comp2.len());
-        assert!(distribution_comp2.contains(&DistributionIndex(0)));
+        assert_eq!(2, distribution_comp2.len());
+        assert!(distribution_comp2.contains(&DistributionIndex(1)));
+        assert!(distribution_comp2.contains(&DistributionIndex(2)));
     }
 }

@@ -55,7 +55,7 @@ where
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> f64 {
         let hash = self.component_extractor.get_component_hash(component);
         // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
-        let should_compute = !self.cache.contains_key(&hash) || true;
+        let should_compute = !self.cache.contains_key(&hash);
         if should_compute {
             let count = self.solve_component(component);
             self.cache.insert(hash, count);

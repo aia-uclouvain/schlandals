@@ -40,6 +40,7 @@
 //! implementation does not have problems like dangling indexes.
 
 use super::trail::*;
+use std::ops::{BitXor, BitXorAssign};
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
@@ -187,6 +188,11 @@ impl Graph {
     /// Returns the number of node in the graph
     pub fn number_nodes(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Returns the number of edges in the graph
+    pub fn number_edges(&self) -> usize {
+        self.edges.len()
     }
 
     /// Returns the number of distribution in the graph
@@ -656,6 +662,20 @@ impl Iterator for EdgesClause {
             self.next += 1;
             Some(EdgeIndex(self.next - 1))
         }
+    }
+}
+
+impl BitXor for NodeIndex {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl BitXorAssign for NodeIndex {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0;
     }
 }
 
