@@ -21,8 +21,8 @@ mod solver;
 use clap::Parser;
 use std::path::PathBuf;
 
-use crate::core::components::{DFSComponentExtractor, NoComponentExtractor};
-use crate::core::trail::TrailedStateManager;
+use crate::core::components::{ComponentExtractor, DFSComponentExtractor, NoComponentExtractor};
+use crate::core::trail::StateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::FirstBranching;
 use solver::solver::Solver;
@@ -36,7 +36,7 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let mut state = TrailedStateManager::new();
+    let mut state = StateManager::new();
     match graph_from_ppidimacs(&args.input, &mut state) {
         Err(_) => println!("Initial model Unsat"),
         Ok((graph, v)) => {

@@ -290,12 +290,12 @@ impl Graph {
     /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
     /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
     /// of `weight`. This method returns the index of the node.
-    pub fn add_node<S: StateManager>(
+    pub fn add_node(
         &mut self,
         probabilistic: bool,
         weight: Option<f64>,
         distribution: Option<DistributionIndex>,
-        state: &mut S,
+        state: &mut StateManager,
     ) -> NodeIndex {
         let id = self.nodes.len();
         self.nodes.push(NodeData {
@@ -319,10 +319,10 @@ impl Graph {
     ///     - None of the node in the distribution is part of another distribution
     ///
     /// Each probabilstic node should be part of one distribution.
-    pub fn add_distribution<S: StateManager>(
+    pub fn add_distribution(
         &mut self,
         weights: &Vec<f64>,
-        state: &mut S,
+        state: &mut StateManager,
     ) -> Vec<NodeIndex> {
         let distribution = DistributionIndex(self.distributions.len());
         let nodes: Vec<NodeIndex> = weights
@@ -339,10 +339,10 @@ impl Graph {
     }
 
     /// Gets the number of nodes set to false in a distribution
-    pub fn get_distribution_false_nodes<S: StateManager>(
+    pub fn get_distribution_false_nodes(
         &self,
         distribution: DistributionIndex,
-        state: &S,
+        state: &StateManager,
     ) -> isize {
         state.get_int(self.distributions[distribution.0].nodes_false)
     }
@@ -355,7 +355,7 @@ impl Graph {
     /// Sets `node` to `value`. This assumes that `node` is unassigned
     /// `node` is probabilistic and `value` is true, then the probability of the node is added to
     /// the current objective
-    pub fn set_node<S: StateManager>(&mut self, node: NodeIndex, value: bool, state: &mut S) {
+    pub fn set_node(&mut self, node: NodeIndex, value: bool, state: &mut StateManager) {
         // TODO: Maybe would be useful to launch an error
         debug_assert!(state.get_int(self.nodes[node.0].domain_size) == 2);
         // If the node is probabilistic, add its value to the objective
@@ -374,7 +374,7 @@ impl Graph {
     }
 
     /// Returns true if `node` is bound to a value, false otherwise
-    pub fn is_node_bound<S: StateManager>(&self, node: NodeIndex, state: &S) -> bool {
+    pub fn is_node_bound(&self, node: NodeIndex, state: &StateManager) -> bool {
         state.get_int(self.nodes[node.0].domain_size) == 1
     }
 
@@ -399,12 +399,12 @@ impl Graph {
     }
 
     /// Returns the number of active incoming edges of `node`
-    pub fn node_number_incoming<S: StateManager>(&self, node: NodeIndex, state: &S) -> isize {
+    pub fn node_number_incoming(&self, node: NodeIndex, state: &StateManager) -> isize {
         state.get_int(self.nodes[node.0].active_incoming)
     }
 
     /// Returns the number of active outgoing edges of `node`
-    pub fn node_number_outgoing<S: StateManager>(&self, node: NodeIndex, state: &S) -> isize {
+    pub fn node_number_outgoing(&self, node: NodeIndex, state: &StateManager) -> isize {
         state.get_int(self.nodes[node.0].active_outgoing)
     }
 
@@ -414,12 +414,12 @@ impl Graph {
 
     /// Add an edge between the node identified by `src` to the node identified by `dst`. This
     /// method returns the index of the edge.
-    fn add_edge<S: StateManager>(
+    fn add_edge(
         &mut self,
         src: NodeIndex,
         dst: NodeIndex,
         clause: ClauseIndex,
-        state: &mut S,
+        state: &mut StateManager,
     ) -> EdgeIndex {
         let source_outgoing = self.nodes[src.0].children;
         let dest_incoming = self.nodes[dst.0].parents;
@@ -450,7 +450,7 @@ impl Graph {
 
     /// Deactivate `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
     /// the number of outgoing edges of `edge.src`
-    pub fn deactivate_edge<S: StateManager>(&mut self, edge: EdgeIndex, state: &mut S) {
+    pub fn deactivate_edge(&mut self, edge: EdgeIndex, state: &mut StateManager) {
         let edge = self.edges[edge.0];
         state.set_bool(edge.active, false);
         state.decrement(self.nodes[edge.src.0].active_outgoing);
@@ -469,7 +469,7 @@ impl Graph {
     }
 
     /// Return true if the edge is still active
-    pub fn is_edge_active<S: StateManager>(&self, edge: EdgeIndex, state: &S) -> bool {
+    pub fn is_edge_active(&self, edge: EdgeIndex, state: &StateManager) -> bool {
         state.get_bool(self.edges[edge.0].active)
     }
 
@@ -494,11 +494,11 @@ impl Graph {
     /// = vec![n1, ..., nn].
     /// This function adds n edges to the graph, one for each node in the body (as source) towards
     /// the head of the clause
-    pub fn add_clause<S: StateManager>(
+    pub fn add_clause(
         &mut self,
         head: NodeIndex,
         body: &[NodeIndex],
-        state: &mut S,
+        state: &mut StateManager,
     ) -> ClauseIndex {
         let cid = ClauseIndex(self.clauses.len());
         self.clauses.push(Clause {
@@ -515,19 +515,15 @@ impl Graph {
     }
 
     /// Returns the number of active edges in the clause
-    pub fn clause_number_active_edges<S: StateManager>(
-        &self,
-        clause: ClauseIndex,
-        state: &S,
-    ) -> isize {
+    pub fn clause_number_active_edges(&self, clause: ClauseIndex, state: &StateManager) -> isize {
         state.get_int(self.clauses[clause.0].active_edges)
     }
 
-    pub fn deactivate_clause<S: StateManager>(&self, clause: ClauseIndex, state: &mut S) {
+    pub fn deactivate_clause(&self, clause: ClauseIndex, state: &mut StateManager) {
         state.set_bool(self.clauses[clause.0].active, false);
     }
 
-    pub fn is_clause_active<S: StateManager>(&self, clause: ClauseIndex, state: &S) -> bool {
+    pub fn is_clause_active(&self, clause: ClauseIndex, state: &StateManager) -> bool {
         state.get_bool(self.clauses[clause.0].active)
     }
 
@@ -536,10 +532,10 @@ impl Graph {
         self.clauses[clause.0].head
     }
 
-    pub fn get_first_active_edge<S: StateManager>(
+    pub fn get_first_active_edge(
         &self,
         clause: ClauseIndex,
-        state: &S,
+        state: &StateManager,
     ) -> Option<EdgeIndex> {
         self.edges_clause(clause)
             .filter(|edge| self.is_edge_active(*edge, state))
@@ -688,7 +684,7 @@ mod test_node_data {
 
     #[test]
     fn new_can_create_probabilistic_node() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let node = NodeData {
             value: true,
             domain_size: state.manage_int(2),
@@ -707,7 +703,7 @@ mod test_node_data {
 
     #[test]
     fn new_can_create_deterministic_node() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let node = NodeData {
             value: true,
             domain_size: state.manage_int(2),
@@ -733,7 +729,7 @@ mod test_edge_data {
     fn new_can_create_first() {
         let src = NodeIndex(11);
         let dst = NodeIndex(13);
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let edge = EdgeData {
             src,
             dst,
@@ -754,7 +750,7 @@ mod test_edge_data {
         let dst = NodeIndex(64);
         let next_incoming = Some(EdgeIndex(3));
         let next_outgoing = Some(EdgeIndex(102));
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let edge = EdgeData {
             src,
             dst,
@@ -781,7 +777,7 @@ mod test_graph {
 
     #[test]
     fn add_nodes_increment_index() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         for i in 0..10 {
             let idx = g.add_node(false, None, None, &mut state);
@@ -791,7 +787,7 @@ mod test_graph {
 
     #[test]
     fn add_edges_increment_index() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         g.add_node(false, None, None, &mut state);
         g.add_node(false, None, None, &mut state);
@@ -803,7 +799,7 @@ mod test_graph {
 
     #[test]
     fn add_multiple_incoming_edges_to_node() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -832,7 +828,7 @@ mod test_graph {
 
     #[test]
     fn add_multiple_outgoing_edges_to_nodes() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_distribution(&vec![0.2], &mut state)[0];
@@ -850,7 +846,7 @@ mod test_graph {
 
     #[test]
     fn setting_nodes_values() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         assert!(!g.is_node_bound(n1, &state));
@@ -867,7 +863,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_distribution() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         assert_eq!(0, g.distributions.len());
         let weights = vec![0.2, 0.4, 0.1, 0.3];
@@ -886,7 +882,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_multiple_distributions() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let w1 = vec![0.1, 0.3, 0.6];
         let w2 = vec![0.5, 0.4, 0.05, 0.05];
@@ -929,7 +925,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_edges_increases_edge_counts() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1036,7 +1032,7 @@ mod test_graph {
 
     #[test]
     fn add_clause_correctly_add_edges() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g: Graph = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1072,7 +1068,7 @@ mod test_graph {
 
     #[test]
     fn clauses_are_correctly_collected() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1122,7 +1118,7 @@ mod test_graph_iterators {
 
     #[test]
     fn nodes_iterator() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let nodes: Vec<NodeIndex> = (0..10)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -1133,7 +1129,7 @@ mod test_graph_iterators {
 
     #[test]
     fn distributions_iterator() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let distributions: Vec<Vec<NodeIndex>> = (0..5)
             .map(|_| g.add_distribution(&vec![0.3, 0.5, 0.2], &mut state))
@@ -1151,7 +1147,7 @@ mod test_graph_iterators {
 
     #[test]
     fn clause_iterator() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n: Vec<NodeIndex> = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))

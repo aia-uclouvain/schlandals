@@ -26,7 +26,7 @@
 //! `find_components` is called. This can be done incrementally or not.
 
 use super::graph::{DistributionIndex, Graph, NodeIndex};
-use super::trail::{ReversibleInt, StateManager};
+use super::trail::*;
 use rustc_hash::{FxHashSet, FxHasher};
 use std::hash::Hasher;
 
@@ -40,12 +40,7 @@ pub struct ComponentIndex(pub usize);
 pub trait ComponentExtractor {
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` gien its current assignments.
-    fn detect_components<S: StateManager>(
-        &mut self,
-        g: &Graph,
-        state: &mut S,
-        component: ComponentIndex,
-    );
+    fn detect_components(&mut self, g: &Graph, state: &mut StateManager, component: ComponentIndex);
     /// Returns the nodes of a given component
     fn get_component(&self, component: ComponentIndex) -> &[NodeIndex];
     /// Returns the hash of a given component. This is the job of the implementing data structure
@@ -58,9 +53,9 @@ pub trait ComponentExtractor {
         component: ComponentIndex,
     ) -> &FxHashSet<DistributionIndex>;
     /// Returns an iterator over the current components
-    fn components_iter<S: StateManager>(&self, state: &S) -> ComponentIterator;
+    fn components_iter(&self, state: &StateManager) -> ComponentIterator;
     /// Returns the current number of component
-    fn number_components<S: StateManager>(&self, state: &S) -> usize;
+    fn number_components(&self, state: &StateManager) -> usize;
 }
 
 /// A Component is identified by two integers. The first is the index in the vector of nodes at
@@ -126,7 +121,7 @@ pub struct DFSComponentExtractor {
 }
 
 impl DFSComponentExtractor {
-    pub fn new<S: StateManager>(g: &Graph, state: &mut S) -> Self {
+    pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(|i| NodeIndex(i)).collect();
         let positions = (0..g.number_nodes()).collect();
         let components = vec![Component(0, g.number_nodes(), 0)];
@@ -149,13 +144,13 @@ impl DFSComponentExtractor {
         extractor
     }
 
-    fn explore_component<S: StateManager>(
+    fn explore_component(
         &mut self,
         g: &Graph,
         node: NodeIndex,
         comp_start: usize,
         comp_size: &mut usize,
-        state: &mut S,
+        state: &mut StateManager,
         hash: &mut u64,
     ) {
         let node_pos = self.positions[node.0];
@@ -208,10 +203,10 @@ impl DFSComponentExtractor {
 }
 
 impl ComponentExtractor for DFSComponentExtractor {
-    fn detect_components<S: StateManager>(
+    fn detect_components(
         &mut self,
         g: &Graph,
-        state: &mut S,
+        state: &mut StateManager,
         component: ComponentIndex,
     ) {
         let end = state.get_int(self.limit);
@@ -259,14 +254,14 @@ impl ComponentExtractor for DFSComponentExtractor {
     }
 
     /// Returns an iterator over the node in a component
-    fn components_iter<S: StateManager>(&self, state: &S) -> ComponentIterator {
+    fn components_iter(&self, state: &StateManager) -> ComponentIterator {
         let start = state.get_int(self.base) as usize;
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
     }
 
     /// Returns the number of components detected by the last call of `detect_components`
-    fn number_components<S: StateManager>(&self, state: &S) -> usize {
+    fn number_components(&self, state: &StateManager) -> usize {
         (state.get_int(self.limit) - state.get_int(self.base)) as usize
     }
 }
@@ -297,10 +292,10 @@ impl NoComponentExtractor {
 }
 
 impl ComponentExtractor for NoComponentExtractor {
-    fn detect_components<S: StateManager>(
+    fn detect_components(
         &mut self,
         g: &Graph,
-        state: &mut S,
+        state: &mut StateManager,
         _component: ComponentIndex,
     ) {
         let mut nodes: Vec<NodeIndex> = vec![];
@@ -332,14 +327,14 @@ impl ComponentExtractor for NoComponentExtractor {
         &self.distributions[component.0]
     }
 
-    fn components_iter<S: StateManager>(&self, _state: &S) -> ComponentIterator {
+    fn components_iter(&self, _state: &StateManager) -> ComponentIterator {
         ComponentIterator {
             limit: self.components.len(),
             next: self.components.len() - 1,
         }
     }
 
-    fn number_components<S: StateManager>(&self, _state: &S) -> usize {
+    fn number_components(&self, _state: &StateManager) -> usize {
         1
     }
 }
@@ -348,13 +343,13 @@ impl ComponentExtractor for NoComponentExtractor {
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex, DFSComponentExtractor};
     use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
-    use crate::core::trail::{IntManager, SaveAndRestore, TrailedStateManager};
+    use crate::core::trail::{IntManager, SaveAndRestore, StateManager};
     use rustc_hash::{FxHashSet, FxHasher};
     use std::hash::Hasher;
 
     #[test]
     fn test_initialiaztion_extractor() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -373,7 +368,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_extractor_distribution() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -394,7 +389,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_single_component() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -419,7 +414,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_multiple_components() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -459,7 +454,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_breaking_components() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -485,7 +480,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_breaking_component_but_backtrack() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -520,7 +515,7 @@ mod test_dfs_component {
 
     #[test]
     fn distributions_in_components() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let n = (0..2)
             .map(|_| g.add_node(false, None, None, &mut state))

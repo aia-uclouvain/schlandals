@@ -36,7 +36,7 @@ pub type PropagationResult<T> = Result<T, Unsat>;
 pub trait SimplePropagator {
     /// This is the global propagation algorithm. This run on the whole graph and when the value of
     /// a node can be infered, it launches `propagate_node`.
-    fn propagate<S: StateManager>(&mut self, state: &mut S) -> PropagationResult<f64>;
+    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult<f64>;
     /// Implements de propagator logics when `node` is set to `value`. This breaks down as follows
     ///
     /// case 1: `value = true`:
@@ -65,16 +65,16 @@ pub trait SimplePropagator {
     ///        all other literals in the body are set to true. In order to be a model, the last one
     ///        must be false
     ///         
-    fn propagate_node<S: StateManager>(
+    fn propagate_node(
         &mut self,
         node: NodeIndex,
         value: bool,
-        state: &mut S,
+        state: &mut StateManager,
     ) -> PropagationResult<f64>;
 }
 
 impl SimplePropagator for Graph {
-    fn propagate<S: StateManager>(&mut self, state: &mut S) -> PropagationResult<f64> {
+    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult<f64> {
         let mut v = 0.0;
         for node in self.nodes_iter() {
             if !self.is_node_bound(node, state) && self.is_node_deterministic(node) {
@@ -88,11 +88,11 @@ impl SimplePropagator for Graph {
         PropagationResult::Ok(v)
     }
 
-    fn propagate_node<S: StateManager>(
+    fn propagate_node(
         &mut self,
         node: NodeIndex,
         value: bool,
-        state: &mut S,
+        state: &mut StateManager,
     ) -> PropagationResult<f64> {
         if self.is_node_bound(node, state) {
             if self.get_node_value(node) != value {
@@ -188,12 +188,12 @@ impl SimplePropagator for Graph {
 mod test_simple_propagator_propagation {
 
     use crate::core::graph::{Graph, NodeIndex};
-    use crate::core::trail::TrailedStateManager;
+    use crate::core::trail::StateManager;
     use crate::solver::propagator::SimplePropagator;
 
     #[test]
     fn initial_propagation_simple_implications() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let d: Vec<NodeIndex> = (0..4)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -228,7 +228,7 @@ mod test_simple_propagator_propagation {
 
     #[test]
     fn initial_propagation_chained_implications() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let d: Vec<NodeIndex> = (0..6)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -271,12 +271,12 @@ mod test_simple_propagator_propagation {
 #[cfg(test)]
 mod test_simple_propagator_node_propagation {
     use crate::core::graph::{Graph, NodeIndex};
-    use crate::core::trail::{SaveAndRestore, TrailedStateManager};
+    use crate::core::trail::{SaveAndRestore, StateManager};
     use crate::solver::propagator::SimplePropagator;
 
     #[test]
     fn simple_implications() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let d = g.add_node(false, None, None, &mut state);
         let p1 = g.add_distribution(&vec![1.0], &mut state);
@@ -338,7 +338,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_multiple_edges_different_clauses() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let d = g.add_node(false, None, None, &mut state);
         let d2 = g.add_node(false, None, None, &mut state);
@@ -416,7 +416,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_distribution() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let nodes = g.add_distribution(&vec![0.1, 0.2, 0.7], &mut state);
 
@@ -431,7 +431,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_multiple_implicant_last_false() {
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         let mut g = Graph::new();
         let nodes = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))

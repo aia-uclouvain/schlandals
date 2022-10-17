@@ -31,8 +31,6 @@ pub struct ReversibleBool(ReversibleInt);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReversibleFloat(usize);
 
-pub trait StateManager: SaveAndRestore + IntManager + BoolManager + FloatManager {}
-
 pub trait SaveAndRestore {
     /// Saves the current state of all managed resources
     fn save_state(&mut self);
@@ -106,7 +104,7 @@ enum TrailEntry {
 }
 
 #[derive(Debug, Clone)]
-pub struct TrailedStateManager {
+pub struct StateManager {
     /// This clock is responsible to tell if a data need to be stored on the trail for restitution
     /// or not. If a managed resource X is changed and X.clock < clock, then it needs to be saved
     /// on the trail for restitution. Once the managed resource is updated, X.clock = clock.
@@ -125,7 +123,7 @@ pub struct TrailedStateManager {
     floats: Vec<FloatState>,
 }
 
-impl TrailedStateManager {
+impl StateManager {
     pub fn new() -> Self {
         Self {
             clock: 0,
@@ -141,11 +139,9 @@ impl TrailedStateManager {
     }
 }
 
-impl StateManager for TrailedStateManager {}
-
 // --- Save and restore --- //
 
-impl SaveAndRestore for TrailedStateManager {
+impl SaveAndRestore for StateManager {
     fn save_state(&mut self) {
         // Increment the clock of the state manager. After this, every managed resource will become
         // "invalid" and will need to be stored on the trail if changed
@@ -193,7 +189,7 @@ struct IntState {
     value: isize,
 }
 
-impl IntManager for TrailedStateManager {
+impl IntManager for StateManager {
     fn manage_int(&mut self, value: isize) -> ReversibleInt {
         let id = ReversibleInt(self.integers.len());
         self.integers.push(IntState {
@@ -242,7 +238,7 @@ impl IntManager for TrailedStateManager {
 
 // --- Bool management --- //
 
-impl BoolManager for TrailedStateManager {
+impl BoolManager for StateManager {
     fn manage_boolean(&mut self, value: bool) -> ReversibleBool {
         ReversibleBool(self.manage_int(value as isize))
     }
@@ -270,7 +266,7 @@ struct FloatState {
     value: f64,
 }
 
-impl FloatManager for TrailedStateManager {
+impl FloatManager for StateManager {
     fn manage_float(&mut self, value: f64) -> ReversibleFloat {
         let id = ReversibleFloat(self.floats.len());
         self.floats.push(FloatState {
@@ -320,7 +316,7 @@ mod test_manager {
     #[test]
     #[should_panic]
     fn can_not_get_bool_manage_at_deeper_level() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_boolean(true);
         assert!(mgr.get_bool(a));
 
@@ -341,7 +337,7 @@ mod test_manager {
     #[cfg(debug_assertions)]
     #[should_panic]
     fn can_not_pop_root_level() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_boolean(true);
 
         mgr.save_state();
@@ -358,7 +354,7 @@ mod test_manager_bool {
 
     #[test]
     fn works() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_boolean(false);
         assert!(!mgr.get_bool(a));
 
@@ -396,7 +392,7 @@ mod test_manager_integer {
 
     #[test]
     fn int_manager_return_values() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let ints: Vec<ReversibleInt> = (0..10).map(|i| mgr.manage_int(i as isize)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleInt(i), ints[i]);
@@ -409,7 +405,7 @@ mod test_manager_integer {
 
     #[test]
     fn floats_manager_return_values() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let floats: Vec<ReversibleFloat> = (0..10).map(|i| mgr.manage_float(i as f64)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleFloat(i), floats[i]);
@@ -426,7 +422,7 @@ mod test_manager_integer {
 
     #[test]
     fn bool_manager_return_values() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let bools: Vec<ReversibleBool> = (0..10).map(|i| mgr.manage_boolean(i % 2 == 0)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleBool(ReversibleInt(i)), bools[i]);
@@ -438,7 +434,7 @@ mod test_manager_integer {
 
     #[test]
     fn set_and_restore_works() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_int(10);
         assert_eq!(10, mgr.get_int(a));
 
@@ -485,7 +481,7 @@ mod test_manager_integer {
 
     #[test]
     fn test_increments() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_int(0);
         assert_eq!(0, mgr.get_int(a));
 
@@ -519,7 +515,7 @@ mod test_manager_float {
 
     #[test]
     fn set_and_restore_works() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let a = mgr.manage_float(0.3);
         assert_eq!(0.3, mgr.get_float(a));
 
@@ -550,7 +546,7 @@ mod test_manager_float {
 
     #[test]
     fn add_and_substract_floats() {
-        let mut mgr = TrailedStateManager::new();
+        let mut mgr = StateManager::new();
         let f = mgr.manage_float(0.0);
         assert_eq!(0.0, mgr.get_float(f));
 

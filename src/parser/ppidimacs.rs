@@ -49,9 +49,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-pub fn graph_from_ppidimacs<S: StateManager>(
+pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
-    state: &mut S,
+    state: &mut StateManager,
 ) -> PropagationResult<(Graph, f64)> {
     let mut node_to_propagate: Vec<(NodeIndex, bool)> = Vec::new();
     let mut g = Graph::new();
@@ -140,13 +140,13 @@ mod test_ppidimacs_parsing {
 
     use super::graph_from_ppidimacs;
     use crate::core::graph::NodeIndex;
-    use crate::core::trail::TrailedStateManager;
+    use crate::core::trail::StateManager;
     use std::path::PathBuf;
 
     #[test]
     fn test_file() {
         let mut file = PathBuf::new();
-        let mut state = TrailedStateManager::new();
+        let mut state = StateManager::new();
         file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
         let (g, _) = graph_from_ppidimacs(&file, &mut state).unwrap();
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
