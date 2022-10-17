@@ -1,6 +1,6 @@
 use schlandals;
 use schlandals::branching::FirstBranching;
-use schlandals::components::{DFSComponentExtractor, NoComponentExtractor};
+use schlandals::components::DFSComponentExtractor;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::solver::Solver;
 use schlandals::trail::TrailedStateManager;
@@ -9,148 +9,45 @@ use std::path::PathBuf;
 
 use assert_float_eq::*;
 
-#[test]
-fn test_abc_chain_a0() {
-    assert_f64_near!(
-        0.2_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_a0.ppidimacs")
-    );
+macro_rules! integration_tests_bn {
+    ($($name:ident: $value:expr,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_float_relative_eq!($value, 2_f64.powf(solve_instance(format!("tests/instances/bayesian_networks/{}.ppidimacs", stringify!($name)))), 0.000001);
+            }
+        )*
+    }
 }
 
-#[test]
-fn test_abc_chain_a1() {
-    assert_f64_near!(
-        0.8_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_a1.ppidimacs")
-    );
+integration_tests_bn! {
+    abc_chain_a0: 0.2_f64,
+    abc_chain_a1: 0.8_f64,
+    abc_chain_b0: 0.38_f64,
+    abc_chain_b1: 0.62_f64,
+    abc_chain_c0: 0.348_f64,
+    abc_chain_c1: 0.652_f64,
+    two_parents_p1_true: 0.2_f64,
+    two_parents_p1_false: 0.8_f64,
+    two_parents_p2_true: 0.6_f64,
+    two_parents_p2_false: 0.4_f64,
+    two_parents_child_true: 0.396_f64,
+    two_parents_child_false: 0.604_f64,
+    two_parents_great_children_d_true: 0.6792_f64,
+    two_parents_great_children_d_false: 0.3208_f64,
+    two_parents_great_children_e_true: 0.5188_f64,
+    two_parents_great_children_e_false: 0.4812_f64,
+    asia_xray_true: 0.11029_f64,
+    asia_xray_false: 0.88971_f64,
+    asia_dyspnea_true: 0.435971_f64,
+    asia_dyspnea_false: 0.564029_f64,
 }
 
-#[test]
-fn test_abc_chain_b0() {
-    assert_f64_near!(
-        0.38_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs")
-    );
-}
-
-#[test]
-fn test_abc_chain_b1() {
-    assert_f64_near!(
-        0.62_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_b1.ppidimacs")
-    );
-}
-
-#[test]
-fn test_abc_chain_c0() {
-    assert_f64_near!(
-        0.348_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_c0.ppidimacs")
-    );
-}
-
-#[test]
-fn test_abc_chain_c1() {
-    assert_f64_near!(
-        0.652_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/abc_chain_c1.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_a_true() {
-    assert_f64_near!(
-        0.2_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_p1_true.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_a_false() {
-    assert_f64_near!(
-        0.8_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_p1_false.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_b_true() {
-    assert_f64_near!(
-        0.6_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_p2_true.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_b_false() {
-    assert_f64_near!(
-        0.4_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_p2_false.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_c_true() {
-    assert_f64_near!(
-        0.396_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_true.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_c_false() {
-    assert_f64_near!(
-        0.604_f64.log2(),
-        solve_instance("tests/instances/bayesian_networks/2_parents_false.ppidimacs")
-    );
-}
-
-#[test]
-fn test_parents_2_great_children_d_true() {
-    assert_f64_near!(
-        0.6792_f64.log2(),
-        solve_instance(
-            "tests/instances/bayesian_networks/2_parents_great_children_D_true.ppidimacs"
-        )
-    );
-}
-
-#[test]
-fn test_parents_2_great_children_d_false() {
-    assert_f64_near!(
-        0.3208_f64.log2(),
-        solve_instance(
-            "tests/instances/bayesian_networks/2_parents_great_children_D_false.ppidimacs"
-        )
-    );
-}
-
-#[test]
-fn test_parents_2_great_children_e_true() {
-    assert_f64_near!(
-        0.5188_f64.log2(),
-        solve_instance(
-            "tests/instances/bayesian_networks/2_parents_great_children_E_true.ppidimacs"
-        )
-    );
-}
-
-#[test]
-fn test_parents_2_great_children_e_false() {
-    assert_f64_near!(
-        0.4812_f64.log2(),
-        solve_instance(
-            "tests/instances/bayesian_networks/2_parents_great_children_E_false.ppidimacs"
-        )
-    );
-}
-
-fn solve_instance(filename: &'static str) -> f64 {
+fn solve_instance(filename: String) -> f64 {
     let mut state = TrailedStateManager::new();
     let path = PathBuf::from(filename);
     let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
-    //let component_extractor = NoComponentExtractor::new(&graph);
     let branching_heuristic = FirstBranching::default();
     let mut solver = Solver::new(graph, state, component_extractor, branching_heuristic);
     solver.solve(v)
