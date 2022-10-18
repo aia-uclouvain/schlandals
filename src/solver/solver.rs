@@ -23,25 +23,25 @@ use rustc_hash::FxHashMap;
 
 pub struct Solver<C, B>
 where
-    C: ComponentExtractor,
+    C: ComponentExtractor + ?Sized,
     B: BranchingDecision,
 {
     graph: Graph,
     state: StateManager,
-    component_extractor: C,
+    component_extractor: Box<C>,
     branching_heuristic: B,
     cache: FxHashMap<u64, f64>,
 }
 
 impl<C, B> Solver<C, B>
 where
-    C: ComponentExtractor,
+    C: ComponentExtractor + ?Sized,
     B: BranchingDecision,
 {
     pub fn new(
         graph: Graph,
         state: StateManager,
-        component_extractor: C,
+        component_extractor: Box<C>,
         branching_heuristic: B,
     ) -> Self {
         Self {

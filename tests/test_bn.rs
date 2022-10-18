@@ -49,6 +49,11 @@ fn solve_instance(filename: String) -> f64 {
     let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
     let branching_heuristic = FirstBranching::default();
-    let mut solver = Solver::new(graph, state, component_extractor, branching_heuristic);
+    let mut solver = Solver::new(
+        graph,
+        state,
+        Box::new(component_extractor),
+        branching_heuristic,
+    );
     solver.solve(v)
 }

@@ -18,7 +18,7 @@ mod core;
 mod parser;
 mod solver;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 use crate::core::components::{ComponentExtractor, DFSComponentExtractor, NoComponentExtractor};
@@ -27,11 +27,22 @@ use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::FirstBranching;
 use solver::solver::Solver;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     #[clap(short, long, value_parser)]
     input: PathBuf,
+    /// How to detect components
+    #[clap(value_enum)]
+    cextractor: CExtractor,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum CExtractor {
+    /// Extract component using a DFS
+    DFS,
+    /// Do not detected components
+    NoExtractor,
 }
 
 fn main() {
@@ -40,7 +51,10 @@ fn main() {
     match graph_from_ppidimacs(&args.input, &mut state) {
         Err(_) => println!("Initial model Unsat"),
         Ok((graph, v)) => {
-            let component_extractor = DFSComponentExtractor::new(&graph, &mut state);
+            let component_extractor: Box<dyn ComponentExtractor> = match args.cextractor {
+                CExtractor::DFS => Box::new(DFSComponentExtractor::new(&graph, &mut state)),
+                CExtractor::NoExtractor => Box::new(NoComponentExtractor::new(&graph)),
+            };
             let branching_heuristic = FirstBranching::default();
             let mut solver = Solver::new(graph, state, component_extractor, branching_heuristic);
             println!("Input file {:?}", args.input);
