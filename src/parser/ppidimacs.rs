@@ -62,14 +62,14 @@ pub fn graph_from_ppidimacs(
     let mut line_count = 0;
     for line in reader.lines() {
         let l = line.unwrap();
-        if l.starts_with("c") {
+        if l.starts_with('c') {
             continue;
         }
         if l.starts_with("p cfn") {
             // Header, parse the number of clauses and variables
             let mut split = l.split_whitespace();
             number_nodes = Some(split.nth(2).unwrap().parse::<usize>().unwrap());
-        } else if l.starts_with("d") {
+        } else if l.starts_with('d') {
             if distribution_definition_finished {
                 panic!("[Parsing error at line {}] All distribution should be defined before the clauses", line_count);
             }
@@ -94,18 +94,18 @@ pub fn graph_from_ppidimacs(
             let split = l.split_whitespace().collect::<Vec<&str>>();
             let positive_literals = split
                 .iter()
-                .filter(|x| !x.starts_with("-"))
+                .filter(|x| !x.starts_with('-'))
                 .map(|x| x.parse::<usize>().unwrap())
                 .collect::<Vec<usize>>();
             let negative_literals = split
                 .iter()
-                .filter(|x| x.starts_with("-"))
-                .map(|x| x.parse::<isize>().unwrap() * -1)
+                .filter(|x| x.starts_with('-'))
+                .map(|x| -x.parse::<isize>().unwrap())
                 .collect::<Vec<isize>>();
             if positive_literals.len() > 1 {
                 panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
             }
-            let head = if positive_literals.len() == 0 {
+            let head = if positive_literals.is_empty() {
                 // There is no head in this clause, so it is just a clause of the form
                 //      n1 && n2 && ... && nn =>
                 //  which, in our model implies that the head is false (otherwise it does not
@@ -146,7 +146,7 @@ mod test_ppidimacs_parsing {
     #[test]
     fn test_file() {
         let mut file = PathBuf::new();
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
         let (g, _) = graph_from_ppidimacs(&file, &mut state).unwrap();
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False

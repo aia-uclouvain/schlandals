@@ -123,8 +123,8 @@ pub struct StateManager {
     floats: Vec<FloatState>,
 }
 
-impl StateManager {
-    pub fn new() -> Self {
+impl Default for StateManager {
+    fn default() -> Self {
         Self {
             clock: 0,
             trail: vec![],
@@ -316,7 +316,7 @@ mod test_manager {
     #[test]
     #[should_panic]
     fn can_not_get_bool_manage_at_deeper_level() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_boolean(true);
         assert!(mgr.get_bool(a));
 
@@ -337,7 +337,7 @@ mod test_manager {
     #[cfg(debug_assertions)]
     #[should_panic]
     fn can_not_pop_root_level() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_boolean(true);
 
         mgr.save_state();
@@ -354,7 +354,7 @@ mod test_manager_bool {
 
     #[test]
     fn works() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_boolean(false);
         assert!(!mgr.get_bool(a));
 
@@ -392,7 +392,7 @@ mod test_manager_integer {
 
     #[test]
     fn int_manager_return_values() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let ints: Vec<ReversibleInt> = (0..10).map(|i| mgr.manage_int(i as isize)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleInt(i), ints[i]);
@@ -405,7 +405,7 @@ mod test_manager_integer {
 
     #[test]
     fn floats_manager_return_values() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let floats: Vec<ReversibleFloat> = (0..10).map(|i| mgr.manage_float(i as f64)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleFloat(i), floats[i]);
@@ -422,7 +422,7 @@ mod test_manager_integer {
 
     #[test]
     fn bool_manager_return_values() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let bools: Vec<ReversibleBool> = (0..10).map(|i| mgr.manage_boolean(i % 2 == 0)).collect();
         for i in 0..10 {
             assert_eq!(ReversibleBool(ReversibleInt(i)), bools[i]);
@@ -434,7 +434,7 @@ mod test_manager_integer {
 
     #[test]
     fn set_and_restore_works() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_int(10);
         assert_eq!(10, mgr.get_int(a));
 
@@ -481,7 +481,7 @@ mod test_manager_integer {
 
     #[test]
     fn test_increments() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_int(0);
         assert_eq!(0, mgr.get_int(a));
 
@@ -515,7 +515,7 @@ mod test_manager_float {
 
     #[test]
     fn set_and_restore_works() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let a = mgr.manage_float(0.3);
         assert_eq!(0.3, mgr.get_float(a));
 
@@ -546,7 +546,7 @@ mod test_manager_float {
 
     #[test]
     fn add_and_substract_floats() {
-        let mut mgr = StateManager::new();
+        let mut mgr = StateManager::default();
         let f = mgr.manage_float(0.0);
         assert_eq!(0.0, mgr.get_float(f));
 

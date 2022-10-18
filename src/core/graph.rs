@@ -174,6 +174,12 @@ pub struct Graph {
     distributions: Vec<Distribution>,
 }
 
+impl Default for Graph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Graph {
     pub fn new() -> Self {
         Self {
@@ -222,7 +228,7 @@ impl Graph {
         let start = self.distributions[distribution.0].first.0;
         let size = self.distributions[distribution.0].size;
         let end = start + size;
-        (start..end).map(|i| NodeIndex(i))
+        (start..end).map(NodeIndex)
     }
 
     /// Returns an iterator on the node in the same distribution as `node`
@@ -320,7 +326,7 @@ impl Graph {
     /// Each probabilstic node should be part of one distribution.
     pub fn add_distribution(
         &mut self,
-        weights: &Vec<f64>,
+        weights: &[f64],
         state: &mut StateManager,
     ) -> Vec<NodeIndex> {
         let distribution = DistributionIndex(self.distributions.len());
@@ -540,8 +546,7 @@ impl Graph {
         state: &StateManager,
     ) -> Option<EdgeIndex> {
         self.edges_clause(clause)
-            .filter(|edge| self.is_edge_active(*edge, state))
-            .next()
+            .find(|edge| self.is_edge_active(*edge, state))
     }
 
     /// Returns the edge in the clause whose source is `implicant`, if any
@@ -551,8 +556,7 @@ impl Graph {
         implicant: NodeIndex,
     ) -> Option<EdgeIndex> {
         self.edges_clause(clause)
-            .filter(|edge| self.get_edge_source(*edge) == implicant)
-            .next()
+            .find(|edge| self.get_edge_source(*edge) == implicant)
     }
 }
 
@@ -673,7 +677,7 @@ mod test_node_data {
 
     #[test]
     fn new_can_create_probabilistic_node() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let node = NodeData {
             value: true,
             domain_size: state.manage_int(2),
@@ -692,7 +696,7 @@ mod test_node_data {
 
     #[test]
     fn new_can_create_deterministic_node() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let node = NodeData {
             value: true,
             domain_size: state.manage_int(2),
@@ -718,7 +722,7 @@ mod test_edge_data {
     fn new_can_create_first() {
         let src = NodeIndex(11);
         let dst = NodeIndex(13);
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let edge = EdgeData {
             src,
             dst,
@@ -739,7 +743,7 @@ mod test_edge_data {
         let dst = NodeIndex(64);
         let next_incoming = Some(EdgeIndex(3));
         let next_outgoing = Some(EdgeIndex(102));
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let edge = EdgeData {
             src,
             dst,
@@ -766,7 +770,7 @@ mod test_graph {
 
     #[test]
     fn add_nodes_increment_index() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         for i in 0..10 {
             let idx = g.add_node(false, None, None, &mut state);
@@ -776,7 +780,7 @@ mod test_graph {
 
     #[test]
     fn add_edges_increment_index() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         g.add_node(false, None, None, &mut state);
         g.add_node(false, None, None, &mut state);
@@ -788,7 +792,7 @@ mod test_graph {
 
     #[test]
     fn add_multiple_incoming_edges_to_node() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -817,7 +821,7 @@ mod test_graph {
 
     #[test]
     fn add_multiple_outgoing_edges_to_nodes() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_distribution(&vec![0.2], &mut state)[0];
@@ -835,7 +839,7 @@ mod test_graph {
 
     #[test]
     fn setting_nodes_values() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         assert!(!g.is_node_bound(n1, &state));
@@ -852,7 +856,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_distribution() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         assert_eq!(0, g.distributions.len());
         let weights = vec![0.2, 0.4, 0.1, 0.3];
@@ -871,7 +875,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_multiple_distributions() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let w1 = vec![0.1, 0.3, 0.6];
         let w2 = vec![0.5, 0.4, 0.05, 0.05];
@@ -914,7 +918,7 @@ mod test_graph {
 
     #[test]
     fn graph_add_edges_increases_edge_counts() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1021,7 +1025,7 @@ mod test_graph {
 
     #[test]
     fn add_clause_correctly_add_edges() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g: Graph = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1057,7 +1061,7 @@ mod test_graph {
 
     #[test]
     fn clauses_are_correctly_collected() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n1 = g.add_node(false, None, None, &mut state);
         let n2 = g.add_node(false, None, None, &mut state);
@@ -1107,7 +1111,7 @@ mod test_graph_iterators {
 
     #[test]
     fn nodes_iterator() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let nodes: Vec<NodeIndex> = (0..10)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -1118,7 +1122,7 @@ mod test_graph_iterators {
 
     #[test]
     fn distributions_iterator() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let distributions: Vec<Vec<NodeIndex>> = (0..5)
             .map(|_| g.add_distribution(&vec![0.3, 0.5, 0.2], &mut state))
@@ -1136,7 +1140,7 @@ mod test_graph_iterators {
 
     #[test]
     fn clause_iterator() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n: Vec<NodeIndex> = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))

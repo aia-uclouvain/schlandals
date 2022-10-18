@@ -133,7 +133,7 @@ pub struct DFSComponentExtractor {
 
 impl DFSComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
-        let nodes = (0..g.number_nodes()).map(|i| NodeIndex(i)).collect();
+        let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
         let positions = (0..g.number_nodes()).collect();
         let components = vec![Component {
             start: 0,
@@ -141,7 +141,7 @@ impl DFSComponentExtractor {
             hash: 0,
         }];
         let first_distributions = (0..g.number_distributions())
-            .map(|i| DistributionIndex(i))
+            .map(DistributionIndex)
             .collect::<FxHashSet<DistributionIndex>>();
         let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
         let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
@@ -172,8 +172,8 @@ impl DFSComponentExtractor {
         // If the node is bound, then it is not part of any component. In the same manner, if its
         // position is already in the part of the component that has been processed, then we must
         // not visit again
-        if !g.is_node_bound(node, state)
-            && !(comp_start <= node_pos && node_pos < (comp_start + *comp_size))
+        if !(g.is_node_bound(node, state)
+            || (comp_start <= node_pos && node_pos < (comp_start + *comp_size)))
         {
             // Adds the node random bits to the hash
             *hash ^= self.nodes_bits[node.0];
@@ -299,7 +299,7 @@ impl NoComponentExtractor {
         components.push(nodes);
         let mut distributions: Vec<FxHashSet<DistributionIndex>> = vec![];
         let ds = (0..g.number_distributions())
-            .map(|i| DistributionIndex(i))
+            .map(DistributionIndex)
             .collect::<FxHashSet<DistributionIndex>>();
         distributions.push(ds);
         Self {
@@ -362,12 +362,11 @@ mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex, DFSComponentExtractor};
     use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
     use crate::core::trail::{IntManager, SaveAndRestore, StateManager};
-    use rustc_hash::{FxHashSet, FxHasher};
-    use std::hash::Hasher;
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn test_initialiaztion_extractor() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -386,7 +385,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_extractor_distribution() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -407,7 +406,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_single_component() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -432,7 +431,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_initialization_multiple_components() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -472,7 +471,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_breaking_components() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -498,7 +497,7 @@ mod test_dfs_component {
 
     #[test]
     fn test_breaking_component_but_backtrack() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -533,7 +532,7 @@ mod test_dfs_component {
 
     #[test]
     fn distributions_in_components() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..2)
             .map(|_| g.add_node(false, None, None, &mut state))

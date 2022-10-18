@@ -25,7 +25,7 @@ use crate::core::components::{ComponentExtractor, DFSComponentExtractor, NoCompo
 use crate::core::trail::StateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::FirstBranching;
-use solver::solver::Solver;
+use solver::sequential::Solver;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -40,19 +40,19 @@ struct Args {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum CExtractor {
     /// Extract component using a DFS
-    DFS,
+    Dfs,
     /// Do not detected components
     NoExtractor,
 }
 
 fn main() {
     let args = Args::parse();
-    let mut state = StateManager::new();
+    let mut state = StateManager::default();
     match graph_from_ppidimacs(&args.input, &mut state) {
         Err(_) => println!("Initial model Unsat"),
         Ok((graph, v)) => {
             let component_extractor: Box<dyn ComponentExtractor> = match args.cextractor {
-                CExtractor::DFS => Box::new(DFSComponentExtractor::new(&graph, &mut state)),
+                CExtractor::Dfs => Box::new(DFSComponentExtractor::new(&graph, &mut state)),
                 CExtractor::NoExtractor => Box::new(NoComponentExtractor::new(&graph)),
             };
             let branching_heuristic = FirstBranching::default();

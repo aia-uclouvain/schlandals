@@ -2,7 +2,7 @@ use schlandals;
 use schlandals::branching::FirstBranching;
 use schlandals::components::DFSComponentExtractor;
 use schlandals::ppidimacs::graph_from_ppidimacs;
-use schlandals::solver::solver::Solver;
+use schlandals::solver::sequential::Solver;
 use schlandals::trail::StateManager;
 
 use std::path::PathBuf;
@@ -44,7 +44,7 @@ integration_tests_bn! {
 }
 
 fn solve_instance(filename: String) -> f64 {
-    let mut state = StateManager::new();
+    let mut state = StateManager::default();
     let path = PathBuf::from(filename);
     let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
     let component_extractor = DFSComponentExtractor::new(&graph, &mut state);

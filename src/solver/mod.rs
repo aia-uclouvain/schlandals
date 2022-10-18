@@ -16,4 +16,4 @@
 
 pub mod branching;
 pub mod propagator;
-pub mod solver;
+pub mod sequential;

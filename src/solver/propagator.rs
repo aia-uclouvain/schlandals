@@ -174,7 +174,7 @@ mod test_simple_propagator_propagation {
 
     #[test]
     fn initial_propagation_simple_implications() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let d: Vec<NodeIndex> = (0..4)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -209,7 +209,7 @@ mod test_simple_propagator_propagation {
 
     #[test]
     fn initial_propagation_chained_implications() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let d: Vec<NodeIndex> = (0..6)
             .map(|_| g.add_node(false, None, None, &mut state))
@@ -257,7 +257,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn simple_implications() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let d = g.add_node(false, None, None, &mut state);
         let p1 = g.add_distribution(&vec![1.0], &mut state);
@@ -319,7 +319,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_multiple_edges_different_clauses() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let d = g.add_node(false, None, None, &mut state);
         let d2 = g.add_node(false, None, None, &mut state);
@@ -397,7 +397,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_distribution() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let nodes = g.add_distribution(&vec![0.1, 0.2, 0.7], &mut state);
 
@@ -412,7 +412,7 @@ mod test_simple_propagator_node_propagation {
 
     #[test]
     fn test_multiple_implicant_last_false() {
-        let mut state = StateManager::new();
+        let mut state = StateManager::default();
         let mut g = Graph::new();
         let nodes = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))

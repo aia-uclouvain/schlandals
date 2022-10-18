@@ -29,7 +29,7 @@ pub struct FirstBranching;
 
 impl BranchingDecision for FirstBranching {
     fn branch_on(&mut self, distributions: &[DistributionIndex]) -> Option<DistributionIndex> {
-        if distributions.len() == 0 {
+        if distributions.is_empty() {
             None
         } else {
             Some(distributions[0])
