@@ -51,12 +51,17 @@ fn main() {
     match graph_from_ppidimacs(&args.input, &mut state) {
         Err(_) => println!("Initial model Unsat"),
         Ok((graph, v)) => {
-            let component_extractor: Box<dyn ComponentExtractor> = match args.cextractor {
+            let mut component_extractor: Box<dyn ComponentExtractor> = match args.cextractor {
                 CExtractor::Dfs => Box::new(DFSComponentExtractor::new(&graph, &mut state)),
                 CExtractor::NoExtractor => Box::new(NoComponentExtractor::new(&graph)),
             };
             let branching_heuristic = FirstBranching::default();
-            let mut solver = Solver::new(graph, state, component_extractor, branching_heuristic);
+            let mut solver = Solver::new(
+                graph,
+                state,
+                component_extractor.as_mut(),
+                branching_heuristic,
+            );
             println!("Input file {:?}", args.input);
             let value = solver.solve(v);
             println!("Solution is {} (prob {})", value, 2_f64.powf(value));

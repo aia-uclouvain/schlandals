@@ -21,19 +21,19 @@ use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
 use rustc_hash::FxHashMap;
 
-pub struct Solver<C, B>
+pub struct Solver<'c, C, B>
 where
     C: ComponentExtractor + ?Sized,
     B: BranchingDecision,
 {
     graph: Graph,
     state: StateManager,
-    component_extractor: Box<C>,
+    component_extractor: &'c mut C,
     branching_heuristic: B,
     cache: FxHashMap<u64, f64>,
 }
 
-impl<C, B> Solver<C, B>
+impl<'c, C, B> Solver<'c, C, B>
 where
     C: ComponentExtractor + ?Sized,
     B: BranchingDecision,
@@ -41,7 +41,7 @@ where
     pub fn new(
         graph: Graph,
         state: StateManager,
-        component_extractor: Box<C>,
+        component_extractor: &'c mut C,
         branching_heuristic: B,
     ) -> Self {
         Self {
