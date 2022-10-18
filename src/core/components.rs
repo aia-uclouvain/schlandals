@@ -19,7 +19,8 @@
 //!     1. There is an edge u-v in the graph (each node can be either the source or the
 //!        destination)
 //!     2. This edge is active
-//!     3. u and v are not bound
+//!     or
+//!     1. u and v are probabilistic and in the same distribution
 //!
 //! During the search, the propagators assign values to nodes and deactivate edges. The extractors
 //! must implement the `ComponentExtractor` trait and compute the connected components when
@@ -39,29 +40,37 @@ pub struct ComponentIndex(pub usize);
 /// described above) in the graph
 pub trait ComponentExtractor {
     /// This function is responsible of updating the data structure with the new connected
-    /// components in `g` gien its current assignments.
+    /// components in `g` given its current assignments.
     fn detect_components(&mut self, g: &Graph, state: &mut StateManager, component: ComponentIndex);
     /// Returns the nodes of a given component
     fn get_component(&self, component: ComponentIndex) -> &[NodeIndex];
     /// Returns the hash of a given component. This is the job of the implementing data structure
     /// to ensure that the same component gives the same hash, even if it appears in another part
-    /// of the search tree
+    /// of the search tree. This means that, in practice, the hash should give the same hash even
+    /// if the "order" of the nodes and/or edges in the component is changed.
     fn get_component_hash(&self, component: ComponentIndex) -> u64;
     /// Returns the distributions in a given component
     fn get_component_distributions(
         &self,
         component: ComponentIndex,
     ) -> &FxHashSet<DistributionIndex>;
-    /// Returns an iterator over the current components
+    /// Returns an iterator over the component detected by the last `detect_components` call
     fn components_iter(&self, state: &StateManager) -> ComponentIterator;
-    /// Returns the current number of component
+    /// Returns the current number of component detected by the last `detect_components` call
     fn number_components(&self, state: &StateManager) -> usize;
 }
 
 /// A Component is identified by two integers. The first is the index in the vector of nodes at
 /// which the component starts, and the second is the size of the component.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Component(pub usize, pub usize, pub u64);
+pub struct Component {
+    // First index of the component
+    start: usize,
+    // Size of the component
+    size: usize,
+    // Hash of the component (computed during the detection, or afterward)
+    hash: u64,
+}
 
 pub struct ComponentIterator {
     limit: usize,
@@ -116,7 +125,9 @@ pub struct DFSComponentExtractor {
     base: ReversibleInt,
     /// The first index which is not a component of the current node in the search tree
     limit: ReversibleInt,
+    // Vector of random 64-bits number for the hash computation when a node is in a component
     nodes_bits: Vec<u64>,
+    // Vector of random 64-bits number for the hash computation when an edge is in a component
     edges_bits: Vec<u64>,
 }
 
@@ -124,7 +135,11 @@ impl DFSComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(|i| NodeIndex(i)).collect();
         let positions = (0..g.number_nodes()).collect();
-        let components = vec![Component(0, g.number_nodes(), 0)];
+        let components = vec![Component {
+            start: 0,
+            size: g.number_nodes(),
+            hash: 0,
+        }];
         let first_distributions = (0..g.number_distributions())
             .map(|i| DistributionIndex(i))
             .collect::<FxHashSet<DistributionIndex>>();
@@ -154,9 +169,13 @@ impl DFSComponentExtractor {
         hash: &mut u64,
     ) {
         let node_pos = self.positions[node.0];
+        // If the node is bound, then it is not part of any component. In the same manner, if its
+        // position is already in the part of the component that has been processed, then we must
+        // not visit again
         if !g.is_node_bound(node, state)
             && !(comp_start <= node_pos && node_pos < (comp_start + *comp_size))
         {
+            // Adds the node random bits to the hash
             *hash ^= self.nodes_bits[node.0];
             // The node is swap with the node at position comp_sart + comp_size
             let current_pos = self.positions[node.0];
@@ -210,21 +229,25 @@ impl ComponentExtractor for DFSComponentExtractor {
         component: ComponentIndex,
     ) {
         let end = state.get_int(self.limit);
+        // If we backtracked, then there are component that are not needed anymore, we truncate
+        // them
         self.components.truncate(end as usize);
         self.distributions.truncate(end as usize);
         state.set_int(self.base, end);
         let comp = self.components[component.0];
-        let mut start = comp.0;
-        let end = start + comp.1;
+        let mut start = comp.start;
+        let end = start + comp.size;
+        // We iterate over all the nodes in the component
         while start < end {
             let node = self.nodes[start];
             if !g.is_node_bound(node, state) {
-                let mut comp_size = 0;
+                // If the node is not bound, then we start a new component from it
+                let mut size = 0;
                 self.distributions.push(FxHashSet::default());
                 let mut hash: u64 = 0;
-                self.explore_component(g, node, start, &mut comp_size, state, &mut hash);
-                self.components.push(Component(start, comp_size, hash));
-                start += comp_size;
+                self.explore_component(g, node, start, &mut size, state, &mut hash);
+                self.components.push(Component { start, size, hash });
+                start += size;
             } else {
                 start += 1;
             }
@@ -232,20 +255,17 @@ impl ComponentExtractor for DFSComponentExtractor {
         state.set_int(self.limit, self.components.len() as isize);
     }
 
-    /// Returns the nodes in a given component
     fn get_component(&self, component: ComponentIndex) -> &[NodeIndex] {
         let c = self.components[component.0];
-        &self.nodes[c.0..(c.0 + c.1)]
+        &self.nodes[c.start..(c.start + c.size)]
     }
 
-    /// Returns the hash of a component
     fn get_component_hash(&self, component: ComponentIndex) -> u64 {
         let mut hasher = FxHasher::default();
-        hasher.write_u64(self.components[component.0].2);
+        hasher.write_u64(self.components[component.0].hash);
         hasher.finish()
     }
 
-    /// Returns the distributions in a component
     fn get_component_distributions(
         &self,
         component: ComponentIndex,
@@ -253,14 +273,12 @@ impl ComponentExtractor for DFSComponentExtractor {
         &self.distributions[component.0]
     }
 
-    /// Returns an iterator over the node in a component
     fn components_iter(&self, state: &StateManager) -> ComponentIterator {
         let start = state.get_int(self.base) as usize;
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
     }
 
-    /// Returns the number of components detected by the last call of `detect_components`
     fn number_components(&self, state: &StateManager) -> usize {
         (state.get_int(self.limit) - state.get_int(self.base)) as usize
     }

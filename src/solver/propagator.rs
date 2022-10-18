@@ -27,9 +27,13 @@ pub type PropagationResult<T> = Result<T, Unsat>;
 /// The following rules are enforced
 ///     1. If a deterministic node has no outgoing or incoming active edges, set it to,
 ///        respectively, true or false.
+///     2. If a node is set to true (resp. false) and is the head (resp. in the body) of the
+///        clause, the clause (and all its edges) are deactivated).
 ///     2. If a node n in the body of a clause (with head h) is set to true, deactivate the edge
 ///        n->h
-///     3. If a clause has no more active edge, and the head is not bound, set the head to true
+///     3. If an active clause has no more active edge, and the head is not bound, set the head to true.
+///        In that case all the edges are deactived because their source is true and so the head
+///        must be true
 ///     4. If a node in a distribution is set to true, then all other node in the distribution must
 ///        be false
 ///     5. If there is only 1 node unset in a distribution, set it to true
@@ -37,34 +41,11 @@ pub trait SimplePropagator {
     /// This is the global propagation algorithm. This run on the whole graph and when the value of
     /// a node can be infered, it launches `propagate_node`.
     fn propagate(&mut self, state: &mut StateManager) -> PropagationResult<f64>;
-    /// Implements de propagator logics when `node` is set to `value`. This breaks down as follows
-    ///
-    /// case 1: `value = true`:
-    ///     - All the clauses B => h with h = `node` are deactivated. This is fine because the
-    ///     implication is always respected, whatever choice is made for the node in B.
-    ///     - For all clauses B => h such that `node` is in B, the edge `node` -> h is deactivated.
-    ///     This is equivalent to "removing" `node` from the body of the clause. If the number of
-    ///     active edges in the clause becomes 0, then we have that h **must** be true since in
-    ///     that case all literal in B are true.
-    ///
-    /// case 2: `value = false`:
-    ///     - All the clauses B => h with `node` in B can be deactivated, for the same reasons as
-    ///     in case 1
-    ///     - For all clause B => `node`, at least one literal in the body must be set to false. If
-    ///     the body has only one literal, it is set to false.
-    ///
-    /// While deactivating the edges, the following conditions are checked:
-    ///     1. If a deterministic node has no more outgoing edges, it is set to true. In this case,
-    ///        the node appears only as head in its clauses. Setting it to true will never yield
-    ///        interpretation that are not models and thus can be done safely
-    ///     2. If a deterministic node has no more incoming edges, it is set to false. In this
-    ///        case, the node only appears in the body of the clauses, and by the same reasoning
-    ///        setting it to false is safe.
-    ///     3. If a clause B => h with h set to false has only one active edge remaining, the
-    ///        source of this edge is set to false. In that case the clause is still active, and
-    ///        all other literals in the body are set to true. In order to be a model, the last one
-    ///        must be false
-    ///         
+    /// This implement the propagation of `node` to `value`. It ensures that all the nodes for
+    /// which a value can be inferred, after setting `node` to `value` are propagated recursively.
+    /// Returns either Unsat if the assignment make the clauses not satisfiable or a float
+    /// representing the probability of the assigned node (i.e. the product (or sum in log-space)
+    /// of the probability of the probabilistic nodes set to true).
     fn propagate_node(
         &mut self,
         node: NodeIndex,

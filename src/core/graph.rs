@@ -40,7 +40,6 @@
 //! implementation does not have problems like dangling indexes.
 
 use super::trail::*;
-use std::ops::{BitXor, BitXorAssign};
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
@@ -519,10 +518,12 @@ impl Graph {
         state.get_int(self.clauses[clause.0].active_edges)
     }
 
+    /// Deactivate a clause
     pub fn deactivate_clause(&self, clause: ClauseIndex, state: &mut StateManager) {
         state.set_bool(self.clauses[clause.0].active, false);
     }
 
+    /// Returns true if the clause is active, false otherwise
     pub fn is_clause_active(&self, clause: ClauseIndex, state: &StateManager) -> bool {
         state.get_bool(self.clauses[clause.0].active)
     }
@@ -532,6 +533,7 @@ impl Graph {
         self.clauses[clause.0].head
     }
 
+    // Returns the first active edge in the clause, if any
     pub fn get_first_active_edge(
         &self,
         clause: ClauseIndex,
@@ -542,6 +544,7 @@ impl Graph {
             .next()
     }
 
+    /// Returns the edge in the clause whose source is `implicant`, if any
     pub fn get_edge_with_implicant(
         &self,
         clause: ClauseIndex,
@@ -658,20 +661,6 @@ impl Iterator for EdgesClause {
             self.next += 1;
             Some(EdgeIndex(self.next - 1))
         }
-    }
-}
-
-impl BitXor for NodeIndex {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(self.0 ^ rhs.0)
-    }
-}
-
-impl BitXorAssign for NodeIndex {
-    fn bitxor_assign(&mut self, rhs: Self) {
-        self.0 ^= rhs.0;
     }
 }
 
