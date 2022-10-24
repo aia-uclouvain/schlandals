@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use crate::core::components::{ComponentExtractor, DFSComponentExtractor, NoComponentExtractor};
 use crate::core::trail::StateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
-use solver::branching::FirstBranching;
+use solver::branching::*;
 use solver::sequential::Solver;
 
 #[derive(Parser)]
@@ -33,8 +33,11 @@ struct Args {
     #[clap(short, long, value_parser)]
     input: PathBuf,
     /// How to detect components
-    #[clap(value_enum)]
+    #[clap(short, long, value_enum)]
     cextractor: CExtractor,
+    // How to branch
+    #[clap(short, long, value_enum)]
+    branching: Branching,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -43,6 +46,14 @@ enum CExtractor {
     Dfs,
     /// Do not detected components
     NoExtractor,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Branching {
+    // Linear branching on the distributions
+    First,
+    // Active degree of the disributions
+    ActiveDegree,
 }
 
 fn main() {
@@ -55,12 +66,15 @@ fn main() {
                 CExtractor::Dfs => Box::new(DFSComponentExtractor::new(&graph, &mut state)),
                 CExtractor::NoExtractor => Box::new(NoComponentExtractor::new(&graph)),
             };
-            let branching_heuristic = FirstBranching::default();
+            let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
+                Branching::First => Box::new(FirstBranching::default()),
+                Branching::ActiveDegree => Box::new(ActiveDegreeBranching::default()),
+            };
             let mut solver = Solver::new(
                 graph,
                 state,
                 component_extractor.as_mut(),
-                branching_heuristic,
+                branching_heuristic.as_mut(),
             );
             println!("Input file {:?}", args.input);
             let value = solver.solve(v);

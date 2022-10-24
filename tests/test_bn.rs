@@ -1,6 +1,6 @@
 use schlandals;
-use schlandals::branching::FirstBranching;
-use schlandals::components::DFSComponentExtractor;
+use schlandals::branching::*;
+use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::sequential::Solver;
 use schlandals::trail::StateManager;
@@ -14,7 +14,16 @@ macro_rules! integration_tests_bn {
         $(
             #[test]
             fn $name() {
-                assert_float_relative_eq!($value, 2_f64.powf(solve_instance(format!("tests/instances/bayesian_networks/{}.ppidimacs", stringify!($name)))), 0.000001);
+                let filename = format!("tests/instances/bayesian_networks/{}.ppidimacs", stringify!($name));
+                let mut state = StateManager::default();
+                let path = PathBuf::from(filename);
+                let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
+                let mut component_extractor = DFSComponentExtractor::new(&graph, &mut state);
+                //let branching_heuristic = FirstBranching::default();
+                let mut branching_heuristic = ActiveDegreeBranching::default();
+                let mut solver = Solver::new(graph, state, &mut component_extractor, &mut branching_heuristic);
+                let sol = solver.solve(v);
+                assert_float_relative_eq!($value, 2_f64.powf(sol), 0.000001);
             }
         )*
     }
@@ -41,14 +50,4 @@ integration_tests_bn! {
     asia_xray_false: 0.88971_f64,
     asia_dyspnea_true: 0.435971_f64,
     asia_dyspnea_false: 0.564029_f64,
-}
-
-fn solve_instance(filename: String) -> f64 {
-    let mut state = StateManager::default();
-    let path = PathBuf::from(filename);
-    let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
-    let mut component_extractor = DFSComponentExtractor::new(&graph, &mut state);
-    let branching_heuristic = FirstBranching::default();
-    let mut solver = Solver::new(graph, state, &mut component_extractor, branching_heuristic);
-    solver.solve(v)
 }

@@ -21,28 +21,28 @@ use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
 use rustc_hash::FxHashMap;
 
-pub struct Solver<'c, C, B>
+pub struct Solver<'c, 'b, C, B>
 where
     C: ComponentExtractor + ?Sized,
-    B: BranchingDecision,
+    B: BranchingDecision + ?Sized,
 {
     graph: Graph,
     state: StateManager,
     component_extractor: &'c mut C,
-    branching_heuristic: B,
+    branching_heuristic: &'b mut B,
     cache: FxHashMap<u64, f64>,
 }
 
-impl<'c, C, B> Solver<'c, C, B>
+impl<'c, 'b, C, B> Solver<'c, 'b, C, B>
 where
     C: ComponentExtractor + ?Sized,
-    B: BranchingDecision,
+    B: BranchingDecision + ?Sized,
 {
     pub fn new(
         graph: Graph,
         state: StateManager,
         component_extractor: &'c mut C,
-        branching_heuristic: B,
+        branching_heuristic: &'b mut B,
     ) -> Self {
         Self {
             graph,
@@ -71,6 +71,8 @@ where
     /// Computes the projected weighted model count of the component
     fn solve_component(&mut self, component: ComponentIndex) -> f64 {
         let decision = self.branching_heuristic.branch_on(
+            &self.graph,
+            &self.state,
             &self
                 .component_extractor
                 .get_component_distributions(component)
