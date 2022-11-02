@@ -97,6 +97,9 @@ where
                         let mut o = v;
                         for sub_component in self.component_extractor.components_iter(&self.state) {
                             o += self.get_cached_component_or_compute(sub_component);
+                            if o == f64::NEG_INFINITY {
+                                break;
+                            }
                         }
                         if o != f64::NEG_INFINITY {
                             branch_objectives.push(o);
