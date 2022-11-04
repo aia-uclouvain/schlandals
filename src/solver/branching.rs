@@ -63,10 +63,37 @@ impl BranchingDecision for ActiveDegreeBranching {
         for d in distributions {
             let active_degree: isize = g
                 .distribution_iter(*d)
-                .map(|n| g.node_number_outgoing(n, state) + g.node_number_outgoing(n, state))
+                .filter(|n| g.is_node_bound(*n, state))
+                .map(|n| g.node_number_outgoing(n, state) + g.node_number_incoming(n, state))
                 .sum();
             if active_degree > best_score {
                 best_score = active_degree;
+                distribution = Some(*d);
+            }
+        }
+        distribution
+    }
+}
+
+#[derive(Default)]
+pub struct Fringe;
+
+impl BranchingDecision for Fringe {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        distributions: &[DistributionIndex],
+    ) -> Option<DistributionIndex> {
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = usize::MAX;
+        for d in distributions {
+            let number_node_fringe = g
+                .distribution_iter(*d)
+                .filter(|n| g.is_node_bound(*n, state) && g.node_number_outgoing(*n, state) == 0)
+                .count();
+            if number_node_fringe < best_score {
+                best_score = number_node_fringe;
                 distribution = Some(*d);
             }
         }
