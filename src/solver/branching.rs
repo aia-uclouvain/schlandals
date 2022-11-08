@@ -14,6 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::{DistributionIndex, Graph};
 use crate::core::trail::StateManager;
 
@@ -25,7 +26,8 @@ pub trait BranchingDecision {
         &mut self,
         g: &Graph,
         state: &StateManager,
-        distributions: &[DistributionIndex],
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
     ) -> Option<DistributionIndex>;
 }
 
@@ -38,16 +40,20 @@ impl BranchingDecision for FirstBranching {
         &mut self,
         _g: &Graph,
         _state: &StateManager,
-        distributions: &[DistributionIndex],
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
     ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
         if distributions.is_empty() {
             None
         } else {
-            Some(distributions[0])
+            Some(*distributions.iter().next().unwrap())
         }
     }
 }
 
+/// A branching heuristic that uses the sum of the active degree of the nodes in a distribution as
+/// heuristic to select the next distribution.
 #[derive(Default)]
 pub struct ActiveDegreeBranching;
 
@@ -56,8 +62,10 @@ impl BranchingDecision for ActiveDegreeBranching {
         &mut self,
         g: &Graph,
         state: &StateManager,
-        distributions: &[DistributionIndex],
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
     ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
         let mut distribution: Option<DistributionIndex> = None;
         let mut best_score = -1;
         for d in distributions {
@@ -75,6 +83,8 @@ impl BranchingDecision for ActiveDegreeBranching {
     }
 }
 
+/// A branching heuristic that select distribution based on the number of nodes they have on the
+/// fringe of the component.
 #[derive(Default)]
 pub struct Fringe;
 
@@ -83,8 +93,10 @@ impl BranchingDecision for Fringe {
         &mut self,
         g: &Graph,
         state: &StateManager,
-        distributions: &[DistributionIndex],
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
     ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
         let mut distribution: Option<DistributionIndex> = None;
         let mut best_score = usize::MAX;
         for d in distributions {
@@ -101,9 +113,36 @@ impl BranchingDecision for Fringe {
     }
 }
 
+#[derive(Default)]
+pub struct Articulation;
+
+impl BranchingDecision for Articulation {
+    fn branch_on(
+        &mut self,
+        _g: &Graph,
+        _state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = usize::MIN;
+        for d in distributions {
+            let nb_articulation = component_extractor.get_distribution_ap(*d);
+            if nb_articulation > best_score {
+                best_score = nb_articulation;
+                distribution = Some(*d);
+            }
+        }
+        distribution
+    }
+}
+
+/*
 #[cfg(test)]
 mod test_simple_branching {
     use super::{BranchingDecision, FirstBranching};
+    use crate::core::components::ComponentExtractor;
     use crate::core::graph::{DistributionIndex, Graph};
     use crate::core::trail::StateManager;
 
@@ -111,16 +150,18 @@ mod test_simple_branching {
     fn test_branching_distribution_order() {
         let _g = Graph::default();
         let _state = StateManager::default();
+        let component_extractor = ComponentExtractor::new(&_g, &mut _state);
         let mut distributions: Vec<DistributionIndex> =
             (0..5).map(|i| DistributionIndex(i)).collect();
         let mut b = FirstBranching::default();
         for i in 0..5 {
             assert_eq!(
                 Some(DistributionIndex(i)),
-                b.branch_on(&_g, &_state, &mut distributions)
+                b.branch_on(&_g, &_state, &component_extractor, )
             );
             distributions.remove(0);
         }
         assert_eq!(None, b.branch_on(&_g, &_state, &mut distributions));
     }
 }
+    */

@@ -21,27 +21,25 @@ use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
 use rustc_hash::FxHashMap;
 
-pub struct Solver<'c, 'b, C, B>
+pub struct Solver<'b, B>
 where
-    C: ComponentExtractor + ?Sized,
     B: BranchingDecision + ?Sized,
 {
     graph: Graph,
     state: StateManager,
-    component_extractor: &'c mut C,
+    component_extractor: ComponentExtractor,
     branching_heuristic: &'b mut B,
     cache: FxHashMap<u64, f64>,
 }
 
-impl<'c, 'b, C, B> Solver<'c, 'b, C, B>
+impl<'b, B> Solver<'b, B>
 where
-    C: ComponentExtractor + ?Sized,
     B: BranchingDecision + ?Sized,
 {
     pub fn new(
         graph: Graph,
         state: StateManager,
-        component_extractor: &'c mut C,
+        component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
     ) -> Self {
         Self {
@@ -73,12 +71,8 @@ where
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
             &self.state,
-            &self
-                .component_extractor
-                .get_component_distributions(component)
-                .iter()
-                .copied()
-                .collect::<Vec<DistributionIndex>>(),
+            &self.component_extractor,
+            component,
         );
         if let Some(distribution) = decision {
             let mut branch_objectives: Vec<f64> = vec![];

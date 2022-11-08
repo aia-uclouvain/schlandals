@@ -20,11 +20,16 @@
 //!        destination)
 //!     2. This edge is active
 //!     or
-//!     1. u and v are probabilistic and in the same distribution
+//!     1. u and v are probabilistic nodes and in the same distribution
 //!
-//! During the search, the propagators assign values to nodes and deactivate edges. The extractors
-//! must implement the `ComponentExtractor` trait and compute the connected components when
-//! `find_components` is called. This can be done incrementally or not.
+//!
+//! The main extractor is based on a simple DFS on the graph, checking if two nodes are connected
+//! as defined above. During this DFS the extractor is also responsible for retrieving information
+//! about the connected component being processed. These informations might be used in the
+//! branching heuristics to help decompose the problem.
+//! This module also provides a special extractor that do not detect any components (i.e. it always
+//! returns a single component with every non-assigned node in the graph). This extractor should
+//! only be used for debugging purposes.
 
 use super::graph::{DistributionIndex, Graph, NodeIndex};
 use super::trail::*;
@@ -34,31 +39,6 @@ use std::hash::Hasher;
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ComponentIndex(pub usize);
-
-/// This trait describes how components extractor must be implemented. An extractor of components
-/// is a data structure that can, during the search, gives a list of the connected components (as
-/// described above) in the graph
-pub trait ComponentExtractor {
-    /// This function is responsible of updating the data structure with the new connected
-    /// components in `g` given its current assignments.
-    fn detect_components(&mut self, g: &Graph, state: &mut StateManager, component: ComponentIndex);
-    /// Returns the nodes of a given component
-    fn get_component(&self, component: ComponentIndex) -> &[NodeIndex];
-    /// Returns the hash of a given component. This is the job of the implementing data structure
-    /// to ensure that the same component gives the same hash, even if it appears in another part
-    /// of the search tree. This means that, in practice, the hash should give the same hash even
-    /// if the "order" of the nodes and/or edges in the component is changed.
-    fn get_component_hash(&self, component: ComponentIndex) -> u64;
-    /// Returns the distributions in a given component
-    fn get_component_distributions(
-        &self,
-        component: ComponentIndex,
-    ) -> &FxHashSet<DistributionIndex>;
-    /// Returns an iterator over the component detected by the last `detect_components` call
-    fn components_iter(&self, state: &StateManager) -> ComponentIterator;
-    /// Returns the current number of component detected by the last `detect_components` call
-    fn number_components(&self, state: &StateManager) -> usize;
-}
 
 /// A Component is identified by two integers. The first is the index in the vector of nodes at
 /// which the component starts, and the second is the size of the component.
@@ -91,27 +71,24 @@ impl Iterator for ComponentIterator {
 }
 
 /// This structure is an extractor of component that works by doing a DFS on the component to
-/// extract sub-components. It works by keeping all the `NodeIndex` in a single vector (the `nodes`
-/// vector) so that all the nodes of a component are in a contiguous part of the vectors.
-/// Thus in that case a component is simply two integers
+/// extract sub-components. It keeps all the `NodeIndex` in a single vector (the `nodes`
+/// vector) and maintain the property that all the nodes of a component are in a contiguous
+/// part of the vectors. All the nodes of a component can be identified by two integers:
 ///     1. The index of the first node in the component
 ///     2. The size of the component
 ///
-/// Since the DFS is done using the `Graph` structure (i.e. following the edges of a node), a
-/// second vector for the position of each node is kept.
-/// This second vector is also used to know if a node has been processed or not. If the current
-/// component starts at index 0 and has already 4 elements in it, a node which position is 2 has
-/// already been processed during the DFS and can be safely ignored.
-/// Finally in order to be safe during the search and more specifically the backtrack, the nodes in
-/// `nodes` are moved inside the component.
+/// A second vector, `positions`, is used to keep track of the position of each node in `nodes`
+/// (since they are swapped from their initial position).
 /// For instance let us assume that we have two components, the `nodes` vector might looks like
 /// [0, 2, 4, 1 | 5, 7 ] (the | is the separation between the two components, and integers
 /// represent the nodes).
 /// If now the first component is split in two, the nodes are moved in the sub-vectors spanning the
 /// first four indexes. Thus (assuming 0 and 1 are in the same component and 2 and 4 in another),
 /// this is a valid representation of the new vector [0, 1 | 2, 4 | 5, 7] while this is not
-/// [2, 4 | 5, 7 | 0, 1]
-pub struct DFSComponentExtractor {
+/// [2, 4 | 5, 7 | 0, 1].
+/// During the DFS, the extractor also apply Tarjan's algorithm for finding articulation nodes
+/// (nodes that, if removed, divide the graph in two disconnected part).
+pub struct ComponentExtractor {
     /// The vector containing the nodes. All nodes in a component are in a contiguous part of this
     /// vector
     nodes: Vec<NodeIndex>,
@@ -129,9 +106,17 @@ pub struct DFSComponentExtractor {
     nodes_bits: Vec<u64>,
     // Vector of random 64-bits number for the hash computation when an edge is in a component
     edges_bits: Vec<u64>,
+    /// Parents for the bicomponent detection
+    parents: Vec<Option<NodeIndex>>,
+    /// Depth for the bicomponent detection
+    depth: Vec<usize>,
+    /// Lowest for the bicomponent detection
+    low: Vec<usize>,
+    /// Count for each distribution the number of articulation point in it
+    number_articulation_points: Vec<usize>,
 }
 
-impl DFSComponentExtractor {
+impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
         let positions = (0..g.number_nodes()).collect();
@@ -145,6 +130,11 @@ impl DFSComponentExtractor {
             .collect::<FxHashSet<DistributionIndex>>();
         let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
         let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
+        let parents: Vec<Option<NodeIndex>> = (0..g.number_nodes()).map(|_| None).collect();
+        let depth: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
+        let low: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
+        let number_articulation_points: Vec<usize> =
+            (0..g.number_distributions()).map(|_| 0).collect();
         let mut extractor = Self {
             nodes,
             positions,
@@ -154,11 +144,34 @@ impl DFSComponentExtractor {
             limit: state.manage_int(1),
             nodes_bits,
             edges_bits,
+            parents,
+            depth,
+            low,
+            number_articulation_points,
         };
         extractor.detect_components(g, state, ComponentIndex(0));
         extractor
     }
 
+    /// Returns true if the node has not been visited during this DFS
+    fn is_node_visitable(
+        &self,
+        g: &Graph,
+        node: NodeIndex,
+        comp_start: usize,
+        comp_size: &usize,
+        state: &StateManager,
+    ) -> bool {
+        // If the node is bound, then it is not part of any component. In the same manner, if its
+        // position is already in the part of the component that has been processed, then we must
+        // not visit again
+        let node_pos = self.positions[node.0];
+        !(g.is_node_bound(node, state)
+            || (comp_start <= node_pos && node_pos < (comp_start + *comp_size)))
+    }
+
+    /// Recursively explore `node` to find all nodes in its component. If `node` has not been
+    /// visited, adds its hash to the hash of the component.
     fn explore_component(
         &mut self,
         g: &Graph,
@@ -167,14 +180,9 @@ impl DFSComponentExtractor {
         comp_size: &mut usize,
         state: &mut StateManager,
         hash: &mut u64,
+        depth: usize,
     ) {
-        let node_pos = self.positions[node.0];
-        // If the node is bound, then it is not part of any component. In the same manner, if its
-        // position is already in the part of the component that has been processed, then we must
-        // not visit again
-        if !(g.is_node_bound(node, state)
-            || (comp_start <= node_pos && node_pos < (comp_start + *comp_size)))
-        {
+        if self.is_node_visitable(g, node, comp_start, comp_size, state) {
             // Adds the node random bits to the hash
             *hash ^= self.nodes_bits[node.0];
             // The node is swap with the node at position comp_sart + comp_size
@@ -190,6 +198,12 @@ impl DFSComponentExtractor {
             }
             *comp_size += 1;
 
+            // Update the vectors for biconnected component detection
+            self.depth[node.0] = depth;
+            self.low[node.0] = depth;
+            let mut child_count = 0;
+            let mut is_articulation = false;
+
             // If the node is probabilistic, add its distribution to the set of distribution for this
             // component
             // And we need to add the nodes in the distribution in the component
@@ -197,8 +211,15 @@ impl DFSComponentExtractor {
                 let distribution = g.get_distribution(node).unwrap();
                 self.distributions.last_mut().unwrap().insert(distribution);
                 for n in g.distribution_iter(distribution) {
-                    if n != node {
-                        self.explore_component(g, n, comp_start, comp_size, state, hash);
+                    if self.is_node_visitable(g, n, comp_start, comp_size, state) {
+                        self.parents[n.0] = Some(node);
+                        self.explore_component(g, n, comp_start, comp_size, state, hash, depth + 1);
+                        child_count += 1;
+                        if self.low[n.0] >= self.depth[node.0] {
+                            is_articulation = true;
+                        }
+                    } else if self.parents[node.0].is_some() && n != self.parents[node.0].unwrap() {
+                        self.low[node.0] = self.low[node.0].min(self.depth[n.0]);
                     }
                 }
             }
@@ -212,22 +233,73 @@ impl DFSComponentExtractor {
                         }
                         let src = g.get_edge_source(edge);
                         let dst = g.get_edge_destination(edge);
-                        self.explore_component(g, src, comp_start, comp_size, state, hash);
-                        self.explore_component(g, dst, comp_start, comp_size, state, hash);
+                        if self.is_node_visitable(g, src, comp_start, comp_size, state) {
+                            self.parents[src.0] = Some(node);
+                            self.explore_component(
+                                g,
+                                src,
+                                comp_start,
+                                comp_size,
+                                state,
+                                hash,
+                                depth + 1,
+                            );
+                            child_count += 1;
+                            if self.low[src.0] >= self.depth[node.0] {
+                                is_articulation = true;
+                            }
+                        } else if let Some(parent) = self.parents[node.0] {
+                            if parent != node {
+                                self.low[node.0] = self.low[node.0].min(self.depth[src.0]);
+                            }
+                        }
+                        if self.is_node_visitable(g, dst, comp_start, comp_size, state) {
+                            self.parents[dst.0] = Some(node);
+                            self.explore_component(
+                                g,
+                                dst,
+                                comp_start,
+                                comp_size,
+                                state,
+                                hash,
+                                depth + 1,
+                            );
+                            child_count += 1;
+                            if self.low[dst.0] >= self.depth[node.0] {
+                                is_articulation = true;
+                            }
+                        } else if let Some(parent) = self.parents[node.0] {
+                            if parent != node {
+                                self.low[node.0] = self.low[node.0].min(self.depth[dst.0]);
+                            }
+                        }
                     }
                 }
             }
+            if ((self.parents[node.0].is_some() && is_articulation)
+                || (self.parents[node.0].is_none() && child_count > 1))
+                && g.is_node_probabilistic(node)
+            {
+                self.number_articulation_points[g.get_distribution(node).unwrap().0] += 1;
+            }
         }
     }
-}
 
-impl ComponentExtractor for DFSComponentExtractor {
-    fn detect_components(
+    /// This function is responsible of updating the data structure with the new connected
+    /// components in `g` given its current assignments.
+    pub fn detect_components(
         &mut self,
         g: &Graph,
         state: &mut StateManager,
         component: ComponentIndex,
     ) {
+        let c = self.components[component.0];
+        for node in (c.start..(c.start + c.size)).map(NodeIndex) {
+            self.parents[node.0] = None;
+            if g.is_node_probabilistic(node) {
+                self.number_articulation_points[g.get_distribution(node).unwrap().0] = 0;
+            }
+        }
         let end = state.get_int(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
@@ -245,7 +317,7 @@ impl ComponentExtractor for DFSComponentExtractor {
                 let mut size = 0;
                 self.distributions.push(FxHashSet::default());
                 let mut hash: u64 = 0;
-                self.explore_component(g, node, start, &mut size, state, &mut hash);
+                self.explore_component(g, node, start, &mut size, state, &mut hash, 0);
                 self.components.push(Component { start, size, hash });
                 start += size;
             } else {
@@ -255,43 +327,53 @@ impl ComponentExtractor for DFSComponentExtractor {
         state.set_int(self.limit, self.components.len() as isize);
     }
 
+    /// Returns the nodes of a given component
     fn get_component(&self, component: ComponentIndex) -> &[NodeIndex] {
         let c = self.components[component.0];
         &self.nodes[c.start..(c.start + c.size)]
     }
 
-    fn get_component_hash(&self, component: ComponentIndex) -> u64 {
+    /// Returns the hash of a given component. This is the job of the implementing data structure
+    /// to ensure that the same component gives the same hash, even if it appears in another part
+    /// of the search tree. This means that, in practice, the hash should give the same hash even
+    /// if the "order" of the nodes and/or edges in the component is changed.
+    pub fn get_component_hash(&self, component: ComponentIndex) -> u64 {
         let mut hasher = FxHasher::default();
         hasher.write_u64(self.components[component.0].hash);
         hasher.finish()
     }
 
-    fn get_component_distributions(
+    /// Returns the distributions in a given component
+    pub fn get_component_distributions(
         &self,
         component: ComponentIndex,
     ) -> &FxHashSet<DistributionIndex> {
         &self.distributions[component.0]
     }
 
-    fn components_iter(&self, state: &StateManager) -> ComponentIterator {
+    /// Returns an iterator over the component detected by the last `detect_components` call
+    pub fn components_iter(&self, state: &StateManager) -> ComponentIterator {
         let start = state.get_int(self.base) as usize;
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
     }
 
-    fn number_components(&self, state: &StateManager) -> usize {
-        (state.get_int(self.limit) - state.get_int(self.base)) as usize
+    /// Returns the number of articulation point in `distribution`
+    pub fn get_distribution_ap(&self, distribution: DistributionIndex) -> usize {
+        self.number_articulation_points[distribution.0]
     }
 }
 
 /// This structure is used to implement a simple component detector that always returns one
 /// component with all the unassigned node in it. It is used to isolate bugs annd should not be
 /// used for real data sets (as it performences will be terrible)
+#[allow(dead_code)]
 pub struct NoComponentExtractor {
     components: Vec<Vec<NodeIndex>>,
     distributions: Vec<FxHashSet<DistributionIndex>>,
 }
 
+#[allow(dead_code)]
 impl NoComponentExtractor {
     pub fn new(g: &Graph) -> Self {
         let mut components: Vec<Vec<NodeIndex>> = vec![];
@@ -307,9 +389,7 @@ impl NoComponentExtractor {
             distributions,
         }
     }
-}
 
-impl ComponentExtractor for NoComponentExtractor {
     fn detect_components(
         &mut self,
         g: &Graph,
@@ -355,11 +435,15 @@ impl ComponentExtractor for NoComponentExtractor {
     fn number_components(&self, _state: &StateManager) -> usize {
         1
     }
-}
 
+    fn component_size(&self, _component: ComponentIndex) -> usize {
+        0
+    }
+}
 #[cfg(test)]
+
 mod test_dfs_component {
-    use super::{ComponentExtractor, ComponentIndex, DFSComponentExtractor};
+    use super::{ComponentExtractor, ComponentIndex};
     use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
     use crate::core::trail::{IntManager, SaveAndRestore, StateManager};
     use rustc_hash::FxHashSet;
@@ -374,13 +458,15 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let component_extractor = ComponentExtractor::new(&g, &mut state);
         assert_eq!(5, component_extractor.nodes.len());
         assert_eq!(5, component_extractor.positions.len());
         assert_eq!(0, component_extractor.distributions[0].len());
         assert_eq!(1, state.get_int(component_extractor.base));
         assert_eq!(2, state.get_int(component_extractor.limit));
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
     }
 
     #[test]
@@ -395,13 +481,15 @@ mod test_dfs_component {
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
         g.add_clause(n[1], &vec![d[0]], &mut state);
         g.add_clause(n[3], &vec![d[1], d[2]], &mut state);
-        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let component_extractor = ComponentExtractor::new(&g, &mut state);
         assert_eq!(8, component_extractor.nodes.len());
         assert_eq!(8, component_extractor.positions.len());
         assert_eq!(1, component_extractor.distributions[0].len());
         assert_eq!(1, state.get_int(component_extractor.base));
         assert_eq!(2, state.get_int(component_extractor.limit));
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
     }
 
     #[test]
@@ -414,12 +502,14 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
         let nodes = component_extractor
             .get_component(components[0])
             .iter()
@@ -439,12 +529,14 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1]], &mut state);
         g.add_clause(n[2], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(2, components.len());
-        assert_eq!(2, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(2, number_component);
         let n_c1 = component_extractor
             .get_component(components[0])
             .iter()
@@ -479,19 +571,23 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
 
         g.set_node(n[1], true, &mut state);
         component_extractor.detect_components(&g, &mut state, components[0]);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
-        assert_eq!(2, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(2, number_component);
         assert_eq!(2, components.len());
     }
 
@@ -505,12 +601,14 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
 
         state.save_state();
 
@@ -520,14 +618,18 @@ mod test_dfs_component {
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(2, components.len());
-        assert_eq!(2, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(2, number_component);
 
         state.restore_state();
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
         assert_eq!(1, components.len());
-        assert_eq!(1, component_extractor.number_components(&state));
+        let number_component =
+            state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
+        assert_eq!(1, number_component);
     }
 
     #[test]
@@ -545,7 +647,7 @@ mod test_dfs_component {
         g.add_clause(d2[0], &vec![n[0], n[1]], &mut state);
         g.add_clause(n[1], &d3, &mut state);
 
-        let mut component_extractor = DFSComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
         assert_eq!(1, components.len());
         let distributions = component_extractor.get_component_distributions(components[0]);

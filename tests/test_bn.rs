@@ -18,10 +18,11 @@ macro_rules! integration_tests_bn {
                 let mut state = StateManager::default();
                 let path = PathBuf::from(filename);
                 let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
-                let mut component_extractor = DFSComponentExtractor::new(&graph, &mut state);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 //let branching_heuristic = FirstBranching::default();
-                let mut branching_heuristic = ActiveDegreeBranching::default();
-                let mut solver = Solver::new(graph, state, &mut component_extractor, &mut branching_heuristic);
+                //let mut branching_heuristic = ActiveDegreeBranching::default();
+                let mut branching_heuristic = Articulation::default();
+                let mut solver = Solver::new(graph, state, component_extractor, &mut branching_heuristic);
                 let sol = solver.solve(v);
                 assert_float_relative_eq!($value, 2_f64.powf(sol), 0.000001);
             }
