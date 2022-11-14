@@ -327,12 +327,6 @@ impl ComponentExtractor {
         state.set_int(self.limit, self.components.len() as isize);
     }
 
-    /// Returns the nodes of a given component
-    fn get_component(&self, component: ComponentIndex) -> &[NodeIndex] {
-        let c = self.components[component.0];
-        &self.nodes[c.start..(c.start + c.size)]
-    }
-
     /// Returns the hash of a given component. This is the job of the implementing data structure
     /// to ensure that the same component gives the same hash, even if it appears in another part
     /// of the search tree. This means that, in practice, the hash should give the same hash even
@@ -408,10 +402,6 @@ impl NoComponentExtractor {
         }
         self.components.push(nodes);
         self.distributions.push(distributions);
-    }
-
-    fn get_component(&self, component: ComponentIndex) -> &[NodeIndex] {
-        &self.components[component.0]
     }
 
     fn get_component_hash(&self, _component: ComponentIndex) -> u64 {
@@ -510,8 +500,9 @@ mod test_dfs_component {
         let number_component =
             state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
         assert_eq!(1, number_component);
-        let nodes = component_extractor
-            .get_component(components[0])
+
+        let c0 = component_extractor.components[components[0].0];
+        let nodes = component_extractor.nodes[c0.start..(c0.start + c0.size)]
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
@@ -537,8 +528,8 @@ mod test_dfs_component {
         let number_component =
             state.get_int(component_extractor.limit) - state.get_int(component_extractor.base);
         assert_eq!(2, number_component);
-        let n_c1 = component_extractor
-            .get_component(components[0])
+        let c0 = component_extractor.components[components[0].0];
+        let n_c1 = component_extractor.nodes[c0.start..(c0.start + c0.size)]
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
@@ -550,8 +541,8 @@ mod test_dfs_component {
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
-        let n_c2 = component_extractor
-            .get_component(components[1])
+        let c1 = component_extractor.components[components[1].0];
+        let n_c2 = component_extractor.nodes[c1.start..(c1.start + c1.size)]
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
