@@ -89,6 +89,10 @@ impl SimplePropagator for Graph {
             0.0
         };
 
+        if propagation_prob == f64::NEG_INFINITY {
+            return PropagationResult::Err(Unsat);
+        }
+
         let clauses = self
             .node_clauses(node)
             .filter(|clause| self.is_clause_active(*clause, state))

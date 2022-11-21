@@ -19,8 +19,6 @@ macro_rules! integration_tests_bn {
                 let path = PathBuf::from(filename);
                 let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                //let branching_heuristic = FirstBranching::default();
-                //let mut branching_heuristic = ActiveDegreeBranching::default();
                 let mut branching_heuristic = Articulation::default();
                 let mut solver = Solver::new(graph, state, component_extractor, &mut branching_heuristic);
                 let sol = solver.solve(v);
