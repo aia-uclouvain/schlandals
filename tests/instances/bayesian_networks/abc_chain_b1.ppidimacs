@@ -2,7 +2,7 @@ c Simple bayesian network with three variables A B C with each 2 values
 c B is dependent on A and C is depedent on B (this is a chain)
 c Some probabilities
 c P(B=1) = 0.56
-p cfn 16 11
+p cnf 16 11
 c --- Start of the distributions ---
 c a0  a1
 d 0.2 0.8

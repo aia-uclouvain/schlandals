@@ -65,7 +65,7 @@ pub fn graph_from_ppidimacs(
         if l.starts_with('c') {
             continue;
         }
-        if l.starts_with("p cfn") {
+        if l.starts_with("p cnf") {
             // Header, parse the number of clauses and variables
             let mut split = l.split_whitespace();
             number_nodes = Some(split.nth(2).unwrap().parse::<usize>().unwrap());

@@ -1,4 +1,4 @@
-p cfn 30 21
+p cnf 30 21
 c --- DISTRIBUTIONS ---
 c Distributions of var A
 c TRUE FALSE
