@@ -113,7 +113,7 @@ pub struct ComponentExtractor {
     /// Lowest for the bicomponent detection
     low: Vec<usize>,
     /// Count for each distribution the number of articulation point in it
-    number_articulation_points: Vec<usize>,
+    ap_heuristic_score: Vec<usize>,
 }
 
 impl ComponentExtractor {
@@ -133,9 +133,8 @@ impl ComponentExtractor {
         let parents: Vec<Option<NodeIndex>> = (0..g.number_nodes()).map(|_| None).collect();
         let depth: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
         let low: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
-        let number_articulation_points: Vec<usize> =
-            (0..g.number_distributions()).map(|_| 0).collect();
-        let mut extractor = Self {
+        let ap_heuristic_score: Vec<usize> = (0..g.number_distributions()).map(|_| 0).collect();
+        Self {
             nodes,
             positions,
             components,
@@ -147,10 +146,8 @@ impl ComponentExtractor {
             parents,
             depth,
             low,
-            number_articulation_points,
-        };
-        extractor.detect_components(g, state, ComponentIndex(0));
-        extractor
+            ap_heuristic_score,
+        }
     }
 
     /// Returns true if the node has not been visited during this DFS
@@ -280,7 +277,7 @@ impl ComponentExtractor {
                 || (self.parents[node.0].is_none() && child_count > 1))
                 && g.is_node_probabilistic(node)
             {
-                self.number_articulation_points[g.get_distribution(node).unwrap().0] += 1;
+                self.ap_heuristic_score[g.get_distribution(node).unwrap().0] += 1;
             }
         }
     }
@@ -296,8 +293,10 @@ impl ComponentExtractor {
         let c = self.components[component.0];
         for node in (c.start..(c.start + c.size)).map(NodeIndex) {
             self.parents[node.0] = None;
+            // Reset the articulation point heuristic for this super-component before detecting its
+            // new sub-components
             if g.is_node_probabilistic(node) {
-                self.number_articulation_points[g.get_distribution(node).unwrap().0] = 0;
+                self.ap_heuristic_score[g.get_distribution(node).unwrap().0] = 0;
             }
         }
         let end = state.get_int(self.limit);
@@ -352,9 +351,14 @@ impl ComponentExtractor {
         ComponentIterator { limit, next: start }
     }
 
+    /// Returns true if there are components after the last call of detect_components
+    pub fn has_component(&self, state: &StateManager) -> bool {
+        state.get_int(self.base) != state.get_int(self.limit)
+    }
+
     /// Returns the number of articulation point in `distribution`
-    pub fn get_distribution_ap(&self, distribution: DistributionIndex) -> usize {
-        self.number_articulation_points[distribution.0]
+    pub fn get_distribution_ap_score(&self, distribution: DistributionIndex) -> usize {
+        self.ap_heuristic_score[distribution.0]
     }
 }
 
@@ -439,7 +443,7 @@ mod test_dfs_component {
     use rustc_hash::FxHashSet;
 
     #[test]
-    fn test_initialiaztion_extractor() {
+    fn test_initialization_extractor() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
         let n = (0..5)
@@ -448,7 +452,8 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = ComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         assert_eq!(5, component_extractor.nodes.len());
         assert_eq!(5, component_extractor.positions.len());
         assert_eq!(0, component_extractor.distributions[0].len());
@@ -471,7 +476,8 @@ mod test_dfs_component {
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
         g.add_clause(n[1], &vec![d[0]], &mut state);
         g.add_clause(n[3], &vec![d[1], d[2]], &mut state);
-        let component_extractor = ComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         assert_eq!(8, component_extractor.nodes.len());
         assert_eq!(8, component_extractor.positions.len());
         assert_eq!(1, component_extractor.distributions[0].len());
@@ -492,7 +498,8 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
         g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = ComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
@@ -520,7 +527,8 @@ mod test_dfs_component {
         g.add_clause(n[0], &vec![n[1]], &mut state);
         g.add_clause(n[2], &vec![n[3], n[4]], &mut state);
 
-        let component_extractor = ComponentExtractor::new(&g, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         let components = component_extractor
             .components_iter(&state)
             .collect::<Vec<ComponentIndex>>();
@@ -639,6 +647,7 @@ mod test_dfs_component {
         g.add_clause(n[1], &d3, &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
         assert_eq!(1, components.len());
         let distributions = component_extractor.get_component_distributions(components[0]);
