@@ -126,10 +126,10 @@ impl BranchingDecision for Articulation {
     ) -> Option<DistributionIndex> {
         let distributions = component_extractor.get_component_distributions(component);
         let mut distribution: Option<DistributionIndex> = None;
-        let mut best_score = usize::MIN;
+        let mut best_score = 0;
         for d in distributions {
             let nb_articulation = component_extractor.get_distribution_ap_score(*d);
-            if nb_articulation > best_score {
+            if nb_articulation > best_score || distribution.is_none() {
                 best_score = nb_articulation;
                 distribution = Some(*d);
             }
