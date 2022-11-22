@@ -68,8 +68,9 @@ fn main() {
                 component_extractor,
                 branching_heuristic.as_mut(),
             );
-            let value = solver.solve(v);
-            println!("Solution is {} (prob {})", value, 2_f64.powf(value));
+            let mut solution = solver.solve();
+            solution.probability += v;
+            println!("{}", solution);
         }
     };
 }

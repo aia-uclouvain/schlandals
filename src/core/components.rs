@@ -351,11 +351,6 @@ impl ComponentExtractor {
         ComponentIterator { limit, next: start }
     }
 
-    /// Returns true if there are components after the last call of detect_components
-    pub fn has_component(&self, state: &StateManager) -> bool {
-        state.get_int(self.base) != state.get_int(self.limit)
-    }
-
     /// Returns the number of articulation point in `distribution`
     pub fn get_distribution_ap_score(&self, distribution: DistributionIndex) -> usize {
         self.ap_heuristic_score[distribution.0]

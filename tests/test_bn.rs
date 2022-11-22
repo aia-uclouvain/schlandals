@@ -21,8 +21,8 @@ macro_rules! integration_tests_bn {
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = Articulation::default();
                 let mut solver = Solver::new(graph, state, component_extractor, &mut branching_heuristic);
-                let sol = solver.solve(v);
-                assert_float_relative_eq!($value, 2_f64.powf(sol), 0.000001);
+                let sol = solver.solve();
+                assert_float_relative_eq!($value, 2_f64.powf(sol.probability + v), 0.000001);
             }
         )*
     }
