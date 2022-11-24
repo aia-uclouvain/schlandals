@@ -82,7 +82,7 @@ pub fn graph_from_ppidimacs(
         } else {
             // First line for the clauses
             if number_nodes.is_none() {
-                panic!("[Parsing error at line {}] The head ``p cfn n m`` is not defined before the clauses", line_count);
+                panic!("[Parsing error at line {}] The head ``p cnf n m`` is not defined before the clauses", line_count);
             }
             if !distribution_definition_finished {
                 distribution_definition_finished = true;
@@ -116,11 +116,17 @@ pub fn graph_from_ppidimacs(
             } else {
                 NodeIndex(positive_literals[0])
             };
-            let body = negative_literals
-                .iter()
-                .copied()
-                .map(|x| NodeIndex(x as usize))
-                .collect::<Vec<NodeIndex>>();
+            let body = if negative_literals.is_empty() {
+                let n = g.add_node(false, None, None, state);
+                node_to_propagate.push((n, true));
+                vec![n]
+            } else {
+                negative_literals
+                    .iter()
+                    .copied()
+                    .map(|x| NodeIndex(x as usize))
+                    .collect::<Vec<NodeIndex>>()
+            };
             g.add_clause(head, &body, state);
         }
         line_count += 1;
