@@ -464,7 +464,9 @@ impl ComponentExtractor {
                 diff += (node_fiedler_value - child_fiedler_value).abs();
                 nb_active_children += 1.0;
             }
-            score += diff / nb_active_children
+            if nb_active_children != 0.0 {
+                score += diff / nb_active_children
+            }
         }
         score / nb_distribution
     }
