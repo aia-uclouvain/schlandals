@@ -33,6 +33,7 @@
 
 use super::graph::{DistributionIndex, Graph, NodeIndex};
 use super::trail::*;
+use nalgebra::DMatrix;
 use rustc_hash::{FxHashSet, FxHasher};
 use std::hash::Hasher;
 
@@ -44,11 +45,11 @@ pub struct ComponentIndex(pub usize);
 /// which the component starts, and the second is the size of the component.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Component {
-    // First index of the component
+    /// First index of the component
     start: usize,
-    // Size of the component
+    /// Size of the component
     size: usize,
-    // Hash of the component (computed during the detection, or afterward)
+    /// Hash of the component (computed during the detection, or afterward)
     hash: u64,
 }
 
@@ -114,6 +115,8 @@ pub struct ComponentExtractor {
     low: Vec<usize>,
     /// Count for each distribution the number of articulation point in it
     ap_heuristic_score: Vec<usize>,
+    /// Fiedler score for Fiedler-based heuristics
+    fiedler_score: Vec<f64>,
 }
 
 impl ComponentExtractor {
@@ -134,6 +137,7 @@ impl ComponentExtractor {
         let depth: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
         let low: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
         let ap_heuristic_score: Vec<usize> = (0..g.number_distributions()).map(|_| 0).collect();
+        let fiedler_score: Vec<f64> = (0..g.number_nodes()).map(|_| 0.0).collect();
         Self {
             nodes,
             positions,
@@ -147,6 +151,7 @@ impl ComponentExtractor {
             depth,
             low,
             ap_heuristic_score,
+            fiedler_score,
         }
     }
 
@@ -178,6 +183,8 @@ impl ComponentExtractor {
         state: &mut StateManager,
         hash: &mut u64,
         depth: usize,
+        laplacians: &mut Vec<Vec<f64>>,
+        laplacian_start: usize,
     ) {
         if self.is_node_visitable(g, node, comp_start, comp_size, state) {
             // Adds the node random bits to the hash
@@ -210,7 +217,17 @@ impl ComponentExtractor {
                 for n in g.distribution_iter(distribution) {
                     if self.is_node_visitable(g, n, comp_start, comp_size, state) {
                         self.parents[n.0] = Some(node);
-                        self.explore_component(g, n, comp_start, comp_size, state, hash, depth + 1);
+                        self.explore_component(
+                            g,
+                            n,
+                            comp_start,
+                            comp_size,
+                            state,
+                            hash,
+                            depth + 1,
+                            laplacians,
+                            laplacian_start,
+                        );
                         child_count += 1;
                         if self.low[n.0] >= self.depth[node.0] {
                             is_articulation = true;
@@ -240,6 +257,8 @@ impl ComponentExtractor {
                                 state,
                                 hash,
                                 depth + 1,
+                                laplacians,
+                                laplacian_start,
                             );
                             child_count += 1;
                             if self.low[src.0] >= self.depth[node.0] {
@@ -260,6 +279,8 @@ impl ComponentExtractor {
                                 state,
                                 hash,
                                 depth + 1,
+                                laplacians,
+                                laplacian_start,
                             );
                             child_count += 1;
                             if self.low[dst.0] >= self.depth[node.0] {
@@ -270,14 +291,35 @@ impl ComponentExtractor {
                                 self.low[node.0] = self.low[node.0].min(self.depth[dst.0]);
                             }
                         }
+                        if !g.is_node_bound(src, state) && !g.is_node_bound(dst, state) {
+                            let src_pos = self.positions[src.0];
+                            let dst_pos = self.positions[dst.0];
+                            if g.is_node_deterministic(src) && g.is_node_deterministic(dst) {
+                                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] =
+                                    -1.0;
+                                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] =
+                                    -1.0;
+                                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] +=
+                                    0.5;
+                                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] +=
+                                    0.5;
+                            }
+                        }
                     }
                 }
             }
-            if ((self.parents[node.0].is_some() && is_articulation)
-                || (self.parents[node.0].is_none() && child_count > 1))
-                && g.is_node_probabilistic(node)
+            if (self.parents[node.0].is_some() && is_articulation)
+                || (self.parents[node.0].is_none() && child_count > 1)
             {
-                self.ap_heuristic_score[g.get_distribution(node).unwrap().0] += 1;
+                if g.is_node_probabilistic(node) {
+                    self.ap_heuristic_score[g.get_distribution(node).unwrap().0] += 1;
+                } else {
+                    for p in g.incomings(node).map(|edge| g.get_edge_source(edge)) {
+                        if g.is_node_probabilistic(p) {
+                            self.ap_heuristic_score[g.get_distribution(p).unwrap().0] += 1;
+                        }
+                    }
+                }
             }
         }
     }
@@ -298,6 +340,7 @@ impl ComponentExtractor {
             if g.is_node_probabilistic(node) {
                 self.ap_heuristic_score[g.get_distribution(node).unwrap().0] = 0;
             }
+            self.fiedler_score[node.0] = 0.0;
         }
         let end = state.get_int(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
@@ -308,6 +351,10 @@ impl ComponentExtractor {
         let comp = self.components[component.0];
         let mut start = comp.start;
         let end = start + comp.size;
+        // laplacian matrix for fiedler vector computation
+        let mut laplacians: Vec<Vec<f64>> = (0..comp.size)
+            .map(|_| (0..comp.size).map(|_| 0.0).collect())
+            .collect();
         // We iterate over all the nodes in the component
         while start < end {
             let node = self.nodes[start];
@@ -316,8 +363,48 @@ impl ComponentExtractor {
                 let mut size = 0;
                 self.distributions.push(FxHashSet::default());
                 let mut hash: u64 = 0;
-                self.explore_component(g, node, start, &mut size, state, &mut hash, 0);
+                self.explore_component(
+                    g,
+                    node,
+                    start,
+                    &mut size,
+                    state,
+                    &mut hash,
+                    0,
+                    &mut laplacians,
+                    comp.start,
+                );
                 self.components.push(Component { start, size, hash });
+                let sub_lp = DMatrix::from_fn(size, size, |r, c| {
+                    laplacians[(start - comp.start) + r][(start - comp.start) + c]
+                });
+                let decomp = sub_lp.hermitian_part().symmetric_eigen();
+                // Finds the fiedler vectors. This is the eigenvector associated with the second
+                // smallest eigenvalue. We first find this eigen value and then assign the fiedler
+                // score to the nodes in the component
+                let mut smallest_eigenvalue = f64::INFINITY;
+                let mut second_smallest_eigenvalue = f64::INFINITY;
+                let mut smallest_index = 0;
+                let mut fiedler_index = 0;
+                let eigenvalues = decomp.eigenvalues;
+                for i in 0..size {
+                    let eigenvalue = eigenvalues[i];
+                    if eigenvalue < smallest_eigenvalue {
+                        second_smallest_eigenvalue = smallest_eigenvalue;
+                        fiedler_index = smallest_index;
+                        smallest_eigenvalue = eigenvalue;
+                        smallest_index = i;
+                    } else if eigenvalue < second_smallest_eigenvalue {
+                        second_smallest_eigenvalue = eigenvalue;
+                        fiedler_index = i;
+                    }
+                }
+                for i in 0..size {
+                    let node = self.nodes[i + comp.start];
+                    let pos = self.positions[node.0];
+                    self.fiedler_score[pos] =
+                        decomp.eigenvectors.row(pos - comp.start)[fiedler_index];
+                }
                 start += size;
             } else {
                 start += 1;
@@ -354,6 +441,37 @@ impl ComponentExtractor {
     /// Returns the number of articulation point in `distribution`
     pub fn get_distribution_ap_score(&self, distribution: DistributionIndex) -> usize {
         self.ap_heuristic_score[distribution.0]
+    }
+
+    pub fn get_distribution_fiedler_neighbor_diff_avg(
+        &self,
+        g: &Graph,
+        distribution: DistributionIndex,
+        state: &StateManager,
+    ) -> f64 {
+        let mut score = 0.0;
+        let mut nb_distribution = 0.0;
+        for node in g
+            .distribution_iter(distribution)
+            .filter(|n| !g.is_node_bound(*n, state))
+        {
+            nb_distribution += 1.0;
+            let node_fiedler_value = self.fiedler_score[self.positions[node.0]];
+            let mut diff = 0.0;
+            let mut nb_active_children = 0.0;
+            for children in g.active_children(node, state) {
+                let child_fiedler_value = self.fiedler_score[self.positions[children.0]];
+                diff += (node_fiedler_value - child_fiedler_value).abs();
+                nb_active_children += 1.0;
+            }
+            score += diff / nb_active_children
+        }
+        score / nb_distribution
+    }
+
+    /// Returns the number of components
+    pub fn number_components(&self, state: &StateManager) -> usize {
+        (state.get_int(self.limit) - state.get_int(self.base)) as usize
     }
 }
 
@@ -429,8 +547,8 @@ impl NoComponentExtractor {
         0
     }
 }
-#[cfg(test)]
 
+#[cfg(test)]
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex};
     use crate::core::graph::{DistributionIndex, Graph, NodeIndex};
@@ -663,5 +781,61 @@ mod test_dfs_component {
         assert_eq!(2, distribution_comp2.len());
         assert!(distribution_comp2.contains(&DistributionIndex(1)));
         assert!(distribution_comp2.contains(&DistributionIndex(2)));
+    }
+}
+
+#[cfg(test)]
+mod test_fiedler {
+    use super::{ComponentExtractor, ComponentIndex};
+    use crate::core::graph::{Graph, NodeIndex};
+    use crate::core::trail::StateManager;
+    use assert_float_eq::*;
+
+    #[test]
+    fn test_one_component() {
+        let mut state = StateManager::default();
+        let mut g = Graph::new();
+        let n = (0..6)
+            .map(|_| g.add_node(false, None, None, &mut state))
+            .collect::<Vec<NodeIndex>>();
+        g.add_clause(n[4], &vec![n[0]], &mut state);
+        g.add_clause(n[1], &vec![n[0]], &mut state);
+        g.add_clause(n[1], &vec![n[4]], &mut state);
+        g.add_clause(n[3], &vec![n[4]], &mut state);
+        g.add_clause(n[2], &vec![n[1]], &mut state);
+        g.add_clause(n[3], &vec![n[2]], &mut state);
+        g.add_clause(n[5], &vec![n[3]], &mut state);
+        let mut component_extractor = ComponentExtractor::new(&g, &mut state);
+        component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
+        assert_float_relative_eq!(
+            0.415,
+            component_extractor.fiedler_score[component_extractor.positions[0]],
+            0.01
+        );
+        assert_float_relative_eq!(
+            0.309,
+            component_extractor.fiedler_score[component_extractor.positions[1]],
+            0.01
+        );
+        assert_float_relative_eq!(
+            0.069,
+            component_extractor.fiedler_score[component_extractor.positions[2]],
+            0.01
+        );
+        assert_float_relative_eq!(
+            -0.221,
+            component_extractor.fiedler_score[component_extractor.positions[3]],
+            0.01
+        );
+        assert_float_relative_eq!(
+            0.221,
+            component_extractor.fiedler_score[component_extractor.positions[4]],
+            0.01
+        );
+        assert_float_relative_eq!(
+            -0.794,
+            component_extractor.fiedler_score[component_extractor.positions[5]],
+            0.01
+        );
     }
 }

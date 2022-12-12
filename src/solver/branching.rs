@@ -31,88 +31,6 @@ pub trait BranchingDecision {
     ) -> Option<DistributionIndex>;
 }
 
-/// A simple branching algorithm that selects the first distribution
-#[derive(Default)]
-pub struct FirstBranching;
-
-impl BranchingDecision for FirstBranching {
-    fn branch_on(
-        &mut self,
-        _g: &Graph,
-        _state: &StateManager,
-        component_extractor: &ComponentExtractor,
-        component: ComponentIndex,
-    ) -> Option<DistributionIndex> {
-        let distributions = component_extractor.get_component_distributions(component);
-        if distributions.is_empty() {
-            None
-        } else {
-            Some(*distributions.iter().next().unwrap())
-        }
-    }
-}
-
-/// A branching heuristic that uses the sum of the active degree of the nodes in a distribution as
-/// heuristic to select the next distribution.
-#[derive(Default)]
-pub struct ActiveDegreeBranching;
-
-impl BranchingDecision for ActiveDegreeBranching {
-    fn branch_on(
-        &mut self,
-        g: &Graph,
-        state: &StateManager,
-        component_extractor: &ComponentExtractor,
-        component: ComponentIndex,
-    ) -> Option<DistributionIndex> {
-        let distributions = component_extractor.get_component_distributions(component);
-        let mut distribution: Option<DistributionIndex> = None;
-        let mut best_score = -1;
-        for d in distributions {
-            let active_degree: isize = g
-                .distribution_iter(*d)
-                .filter(|n| g.is_node_bound(*n, state))
-                .map(|n| g.node_number_outgoing(n, state) + g.node_number_incoming(n, state))
-                .sum();
-            if active_degree > best_score {
-                best_score = active_degree;
-                distribution = Some(*d);
-            }
-        }
-        distribution
-    }
-}
-
-/// A branching heuristic that select distribution based on the number of nodes they have on the
-/// fringe of the component.
-#[derive(Default)]
-pub struct Fringe;
-
-impl BranchingDecision for Fringe {
-    fn branch_on(
-        &mut self,
-        g: &Graph,
-        state: &StateManager,
-        component_extractor: &ComponentExtractor,
-        component: ComponentIndex,
-    ) -> Option<DistributionIndex> {
-        let distributions = component_extractor.get_component_distributions(component);
-        let mut distribution: Option<DistributionIndex> = None;
-        let mut best_score = usize::MAX;
-        for d in distributions {
-            let number_node_fringe = g
-                .distribution_iter(*d)
-                .filter(|n| g.is_node_bound(*n, state) && g.node_number_outgoing(*n, state) == 0)
-                .count();
-            if number_node_fringe < best_score {
-                best_score = number_node_fringe;
-                distribution = Some(*d);
-            }
-        }
-        distribution
-    }
-}
-
 #[derive(Default)]
 pub struct Articulation;
 
@@ -131,6 +49,71 @@ impl BranchingDecision for Articulation {
             let nb_articulation = component_extractor.get_distribution_ap_score(*d);
             if nb_articulation > best_score || distribution.is_none() {
                 best_score = nb_articulation;
+                distribution = Some(*d);
+            }
+        }
+        if best_score == 0 {
+            distribution = Size::default().branch_on(_g, _state, component_extractor, component);
+        }
+        distribution
+    }
+}
+
+#[derive(Default)]
+pub struct Size;
+
+impl BranchingDecision for Size {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut active_size = 0;
+        for d in distributions {
+            if let Some(_current) = distribution {
+                let d_active_size = g
+                    .distribution_iter(*d)
+                    .filter(|n| g.is_node_bound(*n, state))
+                    .count();
+                if d_active_size > active_size {
+                    distribution = Some(*d);
+                    active_size = d_active_size;
+                }
+            } else {
+                distribution = Some(*d);
+                active_size = g
+                    .distribution_iter(*d)
+                    .filter(|n| g.is_node_bound(*n, state))
+                    .count();
+            }
+        }
+        distribution
+    }
+}
+
+#[derive(Default)]
+pub struct NeighborDiffFiedler;
+
+impl BranchingDecision for NeighborDiffFiedler {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = f64::NEG_INFINITY;
+        for d in distributions {
+            let score =
+                component_extractor.get_distribution_fiedler_neighbor_diff_avg(g, *d, state);
+            if score > best_score {
+                best_score = score;
                 distribution = Some(*d);
             }
         }

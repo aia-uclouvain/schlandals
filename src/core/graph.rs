@@ -205,7 +205,7 @@ impl Graph {
         self.distributions.len()
     }
 
-    /// Returns the distribution of a node if ane
+    /// Returns the distribution of a node if any
     pub fn get_distribution(&self, node: NodeIndex) -> Option<DistributionIndex> {
         self.nodes[node.0].distribution
     }
@@ -262,6 +262,18 @@ impl Graph {
             graph: self,
             next: first,
         }
+    }
+
+    /// Returns an itertor on the active children of a node
+    pub fn active_children<'a>(
+        &'a self,
+        node: NodeIndex,
+        state: &'a StateManager,
+    ) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.outgoings(node)
+            .map(|edge| self.get_edge_destination(edge))
+            .filter(|node| !self.is_node_bound(*node, state))
+            .into_iter()
     }
 
     /// Returns an iterator over all the clauses in which `node` is included, either as the head of

@@ -2,7 +2,7 @@ use schlandals;
 use schlandals::branching::*;
 use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
-use schlandals::solver::sequential::Solver;
+use schlandals::solver::QuietSolver;
 use schlandals::trail::StateManager;
 
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ macro_rules! integration_tests_bn {
                 let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = Articulation::default();
-                let mut solver = Solver::new(graph, state, component_extractor, &mut branching_heuristic);
+                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic);
                 let sol = solver.solve();
                 assert_float_relative_eq!($value, 2_f64.powf(sol.probability + v), 0.000001);
             }

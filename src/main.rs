@@ -25,7 +25,7 @@ use crate::core::components::ComponentExtractor;
 use crate::core::trail::StateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::*;
-use solver::sequential::Solver;
+use solver::{DefaultSolver, QuietSolver};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -35,18 +35,19 @@ struct Args {
     // How to branch
     #[clap(short, long, value_enum)]
     branching: Branching,
+    // Collect stats during the search, default yes
+    #[clap(short, long, default_value_t = true)]
+    statistics: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Branching {
-    // Linear branching on the distributions
-    First,
-    // Active degree of the disributions
-    ActiveDegree,
-    // Number of nodes in the fringe of the graph
-    Fringe,
     // Number of articulation point in the distribution
     Articulation,
+    // Size of the distribution
+    Size,
+    // Neighbor fiedler
+    NeighborFiedler,
 }
 
 fn main() {
@@ -57,20 +58,31 @@ fn main() {
         Ok((graph, v)) => {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
-                Branching::First => Box::new(FirstBranching::default()),
-                Branching::ActiveDegree => Box::new(ActiveDegreeBranching::default()),
-                Branching::Fringe => Box::new(Fringe::default()),
                 Branching::Articulation => Box::new(Articulation::default()),
+                Branching::Size => Box::new(Size::default()),
+                Branching::NeighborFiedler => Box::new(NeighborDiffFiedler::default()),
             };
-            let mut solver = Solver::new(
-                graph,
-                state,
-                component_extractor,
-                branching_heuristic.as_mut(),
-            );
-            let mut solution = solver.solve();
-            solution.probability += v;
-            println!("{}", solution);
+            if args.statistics {
+                let mut solver = DefaultSolver::new(
+                    graph,
+                    state,
+                    component_extractor,
+                    branching_heuristic.as_mut(),
+                );
+                let mut solution = solver.solve();
+                solution.probability += v;
+                println!("{}", solution);
+            } else {
+                let mut solver = QuietSolver::new(
+                    graph,
+                    state,
+                    component_extractor,
+                    branching_heuristic.as_mut(),
+                );
+                let mut solution = solver.solve();
+                solution.probability += v;
+                println!("{}", solution);
+            }
         }
     };
 }

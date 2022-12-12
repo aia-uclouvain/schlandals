@@ -17,3 +17,9 @@
 pub mod branching;
 pub mod propagator;
 pub mod sequential;
+mod statistics;
+
+use crate::solver::sequential::Solver;
+
+pub type DefaultSolver<'b, B> = Solver<'b, B, true>;
+pub type QuietSolver<'b, B> = Solver<'b, B, false>;

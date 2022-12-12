@@ -19,6 +19,7 @@ use crate::core::graph::*;
 use crate::core::trail::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
+use crate::solver::statistics::Statistics;
 use rustc_hash::FxHashMap;
 
 use std::{fmt, ops};
@@ -54,7 +55,7 @@ impl Solution {
     }
 }
 
-pub struct Solver<'b, B>
+pub struct Solver<'b, B, const S: bool>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -68,9 +69,11 @@ where
     branching_heuristic: &'b mut B,
     /// Cache used to store results of subtrees
     cache: FxHashMap<u64, Solution>,
+    /// Statistics collectors
+    statistics: Statistics<S>,
 }
 
-impl<'b, B> Solver<'b, B>
+impl<'b, B, const S: bool> Solver<'b, B, S>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -86,6 +89,7 @@ where
             component_extractor,
             branching_heuristic,
             cache: FxHashMap::default(),
+            statistics: Statistics::default(),
         }
     }
 
@@ -94,12 +98,14 @@ where
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> Solution {
         let hash = self.component_extractor.get_component_hash(component);
         // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
+        self.statistics.cache_access();
         let should_compute = !self.cache.contains_key(&hash);
         if should_compute {
             let count = self.choose_and_branch(component);
             self.cache.insert(hash, count);
             count
         } else {
+            self.statistics.cache_hit();
             *self.cache.get(&hash).unwrap()
         }
     }
@@ -115,6 +121,7 @@ where
             component,
         );
         if let Some(distribution) = decision {
+            self.statistics.or_node();
             // The branch objective starts at minus infinity because we use log-probabilities
             let mut node_sol = Solution::new(f64::NEG_INFINITY, 0);
             for node in self.graph.distribution_iter(distribution) {
@@ -148,6 +155,9 @@ where
         // Since the probability are multiplied between the sub-components, it is neutral. And if
         // there are no sub-components, this is the default solution.
         let mut solution = Solution::new(0.0, 1);
+        self.statistics.and_node();
+        self.statistics
+            .decomposition(self.component_extractor.number_components(&self.state));
         for sub_component in self.component_extractor.components_iter(&self.state) {
             solution *= self.get_cached_component_or_compute(sub_component);
             if solution.probability == f64::NEG_INFINITY {
@@ -165,7 +175,9 @@ where
     /// nodes assigned to true. The solution of the root node is the sum of the weights of such
     /// assigments.
     pub fn solve(&mut self) -> Solution {
-        self._solve(ComponentIndex(0))
+        let s = self._solve(ComponentIndex(0));
+        println!("{}", self.statistics);
+        s
     }
 }
 
