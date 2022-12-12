@@ -36,7 +36,7 @@ struct Args {
     #[clap(short, long, value_enum)]
     branching: Branching,
     // Collect stats during the search, default yes
-    #[clap(short, long, default_value_t = true)]
+    #[clap(short, long, action)]
     statistics: bool,
 }
 
