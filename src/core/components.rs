@@ -323,7 +323,7 @@ impl ComponentExtractor {
             }
         }
     }
-
+    
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
     pub fn detect_components(
@@ -348,12 +348,12 @@ impl ComponentExtractor {
         self.components.truncate(end as usize);
         self.distributions.truncate(end as usize);
         state.set_int(self.base, end);
-        let comp = self.components[component.0];
-        let mut start = comp.start;
-        let end = start + comp.size;
+        let super_comp = self.components[component.0];
+        let mut start = super_comp.start;
+        let end = start + super_comp.size;
         // laplacian matrix for fiedler vector computation
-        let mut laplacians: Vec<Vec<f64>> = (0..comp.size)
-            .map(|_| (0..comp.size).map(|_| 0.0).collect())
+        let mut laplacians: Vec<Vec<f64>> = (0..super_comp.size)
+            .map(|_| (0..super_comp.size).map(|_| 0.0).collect())
             .collect();
         // We iterate over all the nodes in the component
         while start < end {
@@ -372,11 +372,22 @@ impl ComponentExtractor {
                     &mut hash,
                     0,
                     &mut laplacians,
-                    comp.start,
+                    super_comp.start,
                 );
                 self.components.push(Component { start, size, hash });
+                start += size;
+            } else {
+                start += 1;
+            }
+        }
+        state.set_int(self.limit, self.components.len() as isize);
+        if self.number_components(state) > 1 || component == ComponentIndex(0) {
+            for cid in self.components_iter(state) {
+                let comp = self.components[cid.0];
+                let size = comp.size;
+                // Extracts the laplacian matrix corresponding to this component
                 let sub_lp = DMatrix::from_fn(size, size, |r, c| {
-                    laplacians[(start - comp.start) + r][(start - comp.start) + c]
+                    laplacians[(comp.start - super_comp.start) + r][(comp.start - super_comp.start) + c]
                 });
                 let decomp = sub_lp.hermitian_part().symmetric_eigen();
                 // Finds the fiedler vectors. This is the eigenvector associated with the second
@@ -405,14 +416,10 @@ impl ComponentExtractor {
                     self.fiedler_score[pos] =
                         decomp.eigenvectors.row(pos - comp.start)[fiedler_index];
                 }
-                start += size;
-            } else {
-                start += 1;
             }
         }
-        state.set_int(self.limit, self.components.len() as isize);
     }
-
+    
     /// Returns the hash of a given component. This is the job of the implementing data structure
     /// to ensure that the same component gives the same hash, even if it appears in another part
     /// of the search tree. This means that, in practice, the hash should give the same hash even
@@ -443,6 +450,8 @@ impl ComponentExtractor {
         self.ap_heuristic_score[distribution.0]
     }
 
+    /// Returns the average distance (computed using the fiedler scores) between each node
+    /// in the distribution and their children.
     pub fn get_distribution_fiedler_neighbor_diff_avg(
         &self,
         g: &Graph,
@@ -468,6 +477,8 @@ impl ComponentExtractor {
                 score += diff / nb_active_children
             }
         }
+        // Since the distribution has been chosen for score computation, then it must have
+        // at least two unassigned node in it. So we do not need to check nb_distribution != 0.0
         score / nb_distribution
     }
 
