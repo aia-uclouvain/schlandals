@@ -56,24 +56,30 @@ impl<const B: bool> Statistics<B> {
             self.total_and_decompositions += number_components;
         }
     }
+    
+    pub fn print(&self) {
+        if B {
+            println!("{}", self);
+        }
+    }
 }
 
 impl<const B: bool> fmt::Display for Statistics<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if B {
-            write!(f, "Statistics on the search:\n")?;
-            write!(f, "\tNumber of cache access: {}\n", self.cache_access)?;
-            write!(
+            writeln!(f, "Statistics on the search:")?;
+            writeln!(f, "\tNumber of cache access: {}", self.cache_access)?;
+            writeln!(
                 f,
-                "\tNumber of cache hit: {} ({:.3} %)\n",
+                "\tNumber of cache hit: {} ({:.3} %)",
                 self.cache_hit,
                 (self.cache_hit as f64 / self.cache_access as f64) * 100.0
             )?;
-            write!(f, "\tNumber of OR nodes: {}\n", self.number_or_nodes)?;
-            write!(f, "\tNumber of AND nodes: {}\n", self.number_and_nodes)?;
-            write!(
+            writeln!(f, "\tNumber of OR nodes: {}", self.number_or_nodes)?;
+            writeln!(f, "\tNumber of AND nodes: {}", self.number_and_nodes)?;
+            writeln!(
                 f,
-                "\tAverage sub-problem decomposition per AND node: {:.3}\n",
+                "\tAverage sub-problem decomposition per AND node: {:.3}",
                 (self.total_and_decompositions as f64) / (self.number_and_nodes as f64)
             )
         } else {

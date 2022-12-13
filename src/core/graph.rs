@@ -273,7 +273,6 @@ impl Graph {
         self.outgoings(node)
             .map(|edge| self.get_edge_destination(edge))
             .filter(|node| !self.is_node_bound(*node, state))
-            .into_iter()
     }
 
     /// Returns an iterator over all the clauses in which `node` is included, either as the head of

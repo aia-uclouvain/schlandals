@@ -176,7 +176,7 @@ where
     /// assigments.
     pub fn solve(&mut self) -> Solution {
         let s = self._solve(ComponentIndex(0));
-        println!("{}", self.statistics);
+        self.statistics.print();
         s
     }
 }
