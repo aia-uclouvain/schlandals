@@ -20,8 +20,7 @@ use crate::core::trail::StateManager;
 
 /// Trait that defined the methods that a branching decision structure must implement.
 pub trait BranchingDecision {
-    /// This function takes some distributions and returns an option with the next distribution to
-    /// branch on (or None if `distributions.len() == 0`)
+    /// Chooses one distribution from
     fn branch_on(
         &mut self,
         g: &Graph,
@@ -50,45 +49,6 @@ impl BranchingDecision for Articulation {
             if nb_articulation > best_score || distribution.is_none() {
                 best_score = nb_articulation;
                 distribution = Some(*d);
-            }
-        }
-        if best_score == 0 {
-            distribution = Size::default().branch_on(_g, _state, component_extractor, component);
-        }
-        distribution
-    }
-}
-
-#[derive(Default)]
-pub struct Size;
-
-impl BranchingDecision for Size {
-    fn branch_on(
-        &mut self,
-        g: &Graph,
-        state: &StateManager,
-        component_extractor: &ComponentExtractor,
-        component: ComponentIndex,
-    ) -> Option<DistributionIndex> {
-        let distributions = component_extractor.get_component_distributions(component);
-        let mut distribution: Option<DistributionIndex> = None;
-        let mut active_size = 0;
-        for d in distributions {
-            if let Some(_current) = distribution {
-                let d_active_size = g
-                    .distribution_iter(*d)
-                    .filter(|n| g.is_node_bound(*n, state))
-                    .count();
-                if d_active_size > active_size {
-                    distribution = Some(*d);
-                    active_size = d_active_size;
-                }
-            } else {
-                distribution = Some(*d);
-                active_size = g
-                    .distribution_iter(*d)
-                    .filter(|n| g.is_node_bound(*n, state))
-                    .count();
             }
         }
         distribution

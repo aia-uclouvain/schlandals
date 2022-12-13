@@ -44,8 +44,6 @@ struct Args {
 enum Branching {
     // Number of articulation point in the distribution
     Articulation,
-    // Size of the distribution
-    Size,
     // Neighbor fiedler
     NeighborFiedler,
 }
@@ -59,7 +57,6 @@ fn main() {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
                 Branching::Articulation => Box::new(Articulation::default()),
-                Branching::Size => Box::new(Size::default()),
                 Branching::NeighborFiedler => Box::new(NeighborDiffFiedler::default()),
             };
             if args.statistics {
