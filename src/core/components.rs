@@ -383,35 +383,32 @@ impl ComponentExtractor {
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
     }
-
-    /// Returns the average distance (computed using the fiedler scores) between each node
-    /// in the distribution and their children.
-    pub fn get_distribution_fiedler_neighbor_avg(
-        &self,
-        g: &Graph,
-        distribution: DistributionIndex,
-        state: &StateManager,
-    ) -> f64 {
-        let mut score = 0.0;
-        let mut nb_distribution = 0.0;
-        for node in g
-            .distribution_iter(distribution)
-            .filter(|n| !g.is_node_bound(*n, state))
-        {
-            nb_distribution += 1.0;
-            let mut avg_value = 0.0;
-            let mut nb_active_children = 0.0;
-            for children in g.active_children(node, state) {
-                avg_value += self.fiedler_score[self.positions[children.0]].abs();
-                nb_active_children += 1.0;
-            }
-            if nb_active_children != 0.0 {
-                score += avg_value / nb_active_children
+    
+    /// Returns the average of the fiedler values of the active (unassigned) children of a node
+    pub fn average_children_fiedler(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> Option<f64> {
+        let mut value = 0.0;
+        let mut active_children = 0.0;
+        for child in g.active_children(node, state) {
+            value += self.fiedler_score[self.positions[child.0]].abs();
+            active_children += 1.0;
+        }
+        if active_children > 0.0 {
+            Some(value / active_children)
+        } else {
+            None
+        }
+    }
+    
+    /// Returns the minimum of the active (unassigned) children's fiedler value of a node
+    pub fn minimum_children_fiedler(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> f64 {
+        let mut value = f64::INFINITY;
+        for child in g.active_children(node, state) {
+            let child_value = self.fiedler_score[self.positions[child.0]].abs();
+            if child_value < value {
+                value = child_value;
             }
         }
-        // Since the distribution has been chosen for score computation, then it must have
-        // at least two unassigned node in it. So we do not need to check nb_distribution != 0.0
-        score / nb_distribution
+        value
     }
 
     /// Returns the number of components

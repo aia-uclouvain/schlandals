@@ -42,8 +42,10 @@ struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Branching {
-    // Neighbor fiedler
-    NeighborFiedler,
+    // Averages the fiedler value of each node in a distribution
+    ChildrenFiedlerAvg,
+    // Takes the minimum of the fiedler value of each node in a distribution
+    ChildrenFiedlerMin,
 }
 
 fn main() {
@@ -54,7 +56,8 @@ fn main() {
         Ok((graph, v)) => {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
-                Branching::NeighborFiedler => Box::new(NeighborDiffFiedler::default()),
+                Branching::ChildrenFiedlerAvg => Box::new(ChildrenFiedlerAvg::default()),
+                Branching::ChildrenFiedlerMin => Box::new(ChildrenFiedlerMin::default()),
             };
             if args.statistics {
                 let mut solver = DefaultSolver::new(

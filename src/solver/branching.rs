@@ -31,9 +31,9 @@ pub trait BranchingDecision {
 }
 
 #[derive(Default)]
-pub struct NeighborDiffFiedler;
+pub struct ChildrenFiedlerAvg;
 
-impl BranchingDecision for NeighborDiffFiedler {
+impl BranchingDecision for ChildrenFiedlerAvg {
     fn branch_on(
         &mut self,
         g: &Graph,
@@ -45,8 +45,45 @@ impl BranchingDecision for NeighborDiffFiedler {
         let mut distribution: Option<DistributionIndex> = None;
         let mut best_score = f64::INFINITY;
         for d in distributions {
-            let score =
-                component_extractor.get_distribution_fiedler_neighbor_avg(g, *d, state);
+            let mut sum = 0.0;
+            let mut count = 0.0;
+            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| component_extractor.average_children_fiedler(g, n, state)) {
+                if let Some(v) = node_value {
+                    sum += v;
+                    count += 1.0;
+                }
+            }
+            let score = sum / count;
+            if score < best_score {
+                best_score = score;
+                distribution = Some(*d);
+            }
+        }
+        distribution
+    }
+}
+
+#[derive(Default)]
+pub struct ChildrenFiedlerMin;
+
+impl BranchingDecision for ChildrenFiedlerMin {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = f64::INFINITY;
+        for d in distributions {
+            let mut score = f64::INFINITY;
+            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| component_extractor.minimum_children_fiedler(g, n, state)) {
+                if node_value < score {
+                    score = node_value;
+                }
+            }
             if score < best_score {
                 best_score = score;
                 distribution = Some(*d);
