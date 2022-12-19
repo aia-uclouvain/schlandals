@@ -31,31 +31,6 @@ pub trait BranchingDecision {
 }
 
 #[derive(Default)]
-pub struct Articulation;
-
-impl BranchingDecision for Articulation {
-    fn branch_on(
-        &mut self,
-        _g: &Graph,
-        _state: &StateManager,
-        component_extractor: &ComponentExtractor,
-        component: ComponentIndex,
-    ) -> Option<DistributionIndex> {
-        let distributions = component_extractor.get_component_distributions(component);
-        let mut distribution: Option<DistributionIndex> = None;
-        let mut best_score = 0;
-        for d in distributions {
-            let nb_articulation = component_extractor.get_distribution_ap_score(*d);
-            if nb_articulation > best_score || distribution.is_none() {
-                best_score = nb_articulation;
-                distribution = Some(*d);
-            }
-        }
-        distribution
-    }
-}
-
-#[derive(Default)]
 pub struct NeighborDiffFiedler;
 
 impl BranchingDecision for NeighborDiffFiedler {

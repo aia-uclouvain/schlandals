@@ -42,8 +42,6 @@ struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Branching {
-    // Number of articulation point in the distribution
-    Articulation,
     // Neighbor fiedler
     NeighborFiedler,
 }
@@ -56,7 +54,6 @@ fn main() {
         Ok((graph, v)) => {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
-                Branching::Articulation => Box::new(Articulation::default()),
                 Branching::NeighborFiedler => Box::new(NeighborDiffFiedler::default()),
             };
             if args.statistics {

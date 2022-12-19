@@ -107,14 +107,6 @@ pub struct ComponentExtractor {
     nodes_bits: Vec<u64>,
     // Vector of random 64-bits number for the hash computation when an edge is in a component
     edges_bits: Vec<u64>,
-    /// Parents for the bicomponent detection
-    parents: Vec<Option<NodeIndex>>,
-    /// Depth for the bicomponent detection
-    depth: Vec<usize>,
-    /// Lowest for the bicomponent detection
-    low: Vec<usize>,
-    /// Count for each distribution the number of articulation point in it
-    ap_heuristic_score: Vec<usize>,
     /// Fiedler score for Fiedler-based heuristics
     fiedler_score: Vec<f64>,
 }
@@ -133,10 +125,6 @@ impl ComponentExtractor {
             .collect::<FxHashSet<DistributionIndex>>();
         let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
         let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
-        let parents: Vec<Option<NodeIndex>> = (0..g.number_nodes()).map(|_| None).collect();
-        let depth: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
-        let low: Vec<usize> = (0..g.number_nodes()).map(|_| 0).collect();
-        let ap_heuristic_score: Vec<usize> = (0..g.number_distributions()).map(|_| 0).collect();
         let fiedler_score: Vec<f64> = (0..g.number_nodes()).map(|_| 0.0).collect();
         Self {
             nodes,
@@ -147,10 +135,6 @@ impl ComponentExtractor {
             limit: state.manage_int(1),
             nodes_bits,
             edges_bits,
-            parents,
-            depth,
-            low,
-            ap_heuristic_score,
             fiedler_score,
         }
     }
@@ -202,12 +186,6 @@ impl ComponentExtractor {
             }
             *comp_size += 1;
 
-            // Update the vectors for biconnected component detection
-            self.depth[node.0] = depth;
-            self.low[node.0] = depth;
-            let mut child_count = 0;
-            let mut is_articulation = false;
-
             // If the node is probabilistic, add its distribution to the set of distribution for this
             // component
             // And we need to add the nodes in the distribution in the component
@@ -216,7 +194,6 @@ impl ComponentExtractor {
                 self.distributions.last_mut().unwrap().insert(distribution);
                 for n in g.distribution_iter(distribution) {
                     if self.is_node_visitable(g, n, comp_start, comp_size, state) {
-                        self.parents[n.0] = Some(node);
                         self.explore_component(
                             g,
                             n,
@@ -228,12 +205,6 @@ impl ComponentExtractor {
                             laplacians,
                             laplacian_start,
                         );
-                        child_count += 1;
-                        if self.low[n.0] >= self.depth[node.0] {
-                            is_articulation = true;
-                        }
-                    } else if self.parents[node.0].is_some() && n != self.parents[node.0].unwrap() {
-                        self.low[node.0] = self.low[node.0].min(self.depth[n.0]);
                     }
                 }
             }
@@ -248,7 +219,6 @@ impl ComponentExtractor {
                         let src = g.get_edge_source(edge);
                         let dst = g.get_edge_destination(edge);
                         if self.is_node_visitable(g, src, comp_start, comp_size, state) {
-                            self.parents[src.0] = Some(node);
                             self.explore_component(
                                 g,
                                 src,
@@ -260,17 +230,8 @@ impl ComponentExtractor {
                                 laplacians,
                                 laplacian_start,
                             );
-                            child_count += 1;
-                            if self.low[src.0] >= self.depth[node.0] {
-                                is_articulation = true;
-                            }
-                        } else if let Some(parent) = self.parents[node.0] {
-                            if parent != node {
-                                self.low[node.0] = self.low[node.0].min(self.depth[src.0]);
-                            }
                         }
                         if self.is_node_visitable(g, dst, comp_start, comp_size, state) {
-                            self.parents[dst.0] = Some(node);
                             self.explore_component(
                                 g,
                                 dst,
@@ -282,14 +243,6 @@ impl ComponentExtractor {
                                 laplacians,
                                 laplacian_start,
                             );
-                            child_count += 1;
-                            if self.low[dst.0] >= self.depth[node.0] {
-                                is_articulation = true;
-                            }
-                        } else if let Some(parent) = self.parents[node.0] {
-                            if parent != node {
-                                self.low[node.0] = self.low[node.0].min(self.depth[dst.0]);
-                            }
                         }
                         if !g.is_node_bound(src, state) && !g.is_node_bound(dst, state) {
                             let src_pos = self.positions[src.0];
@@ -308,22 +261,8 @@ impl ComponentExtractor {
                     }
                 }
             }
-            if (self.parents[node.0].is_some() && is_articulation)
-                || (self.parents[node.0].is_none() && child_count > 1)
-            {
-                if g.is_node_probabilistic(node) {
-                    self.ap_heuristic_score[g.get_distribution(node).unwrap().0] += 1;
-                } else {
-                    for p in g.incomings(node).map(|edge| g.get_edge_source(edge)) {
-                        if g.is_node_probabilistic(p) {
-                            self.ap_heuristic_score[g.get_distribution(p).unwrap().0] += 1;
-                        }
-                    }
-                }
-            }
         }
     }
-    
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
     pub fn detect_components(
@@ -334,12 +273,6 @@ impl ComponentExtractor {
     ) {
         let c = self.components[component.0];
         for node in (c.start..(c.start + c.size)).map(NodeIndex) {
-            self.parents[node.0] = None;
-            // Reset the articulation point heuristic for this super-component before detecting its
-            // new sub-components
-            if g.is_node_probabilistic(node) {
-                self.ap_heuristic_score[g.get_distribution(node).unwrap().0] = 0;
-            }
             self.fiedler_score[node.0] = 0.0;
         }
         let end = state.get_int(self.limit);
@@ -387,7 +320,8 @@ impl ComponentExtractor {
                 let size = comp.size;
                 // Extracts the laplacian matrix corresponding to this component
                 let sub_lp = DMatrix::from_fn(size, size, |r, c| {
-                    laplacians[(comp.start - super_comp.start) + r][(comp.start - super_comp.start) + c]
+                    laplacians[(comp.start - super_comp.start) + r]
+                        [(comp.start - super_comp.start) + c]
                 });
                 let decomp = sub_lp.hermitian_part().symmetric_eigen();
                 // Finds the fiedler vectors. This is the eigenvector associated with the second
@@ -419,7 +353,6 @@ impl ComponentExtractor {
             }
         }
     }
-    
     /// Returns the hash of a given component. This is the job of the implementing data structure
     /// to ensure that the same component gives the same hash, even if it appears in another part
     /// of the search tree. This means that, in practice, the hash should give the same hash even
@@ -443,11 +376,6 @@ impl ComponentExtractor {
         let start = state.get_int(self.base) as usize;
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
-    }
-
-    /// Returns the number of articulation point in `distribution`
-    pub fn get_distribution_ap_score(&self, distribution: DistributionIndex) -> usize {
-        self.ap_heuristic_score[distribution.0]
     }
 
     /// Returns the average distance (computed using the fiedler scores) between each node
