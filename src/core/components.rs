@@ -247,16 +247,14 @@ impl ComponentExtractor {
                         if !g.is_node_bound(src, state) && !g.is_node_bound(dst, state) {
                             let src_pos = self.positions[src.0];
                             let dst_pos = self.positions[dst.0];
-                            if g.is_node_deterministic(src) && g.is_node_deterministic(dst) {
-                                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] =
-                                    -1.0;
-                                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] =
-                                    -1.0;
-                                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] +=
-                                    0.5;
-                                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] +=
-                                    0.5;
-                            }
+                            laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] =
+                                -1.0;
+                            laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] =
+                                -1.0;
+                            laplacians[src_pos - laplacian_start][src_pos - laplacian_start] +=
+                                0.5;
+                            laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] +=
+                                0.5;
                         }
                     }
                 }
@@ -314,41 +312,49 @@ impl ComponentExtractor {
             }
         }
         state.set_int(self.limit, self.components.len() as isize);
+        // If there is only one sub-component extracted, we keep the same values for the fiedler
+        // heuristic. Since the computation of the fiedler vector is expensive, we try to delay it
+        // as much as possible. If the component was not breaked, we assume that the nodes that were
+        // on the "inside" of the graph should have lower value in order to break the graph.
         if self.number_components(state) > 1 || component == ComponentIndex(0) {
             for cid in self.components_iter(state) {
                 let comp = self.components[cid.0];
                 let size = comp.size;
                 // Extracts the laplacian matrix corresponding to this component
-                let sub_lp = DMatrix::from_fn(size, size, |r, c| {
-                    laplacians[(comp.start - super_comp.start) + r]
-                        [(comp.start - super_comp.start) + c]
-                });
-                let decomp = sub_lp.hermitian_part().symmetric_eigen();
-                // Finds the fiedler vectors. This is the eigenvector associated with the second
-                // smallest eigenvalue. We first find this eigen value and then assign the fiedler
-                // score to the nodes in the component
-                let mut smallest_eigenvalue = f64::INFINITY;
-                let mut second_smallest_eigenvalue = f64::INFINITY;
-                let mut smallest_index = 0;
-                let mut fiedler_index = 0;
-                let eigenvalues = decomp.eigenvalues;
-                for i in 0..size {
-                    let eigenvalue = eigenvalues[i];
-                    if eigenvalue < smallest_eigenvalue {
-                        second_smallest_eigenvalue = smallest_eigenvalue;
-                        fiedler_index = smallest_index;
-                        smallest_eigenvalue = eigenvalue;
-                        smallest_index = i;
-                    } else if eigenvalue < second_smallest_eigenvalue {
-                        second_smallest_eigenvalue = eigenvalue;
-                        fiedler_index = i;
+                let deterministic_indexes = (comp.start..(comp.start+size)).filter(|i| g.is_node_deterministic(self.nodes[*i])).collect::<Vec<usize>>();
+                let msize = deterministic_indexes.len();
+                if msize > 0 {
+                    let sub_lp = DMatrix::from_fn(msize, msize, |r, c| {
+                        let rpos = deterministic_indexes[r];
+                        let cpos = deterministic_indexes[c];
+                        laplacians[(rpos - super_comp.start)]
+                            [(cpos - super_comp.start)]
+                    });
+                    let decomp = sub_lp.hermitian_part().symmetric_eigen();
+                    // Finds the fiedler vectors. This is the eigenvector associated with the second
+                    // smallest eigenvalue. We first find this eigen value and then assign the fiedler
+                    // score to the nodes in the component
+                    let mut smallest_eigenvalue = f64::INFINITY;
+                    let mut second_smallest_eigenvalue = f64::INFINITY;
+                    let mut smallest_index = 0;
+                    let mut fiedler_index = 0;
+                    let eigenvalues = decomp.eigenvalues;
+                    for i in 0..msize {
+                        let eigenvalue = eigenvalues[i];
+                        if eigenvalue < smallest_eigenvalue {
+                            second_smallest_eigenvalue = smallest_eigenvalue;
+                            fiedler_index = smallest_index;
+                            smallest_eigenvalue = eigenvalue;
+                            smallest_index = i;
+                        } else if eigenvalue < second_smallest_eigenvalue {
+                            second_smallest_eigenvalue = eigenvalue;
+                            fiedler_index = i;
+                        }
                     }
-                }
-                for i in 0..size {
-                    let node = self.nodes[i + comp.start];
-                    let pos = self.positions[node.0];
-                    self.fiedler_score[pos] =
-                        decomp.eigenvectors.row(pos - comp.start)[fiedler_index];
+                    for i in 0..msize {
+                        self.fiedler_score[deterministic_indexes[i]] =
+                            decomp.eigenvectors.row(i)[fiedler_index];
+                    }
                 }
             }
         }
@@ -380,7 +386,7 @@ impl ComponentExtractor {
 
     /// Returns the average distance (computed using the fiedler scores) between each node
     /// in the distribution and their children.
-    pub fn get_distribution_fiedler_neighbor_diff_avg(
+    pub fn get_distribution_fiedler_neighbor_avg(
         &self,
         g: &Graph,
         distribution: DistributionIndex,
@@ -393,16 +399,14 @@ impl ComponentExtractor {
             .filter(|n| !g.is_node_bound(*n, state))
         {
             nb_distribution += 1.0;
-            let node_fiedler_value = self.fiedler_score[self.positions[node.0]];
-            let mut diff = 0.0;
+            let mut avg_value = 0.0;
             let mut nb_active_children = 0.0;
             for children in g.active_children(node, state) {
-                let child_fiedler_value = self.fiedler_score[self.positions[children.0]];
-                diff += (node_fiedler_value - child_fiedler_value).abs();
+                avg_value += self.fiedler_score[self.positions[children.0]].abs();
                 nb_active_children += 1.0;
             }
             if nb_active_children != 0.0 {
-                score += diff / nb_active_children
+                score += avg_value / nb_active_children
             }
         }
         // Since the distribution has been chosen for score computation, then it must have

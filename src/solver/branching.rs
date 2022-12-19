@@ -43,11 +43,11 @@ impl BranchingDecision for NeighborDiffFiedler {
     ) -> Option<DistributionIndex> {
         let distributions = component_extractor.get_component_distributions(component);
         let mut distribution: Option<DistributionIndex> = None;
-        let mut best_score = f64::NEG_INFINITY;
+        let mut best_score = f64::INFINITY;
         for d in distributions {
             let score =
-                component_extractor.get_distribution_fiedler_neighbor_diff_avg(g, *d, state);
-            if score > best_score {
+                component_extractor.get_distribution_fiedler_neighbor_avg(g, *d, state);
+            if score < best_score {
                 best_score = score;
                 distribution = Some(*d);
             }
