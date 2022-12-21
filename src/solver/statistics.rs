@@ -18,6 +18,7 @@ use std::fmt;
 
 /// Implements a bunch of statistics that are collected during the search
 #[derive(Default)]
+#[cfg(not(tarpaulin_include))]
 pub struct Statistics<const B: bool> {
     cache_hit: usize,
     cache_access: usize,

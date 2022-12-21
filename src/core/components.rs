@@ -469,6 +469,7 @@ pub struct NoComponentExtractor {
 }
 
 #[allow(dead_code)]
+#[cfg(not(tarpaulin_include))]
 impl NoComponentExtractor {
     pub fn new(g: &Graph) -> Self {
         let mut components: Vec<Vec<NodeIndex>> = vec![];
