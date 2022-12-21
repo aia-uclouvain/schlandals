@@ -46,6 +46,10 @@ enum Branching {
     ChildrenFiedlerAvg,
     // Takes the minimum of the fiedler value of each node in a distribution
     ChildrenFiedlerMin,
+    // ChildrenFiedlerAvg with cache score
+    CSChildrenFiedlerAvg,
+    // ChildrenFiedlerMin with cache score
+    CSChildrenFiedlerMin,
 }
 
 fn main() {
@@ -58,6 +62,8 @@ fn main() {
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
                 Branching::ChildrenFiedlerAvg => Box::new(ChildrenFiedlerAvg::default()),
                 Branching::ChildrenFiedlerMin => Box::new(ChildrenFiedlerMin::default()),
+                Branching::CSChildrenFiedlerAvg => Box::new(CSChildrenFiedlerAvg::default()),
+                Branching::CSChildrenFiedlerMin => Box::new(CSChildrenFiedlerMin::default()),
             };
             if args.statistics {
                 let mut solver = DefaultSolver::new(

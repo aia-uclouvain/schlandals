@@ -29,7 +29,7 @@ macro_rules! make_benches {
         pub fn bench(c: &mut Criterion) {
             $(
                 set_up_solvers! {
-                    fiedler_nb_diff: [$instance,  ChildrenFiedlerAvg, c],
+                    fiedler_nb_diff: [$instance,  CSChildrenFiedlerAvg, c],
                 }
             )*
         }

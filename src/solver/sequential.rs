@@ -103,8 +103,10 @@ where
         if should_compute {
             let count = self.choose_and_branch(component);
             self.cache.insert(hash, count);
+            self.component_extractor.decrement_cache_score(component);
             count
         } else {
+            self.component_extractor.decrement_cache_score(component);
             self.statistics.cache_hit();
             *self.cache.get(&hash).unwrap()
         }

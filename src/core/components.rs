@@ -71,6 +71,11 @@ impl Iterator for ComponentIterator {
     }
 }
 
+/// Constant that indicates after how many decrement the cache scores must be incremented
+const CS_LIMIT: usize = 500;
+/// Constant by which the cache scores are incremented after CS_LIMIT decrement
+const CS_INCREMENT: usize = 100;
+
 /// This structure is an extractor of component that works by doing a DFS on the component to
 /// extract sub-components. It keeps all the `NodeIndex` in a single vector (the `nodes`
 /// vector) and maintain the property that all the nodes of a component are in a contiguous
@@ -109,6 +114,10 @@ pub struct ComponentExtractor {
     edges_bits: Vec<u64>,
     /// Fiedler score for Fiedler-based heuristics
     fiedler_score: Vec<f64>,
+    /// Cache score, decremented each time a variable is store in the cache or hitted
+    cache_score: Vec<isize>,
+    /// Counter for the number of time the cache score have been decremented and should be incremented
+    cache_score_decrement_count: usize
 }
 
 impl ComponentExtractor {
@@ -126,6 +135,7 @@ impl ComponentExtractor {
         let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
         let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
         let fiedler_score: Vec<f64> = (0..g.number_nodes()).map(|_| 0.0).collect();
+        let cache_score: Vec<isize> = (0..g.number_nodes()).map(|_| 0).collect();
         Self {
             nodes,
             positions,
@@ -136,6 +146,8 @@ impl ComponentExtractor {
             nodes_bits,
             edges_bits,
             fiedler_score,
+            cache_score,
+            cache_score_decrement_count: 0,
         }
     }
 
@@ -414,6 +426,36 @@ impl ComponentExtractor {
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {
         (state.get_int(self.limit) - state.get_int(self.base)) as usize
+    }
+    
+    /// Decrements the cache score of the variables in component
+    pub fn decrement_cache_score(&mut self, component: ComponentIndex) {
+        let comp = self.components[component.0];
+        for node in &self.nodes[comp.start..(comp.start+comp.size)] {
+            self.cache_score[node.0] -= 1;
+        }
+        self.cache_score_decrement_count = (self.cache_score_decrement_count + 1) % CS_LIMIT;
+        if self.cache_score_decrement_count == 0 {
+            for i in 0..self.cache_score.len() {
+                self.cache_score[i] += CS_INCREMENT as isize;
+            }
+        }
+    }
+    
+    /// Returns the average difference between a node's cache score and its children
+    pub fn average_diff_children_cs(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> Option<f64> {
+        let node_score = self.cache_score[node.0];
+        let mut diff = 0;
+        let mut active_child = 0;
+        for child in g.active_children(node, state) {
+            diff += node_score - self.cache_score[child.0];
+            active_child += 1;
+        }
+        if active_child == 0 {
+            None
+        } else {
+            Some((diff as f64 / active_child as f64) / CS_LIMIT as f64)
+        }
     }
 }
 
