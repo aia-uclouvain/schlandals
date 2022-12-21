@@ -16,6 +16,7 @@ jobs:
   benchmark:
     name: Performance regression check
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[no bench]')"
     steps:
       - uses: actions/checkout@v2
       - run: rustup toolchain update nightly && rustup default nightly

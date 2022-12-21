@@ -16,6 +16,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - run: rustup toolchain update nightly && rustup default nightly
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -23,8 +24,6 @@ jobs:
     - name: Run cargo-tarpaulin
       uses: actions-rs/tarpaulin@v0.1
       with:
-        version: 0.16.0
-        args: --ignore-tests --exclude-files lib.rs main.rs mod.rs
+        args: --ignore-tests --engine llvm --exclude-files lib.rs main.rs mod.rs
     - name: Upload coverage reports to Codecov with GitHub Action
       uses: codecov/codecov-action@v3
-    
