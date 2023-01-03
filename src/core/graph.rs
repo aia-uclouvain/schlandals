@@ -172,6 +172,8 @@ pub struct Graph {
     clauses: Vec<Clause>,
     /// Vector containing the distributions of the graph
     distributions: Vec<Distribution>,
+    /// Number of probabilistic nodes in the graph
+    number_probabilistic: usize,
 }
 
 impl Default for Graph {
@@ -187,6 +189,7 @@ impl Graph {
             edges: vec![],
             clauses: vec![],
             distributions: vec![],
+            number_probabilistic: 0,
         }
     }
 
@@ -340,6 +343,7 @@ impl Graph {
         weights: &[f64],
         state: &mut StateManager,
     ) -> Vec<NodeIndex> {
+        self.number_probabilistic += weights.len();
         let distribution = DistributionIndex(self.distributions.len());
         let nodes: Vec<NodeIndex> = weights
             .iter()
@@ -366,6 +370,11 @@ impl Graph {
     /// Gets the number of nodes in a distribution
     pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
         self.distributions[distribution.0].size
+    }
+    
+    /// Returns the number of probabilistic nodes in the graph
+    pub fn get_number_probabilistic(&self) -> usize {
+        self.number_probabilistic
     }
 
     /// Sets `node` to `value`. This assumes that `node` is unassigned

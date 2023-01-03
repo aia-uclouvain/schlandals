@@ -75,7 +75,7 @@ fn main() {
                     branching_heuristic.as_mut(),
                 );
                 let mut solution = solver.solve();
-                solution.probability += v;
+                solution.probability *= v;
                 println!("{}", solution);
             } else {
                 let mut solver = QuietSolver::new(

@@ -23,7 +23,7 @@ use crate::solver::statistics::Statistics;
 use crate::common::f128;
 use rustc_hash::FxHashMap;
 
-use rug::Float;
+use rug::{Integer, Float};
 
 use std::{fmt, ops};
 
@@ -46,11 +46,11 @@ use std::{fmt, ops};
 #[derive(Clone)]
 pub struct Solution {
     pub probability: Float,
-    pub sol_count: usize,
+    pub sol_count: Integer,
 }
 
 impl Solution {
-    fn new(probability: Float, sol_count: usize) -> Self {
+    fn new(probability: Float, sol_count: Integer) -> Self {
         Solution {
             probability,
             sol_count,
@@ -126,7 +126,7 @@ where
         if let Some(distribution) = decision {
             self.statistics.or_node();
             // The branch objective starts at minus infinity because we use log-probabilities
-            let mut node_sol = Solution::new(f128!(0.0), 0);
+            let mut node_sol = Solution::new(f128!(0.0), Integer::new());
             for node in self.graph.distribution_iter(distribution) {
                 self.state.save_state();
                 match self.graph.propagate_node(node, true, &mut self.state) {
@@ -144,7 +144,9 @@ where
             }
             node_sol
         } else {
-            Solution::new(f128!(1.0), 1)
+            let mut count = Integer::new();
+            count += 1;
+            Solution::new(f128!(1.0), count)
         }
     }
 
@@ -157,7 +159,9 @@ where
         // Default solution with a probability/count of 1 (in log-domain).
         // Since the probability are multiplied between the sub-components, it is neutral. And if
         // there are no sub-components, this is the default solution.
-        let mut solution = Solution::new(f128!(1.0), 1);
+        let mut count = Integer::with_capacity(self.graph.get_number_probabilistic());
+        count += 1;
+        let mut solution = Solution::new(f128!(1.0), count);
         self.statistics.and_node();
         self.statistics
             .decomposition(self.component_extractor.number_components(&self.state));
@@ -187,25 +191,23 @@ where
 impl ops::AddAssign<&Solution> for Solution {
     fn add_assign(&mut self, rhs: &Solution) {
         self.probability += &rhs.probability;
-        self.sol_count += rhs.sol_count;
+        self.sol_count += &rhs.sol_count;
     }
 }
 
 impl ops::MulAssign<&Solution> for Solution {
     fn mul_assign(&mut self, rhs: &Solution) {
         self.probability *= &rhs.probability;
-        self.sol_count *= rhs.sol_count;
+        self.sol_count *= &rhs.sol_count;
     }
 }
 
 impl fmt::Display for Solution {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let proba = f128!(self.probability.exp2_ref());
         write!(
             f,
-            "Node with probability {} ({}) and {} solutions",
+            "Node with probability {} and {} solutions",
             self.probability,
-            proba,
             self.sol_count
         )
     }
