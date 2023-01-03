@@ -125,7 +125,6 @@ where
         );
         if let Some(distribution) = decision {
             self.statistics.or_node();
-            // The branch objective starts at minus infinity because we use log-probabilities
             let mut node_sol = Solution::new(f128!(0.0), Integer::new());
             for node in self.graph.distribution_iter(distribution) {
                 self.state.save_state();
@@ -134,16 +133,16 @@ where
                     Ok(v) => {
                         debug_assert_ne!(v, 0.0);
                         let mut child_sol = self._solve(component);
-                        if child_sol.probability != 0.0 {
-                            child_sol.probability *= v;
-                            node_sol += &child_sol;
-                        }
+                        child_sol.probability *= v;
+                        node_sol += &child_sol;
                     }
                 };
                 self.state.restore_state();
             }
             node_sol
         } else {
+            // All distributions have been assigned 1 value, this is 1 assignement that is SAT for the probability variables
+            // and extends to deterministic variables.
             let mut count = Integer::new();
             count += 1;
             Solution::new(f128!(1.0), count)
@@ -156,7 +155,7 @@ where
         // First we detect the sub-components in the graph
         self.component_extractor
             .detect_components(&self.graph, &mut self.state, component);
-        // Default solution with a probability/count of 1 (in log-domain).
+        // Default solution with a probability/count of 1
         // Since the probability are multiplied between the sub-components, it is neutral. And if
         // there are no sub-components, this is the default solution.
         let mut count = Integer::with_capacity(self.graph.get_number_probabilistic());
@@ -167,7 +166,7 @@ where
             .decomposition(self.component_extractor.number_components(&self.state));
         for sub_component in self.component_extractor.components_iter(&self.state) {
             solution *= self.get_cached_component_or_compute(sub_component);
-            if solution.probability == f64::NEG_INFINITY {
+            if solution.probability == 0.0 {
                 break;
             }
         }
