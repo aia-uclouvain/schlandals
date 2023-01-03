@@ -16,11 +16,13 @@
 
 use crate::core::graph::{ClauseIndex, Graph, NodeIndex};
 use crate::core::trail::StateManager;
+use crate::common::f128;
+use rug::Float;
 
 #[derive(Debug)]
 pub struct Unsat;
 
-pub type PropagationResult<T> = Result<T, Unsat>;
+pub type PropagationResult = Result<Float, Unsat>;
 
 /// This is a simple propagator that makes very basic local assumption and propagate them to the
 /// graph in a DFS manner.
@@ -40,7 +42,7 @@ pub type PropagationResult<T> = Result<T, Unsat>;
 pub trait SimplePropagator {
     /// This is the global propagation algorithm. This run on the whole graph and when the value of
     /// a node can be infered, it launches `propagate_node`.
-    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult<f64>;
+    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult;
     /// This implement the propagation of `node` to `value`. It ensures that all the nodes for
     /// which a value can be inferred, after setting `node` to `value` are propagated recursively.
     /// Returns either Unsat if the assignment make the clauses not satisfiable or a float
@@ -51,18 +53,18 @@ pub trait SimplePropagator {
         node: NodeIndex,
         value: bool,
         state: &mut StateManager,
-    ) -> PropagationResult<f64>;
+    ) -> PropagationResult;
 }
 
 impl SimplePropagator for Graph {
-    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult<f64> {
-        let mut v = 0.0;
+    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult {
+        let mut v = f128!(1.0);
         for node in self.nodes_iter() {
             if !self.is_node_bound(node, state) && self.is_node_deterministic(node) {
                 if self.node_number_incoming(node, state) == 0 {
-                    v += self.propagate_node(node, false, state)?;
+                    v *= self.propagate_node(node, false, state)?;
                 } else if self.node_number_outgoing(node, state) == 0 {
-                    v += self.propagate_node(node, true, state)?;
+                    v *= self.propagate_node(node, true, state)?;
                 }
             }
         }
@@ -74,22 +76,22 @@ impl SimplePropagator for Graph {
         node: NodeIndex,
         value: bool,
         state: &mut StateManager,
-    ) -> PropagationResult<f64> {
+    ) -> PropagationResult {
         if self.is_node_bound(node, state) {
             if self.get_node_value(node) != value {
                 return PropagationResult::Err(Unsat);
             } else {
-                return PropagationResult::Ok(0.0);
+                return PropagationResult::Ok(f128!(1.0));
             }
         }
         self.set_node(node, value, state);
         let mut propagation_prob = if value && self.is_node_probabilistic(node) {
-            self.get_node_weight(node).unwrap()
+            f128!(self.get_node_weight(node).unwrap())
         } else {
-            0.0
+            f128!(1.0)
         };
 
-        if propagation_prob == f64::NEG_INFINITY {
+        if propagation_prob == 0.0 {
             return PropagationResult::Err(Unsat);
         }
 
@@ -111,14 +113,14 @@ impl SimplePropagator for Graph {
                             && self.is_node_deterministic(src)
                             && self.node_number_outgoing(src, state) == 0
                         {
-                            propagation_prob += self.propagate_node(src, true, state)?;
+                            propagation_prob *= self.propagate_node(src, true, state)?;
                         }
                         let dst = self.get_edge_destination(edge);
                         if !self.is_node_bound(dst, state)
                             && self.is_node_deterministic(dst)
                             && self.node_number_incoming(dst, state) == 0
                         {
-                            propagation_prob += self.propagate_node(dst, false, state)?;
+                            propagation_prob *= self.propagate_node(dst, false, state)?;
                         }
                     }
                 }
@@ -133,13 +135,13 @@ impl SimplePropagator for Graph {
                 if value && nb_active_edge == 0 {
                     // The head is not true, but there are no more unassigned implicants. And
                     // they are all true.
-                    propagation_prob += self.propagate_node(head, true, state)?;
+                    propagation_prob *= self.propagate_node(head, true, state)?;
                 } else if nb_active_edge == 1 {
                     let last_active_edge = self.get_first_active_edge(clause, state).unwrap();
 
                     if self.is_node_bound(head, state) && !self.get_node_value(head) {
                         let n = self.get_edge_source(last_active_edge);
-                        propagation_prob += self.propagate_node(n, false, state)?;
+                        propagation_prob *= self.propagate_node(n, false, state)?;
                     }
                 }
             }
@@ -147,7 +149,7 @@ impl SimplePropagator for Graph {
         if self.is_node_probabilistic(node) {
             if value {
                 for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                    propagation_prob += self.propagate_node(other, false, state)?;
+                    propagation_prob *= self.propagate_node(other, false, state)?;
                 }
             } else {
                 let distribution = self.get_distribution(node).unwrap();
@@ -158,7 +160,7 @@ impl SimplePropagator for Graph {
                     // Only 1 node not assigned in the distribution -> set to true
                     for other in self.nodes_distribution_iter(node) {
                         if !self.is_node_bound(other, state) {
-                            propagation_prob += self.propagate_node(other, true, state)?;
+                            propagation_prob *= self.propagate_node(other, true, state)?;
                             break;
                         }
                     }

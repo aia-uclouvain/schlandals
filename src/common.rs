@@ -14,12 +14,10 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod branching;
-pub mod propagator;
-pub mod sequential;
-mod statistics;
+macro_rules! f128 {
+    ($v:expr) => {
+        Float::with_val(113, $v)
+    }
+}
 
-use crate::solver::sequential::Solver;
-
-pub type DefaultSolver<'b, B> = Solver<'b, B, true>;
-pub type QuietSolver<'b, B> = Solver<'b, B, false>;
+pub(crate) use f128;

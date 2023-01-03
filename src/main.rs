@@ -17,6 +17,7 @@
 mod core;
 mod parser;
 mod solver;
+mod common;
 
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
@@ -55,9 +56,10 @@ enum Branching {
 fn main() {
     let args = Args::parse();
     let mut state = StateManager::default();
-    match graph_from_ppidimacs(&args.input, &mut state) {
+    let (graph, prob) = graph_from_ppidimacs(&args.input, &mut state);
+    match prob {
         Err(_) => println!("Initial model Unsat"),
-        Ok((graph, v)) => {
+        Ok(v) => {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
                 Branching::ChildrenFiedlerAvg => Box::new(ChildrenFiedlerAvg::default()),
@@ -83,7 +85,7 @@ fn main() {
                     branching_heuristic.as_mut(),
                 );
                 let mut solution = solver.solve();
-                solution.probability += v;
+                solution.probability *= v;
                 println!("{}", solution);
             }
         }

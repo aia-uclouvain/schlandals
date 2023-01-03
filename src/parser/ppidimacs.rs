@@ -49,10 +49,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use rug::Float;
+use crate::common::f128;
+
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
-) -> PropagationResult<(Graph, f64)> {
+) -> (Graph, PropagationResult) {
     let mut node_to_propagate: Vec<(NodeIndex, bool)> = Vec::new();
     let mut g = Graph::new();
     let file = File::open(filepath).unwrap();
@@ -76,7 +79,7 @@ pub fn graph_from_ppidimacs(
             let split = l
                 .split_whitespace()
                 .skip(1)
-                .map(|token| token.parse::<f64>().unwrap().log2())
+                .map(|token| token.parse::<f64>().unwrap())
                 .collect::<Vec<f64>>();
             g.add_distribution(&split, state);
         } else {
@@ -131,14 +134,22 @@ pub fn graph_from_ppidimacs(
         }
         line_count += 1;
     }
-    let mut v = 0.0;
+    let mut v = f128!(1.0);
     for (node, value) in node_to_propagate {
         if !g.is_node_bound(node, state) {
-            v += g.propagate_node(node, value, state)?;
+            match g.propagate_node(node, value, state) {
+                Err(err) => return (g, PropagationResult::Err(err)),
+                Ok(value) => v *= value
+            }
         }
     }
-    g.propagate(state)?;
-    PropagationResult::Ok((g, v))
+    match g.propagate(state) {
+        Ok(value) => {
+            v *= &value;
+            (g, PropagationResult::Ok(v))
+        },
+        Err(err) => (g, PropagationResult::Err(err))
+    }
 }
 
 #[cfg(test)]
@@ -154,7 +165,7 @@ mod test_ppidimacs_parsing {
         let mut file = PathBuf::new();
         let mut state = StateManager::default();
         file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
-        let (g, _) = graph_from_ppidimacs(&file, &mut state).unwrap();
+        let (g, _) = graph_from_ppidimacs(&file, &mut state);
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
         assert_eq!(17, g.number_nodes());
         assert_eq!(5, g.number_distributions());

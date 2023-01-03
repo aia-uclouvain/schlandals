@@ -20,7 +20,10 @@ use crate::core::trail::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
 use crate::solver::statistics::Statistics;
+use crate::common::f128;
 use rustc_hash::FxHashMap;
+
+use rug::Float;
 
 use std::{fmt, ops};
 
@@ -40,14 +43,14 @@ use std::{fmt, ops};
 ///     default
 ///     - If not, using the same procedure as above, the count is the sum of the count of the
 ///     children (multiplied for independent sub-components)
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Solution {
-    pub probability: f64,
+    pub probability: Float,
     pub sol_count: usize,
 }
 
 impl Solution {
-    fn new(probability: f64, sol_count: usize) -> Self {
+    fn new(probability: Float, sol_count: usize) -> Self {
         Solution {
             probability,
             sol_count,
@@ -95,7 +98,7 @@ where
 
     /// Returns the solution for the sub-graph identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> Solution {
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> &Solution {
         let hash = self.component_extractor.get_component_hash(component);
         // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
         self.statistics.cache_access();
@@ -103,13 +106,11 @@ where
         if should_compute {
             let count = self.choose_and_branch(component);
             self.cache.insert(hash, count);
-            self.component_extractor.decrement_cache_score(component);
-            count
         } else {
-            self.component_extractor.decrement_cache_score(component);
             self.statistics.cache_hit();
-            *self.cache.get(&hash).unwrap()
         }
+        self.component_extractor.decrement_cache_score(component);
+        self.cache.get(&hash).unwrap()
     }
 
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
@@ -125,17 +126,17 @@ where
         if let Some(distribution) = decision {
             self.statistics.or_node();
             // The branch objective starts at minus infinity because we use log-probabilities
-            let mut node_sol = Solution::new(f64::NEG_INFINITY, 0);
+            let mut node_sol = Solution::new(f128!(0.0), 0);
             for node in self.graph.distribution_iter(distribution) {
                 self.state.save_state();
                 match self.graph.propagate_node(node, true, &mut self.state) {
                     Err(_) => {}
                     Ok(v) => {
-                        debug_assert_ne!(v, f64::NEG_INFINITY);
+                        debug_assert_ne!(v, 0.0);
                         let mut child_sol = self._solve(component);
-                        if child_sol.probability != f64::NEG_INFINITY {
-                            child_sol.probability += v;
-                            node_sol += child_sol;
+                        if child_sol.probability != 0.0 {
+                            child_sol.probability *= v;
+                            node_sol += &child_sol;
                         }
                     }
                 };
@@ -143,7 +144,7 @@ where
             }
             node_sol
         } else {
-            Solution::new(0.0, 1)
+            Solution::new(f128!(1.0), 1)
         }
     }
 
@@ -156,7 +157,7 @@ where
         // Default solution with a probability/count of 1 (in log-domain).
         // Since the probability are multiplied between the sub-components, it is neutral. And if
         // there are no sub-components, this is the default solution.
-        let mut solution = Solution::new(0.0, 1);
+        let mut solution = Solution::new(f128!(1.0), 1);
         self.statistics.and_node();
         self.statistics
             .decomposition(self.component_extractor.number_components(&self.state));
@@ -183,27 +184,28 @@ where
     }
 }
 
-impl ops::AddAssign<Solution> for Solution {
-    fn add_assign(&mut self, rhs: Solution) {
-        self.probability = (2_f64.powf(self.probability) + 2_f64.powf(rhs.probability)).log2();
+impl ops::AddAssign<&Solution> for Solution {
+    fn add_assign(&mut self, rhs: &Solution) {
+        self.probability += &rhs.probability;
         self.sol_count += rhs.sol_count;
     }
 }
 
-impl ops::MulAssign<Solution> for Solution {
-    fn mul_assign(&mut self, rhs: Solution) {
-        self.probability += rhs.probability;
+impl ops::MulAssign<&Solution> for Solution {
+    fn mul_assign(&mut self, rhs: &Solution) {
+        self.probability *= &rhs.probability;
         self.sol_count *= rhs.sol_count;
     }
 }
 
 impl fmt::Display for Solution {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let proba = f128!(self.probability.exp2_ref());
         write!(
             f,
             "Node with probability {} ({}) and {} solutions",
             self.probability,
-            2_f64.powf(self.probability),
+            proba,
             self.sol_count
         )
     }

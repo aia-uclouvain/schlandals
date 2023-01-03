@@ -4,10 +4,9 @@ use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::QuietSolver;
 use schlandals::trail::StateManager;
+use rug::Float;
 
 use std::path::PathBuf;
-
-use assert_float_eq::*;
 
 macro_rules! integration_tests_bn {
     ($($name:ident: $value:expr,)*) => {
@@ -17,12 +16,16 @@ macro_rules! integration_tests_bn {
                 let filename = format!("tests/instances/bayesian_networks/{}.ppidimacs", stringify!($name));
                 let mut state = StateManager::default();
                 let path = PathBuf::from(filename);
-                let (graph, v) = graph_from_ppidimacs(&path, &mut state).unwrap();
+                let (graph, v) = graph_from_ppidimacs(&path, &mut state);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = ChildrenFiedlerAvg::default();
                 let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic);
-                let sol = solver.solve();
-                assert_float_relative_eq!($value, 2_f64.powf(sol.probability + v), 0.000001);
+                let mut sol = solver.solve();
+                sol.probability *= v.unwrap();
+                let expected = Float::with_val(113, $value);
+                println!("Expected: {:?}", expected);
+                println!("Actual: {:?}", sol.probability);
+                assert!((expected - sol.probability).abs() < 0.000001);
             }
         )*
     }
