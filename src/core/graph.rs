@@ -366,7 +366,12 @@ impl Graph {
     ) -> isize {
         state.get_int(self.distributions[distribution.0].nodes_false)
     }
-
+    
+    /// Gets the number of unassigned nodes in the distribution
+    pub fn get_distribution_unassigned_nodes(&self, distribution: DistributionIndex, state: &StateManager) -> usize {
+        self.distribution_iter(distribution).filter(|n| !self.is_node_bound(*n, state)).count()
+    }
+    
     /// Gets the number of nodes in a distribution
     pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
         self.distributions[distribution.0].size

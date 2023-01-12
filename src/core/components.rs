@@ -49,6 +49,8 @@ pub struct Component {
     start: usize,
     /// Size of the component
     size: usize,
+    /// Number of probabilistic nodes in the component
+    number_probabilistic: usize,
     /// Hash of the component (computed during the detection, or afterward)
     hash: u64,
 }
@@ -124,9 +126,11 @@ impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
         let positions = (0..g.number_nodes()).collect();
+        let number_probabilistic = g.nodes_iter().filter(|n| g.is_node_probabilistic(*n)).count();
         let components = vec![Component {
             start: 0,
             size: g.number_nodes(),
+            number_probabilistic,
             hash: 0,
         }];
         let first_distributions = (0..g.number_distributions())
@@ -275,12 +279,13 @@ impl ComponentExtractor {
     }
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
+    /// Returns true iff at least one component has been detected and it contains one distribution
     pub fn detect_components(
         &mut self,
         g: &Graph,
         state: &mut StateManager,
         component: ComponentIndex,
-    ) {
+    ) -> bool {
         let c = self.components[component.0];
         for node in (c.start..(c.start + c.size)).map(NodeIndex) {
             self.fiedler_score[node.0] = 0.0;
@@ -317,7 +322,14 @@ impl ComponentExtractor {
                     &mut laplacians,
                     super_comp.start,
                 );
-                self.components.push(Component { start, size, hash });
+                if !self.distributions.last().unwrap().is_empty() {
+                    let ds = self.distributions.last().unwrap();
+                    let mut number_probabilistic = 0;
+                    for d in ds {
+                        number_probabilistic += g.get_distribution_unassigned_nodes(*d, state);
+                    }
+                    self.components.push(Component { start, size, number_probabilistic, hash });
+                }
                 start += size;
             } else {
                 start += 1;
@@ -339,8 +351,7 @@ impl ComponentExtractor {
                     let sub_lp = DMatrix::from_fn(msize, msize, |r, c| {
                         let rpos = deterministic_indexes[r];
                         let cpos = deterministic_indexes[c];
-                        laplacians[(rpos - super_comp.start)]
-                            [(cpos - super_comp.start)]
+                        laplacians[rpos - super_comp.start][cpos - super_comp.start]
                     });
                     let decomp = sub_lp.hermitian_part().symmetric_eigen();
                     // Finds the fiedler vectors. This is the eigenvector associated with the second
@@ -370,7 +381,9 @@ impl ComponentExtractor {
                 }
             }
         }
+        self.number_components(state) > 0
     }
+
     /// Returns the hash of a given component. This is the job of the implementing data structure
     /// to ensure that the same component gives the same hash, even if it appears in another part
     /// of the search tree. This means that, in practice, the hash should give the same hash even
@@ -394,6 +407,12 @@ impl ComponentExtractor {
         let start = state.get_int(self.base) as usize;
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
+    }
+    
+    /// Returns true if there are only probabilistic nodes in the component
+    pub fn has_only_probabilistic(&self, component: ComponentIndex) -> bool {
+        let comp = self.components[component.0];
+        comp.size == comp.number_probabilistic
     }
     
     /// Returns the average of the fiedler values of the active (unassigned) children of a node
@@ -448,7 +467,7 @@ impl ComponentExtractor {
         let mut diff = 0;
         let mut active_child = 0;
         for child in g.active_children(node, state) {
-            diff += node_score - self.cache_score[child.0];
+            diff += (node_score - self.cache_score[child.0]).abs();
             active_child += 1;
         }
         if active_child == 0 {
