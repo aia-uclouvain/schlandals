@@ -563,17 +563,19 @@ mod test_dfs_component {
     fn test_initialization_extractor() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..5)
+        g.add_distribution(&vec![0.0], &mut state);
+        let np = vec![NodeIndex(0)];
+        let n = (0..4)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        g.add_clause(n[1], &vec![n[3], np[0]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         assert_eq!(5, component_extractor.nodes.len());
         assert_eq!(5, component_extractor.positions.len());
-        assert_eq!(0, component_extractor.distributions[0].len());
+        assert_eq!(1, component_extractor.distributions[0].len());
         assert_eq!(1, state.get_int(component_extractor.base));
         assert_eq!(2, state.get_int(component_extractor.limit));
         let number_component =
@@ -609,11 +611,12 @@ mod test_dfs_component {
     fn test_initialization_single_component() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..5)
+        g.add_distribution(&vec![0.5], &mut state);
+        let n = (0..4)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
         g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        g.add_clause(n[1], &vec![n[3], NodeIndex(0)], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
@@ -630,7 +633,8 @@ mod test_dfs_component {
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
-        let expected = n.iter().copied().collect::<FxHashSet<NodeIndex>>();
+        let mut expected = n.iter().copied().collect::<FxHashSet<NodeIndex>>();
+        expected.insert(NodeIndex(0));
         assert_eq!(expected, nodes);
     }
 
@@ -638,11 +642,14 @@ mod test_dfs_component {
     fn test_initialization_multiple_components() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..5)
+        g.add_distribution(&vec![0.5], &mut state);
+        g.add_distribution(&vec![0.5], &mut state);
+        let np = vec![NodeIndex(0), NodeIndex(1)];
+        let n = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
-        g.add_clause(n[0], &vec![n[1]], &mut state);
-        g.add_clause(n[2], &vec![n[3], n[4]], &mut state);
+        g.add_clause(n[0], &vec![np[0]], &mut state);
+        g.add_clause(n[1], &vec![np[1], n[2]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
@@ -658,11 +665,11 @@ mod test_dfs_component {
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
-        let n1 = vec![n[0], n[1]]
+        let n1 = vec![n[0], np[0]]
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
-        let n2 = vec![n[2], n[3], n[4]]
+        let n2 = vec![n[1], n[2], np[1]]
             .iter()
             .copied()
             .collect::<FxHashSet<NodeIndex>>();
@@ -681,11 +688,14 @@ mod test_dfs_component {
     fn test_breaking_components() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..5)
+        g.add_distribution(&vec![0.5], &mut state);
+        g.add_distribution(&vec![0.5], &mut state);
+        let n = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
-        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        let np = vec![NodeIndex(0), NodeIndex(1)];
+        g.add_clause(n[1], &vec![n[0], n[0]], &mut state);
+        g.add_clause(n[2], &vec![n[1], np[1]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
@@ -711,11 +721,14 @@ mod test_dfs_component {
     fn test_breaking_component_but_backtrack() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..5)
+        g.add_distribution(&vec![0.5], &mut state);
+        g.add_distribution(&vec![0.5], &mut state);
+        let np = vec![NodeIndex(0), NodeIndex(1)];
+        let n = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
-        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3], n[4]], &mut state);
+        g.add_clause(n[1], &vec![np[0], n[0]], &mut state);
+        g.add_clause(n[2], &vec![np[1], n[1]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         let components = component_extractor
@@ -794,50 +807,72 @@ mod test_fiedler {
     use crate::core::graph::{Graph, NodeIndex};
     use crate::core::trail::StateManager;
     use assert_float_eq::*;
+    use nalgebra::Matrix5;
 
     #[test]
     fn test_one_component() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
-        let n = (0..6)
+        g.add_distribution(&vec![0.5], &mut state);
+        let n = (0..5)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
-        g.add_clause(n[4], &vec![n[0]], &mut state);
+        g.add_clause(n[3], &vec![NodeIndex(0)], &mut state);
+        g.add_clause(n[0], &vec![NodeIndex(0)], &mut state);
+        g.add_clause(n[0], &vec![n[3]], &mut state);
+        g.add_clause(n[2], &vec![n[3]], &mut state);
         g.add_clause(n[1], &vec![n[0]], &mut state);
-        g.add_clause(n[1], &vec![n[4]], &mut state);
-        g.add_clause(n[3], &vec![n[4]], &mut state);
         g.add_clause(n[2], &vec![n[1]], &mut state);
-        g.add_clause(n[3], &vec![n[2]], &mut state);
-        g.add_clause(n[5], &vec![n[3]], &mut state);
+        g.add_clause(n[4], &vec![n[2]], &mut state);
+        let laplacian = Matrix5::from_vec(vec![3.0, -1.0, 0.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 3.0, -1.0, -1.0, -1.0, 0.0, -1.0, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0]);
+        let decomp = laplacian.hermitian_part().symmetric_eigen();
+        let mut smallest_eigenvalue = f64::INFINITY;
+        let mut second_smallest_eigenvalue = f64::INFINITY;
+        let mut smallest_index = 0;
+        let mut fiedler_index = 0;
+        let eigenvalues = decomp.eigenvalues;
+        for i in 0..5 {
+            let eigenvalue = eigenvalues[i];
+            if eigenvalue < smallest_eigenvalue {
+                second_smallest_eigenvalue = smallest_eigenvalue;
+                fiedler_index = smallest_index;
+                smallest_eigenvalue = eigenvalue;
+                smallest_index = i;
+            } else if eigenvalue < second_smallest_eigenvalue {
+                second_smallest_eigenvalue = eigenvalue;
+                fiedler_index = i;
+            }
+        }
+        
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         assert_float_relative_eq!(
-            0.415,
+            0.0,
             component_extractor.fiedler_score[component_extractor.positions[0]],
             0.01
         );
         assert_float_relative_eq!(
-            0.309,
+            decomp.eigenvectors.row(0)[fiedler_index],
             component_extractor.fiedler_score[component_extractor.positions[1]],
             0.01
         );
         assert_float_relative_eq!(
-            0.069,
+            decomp.eigenvectors.row(1)[fiedler_index],
             component_extractor.fiedler_score[component_extractor.positions[2]],
             0.01
         );
         assert_float_relative_eq!(
-            -0.221,
+            decomp.eigenvectors.row(2)[fiedler_index],
             component_extractor.fiedler_score[component_extractor.positions[3]],
             0.01
         );
         assert_float_relative_eq!(
-            0.221,
+            decomp.eigenvectors.row(3)[fiedler_index],
             component_extractor.fiedler_score[component_extractor.positions[4]],
             0.01
         );
         assert_float_relative_eq!(
-            -0.794,
+            decomp.eigenvectors.row(4)[fiedler_index],
             component_extractor.fiedler_score[component_extractor.positions[5]],
             0.01
         );
