@@ -24,6 +24,7 @@ use crate::solver::statistics::Statistics;
 use rustc_hash::FxHashMap;
 
 use rug::{Float, Integer};
+use rug::Assign;
 
 use std::{fmt, ops};
 
@@ -169,19 +170,24 @@ where
                     .decomposition(self.component_extractor.number_components(&self.state));
                 for sub_component in self.component_extractor.components_iter(&self.state) {
                     if self.component_extractor.has_only_probabilistic(sub_component) {
-                        let count = Integer::with_capacity(self.graph.get_number_probabilistic());
-                        let mut solution = Solution::new(f128!(1.0), count);
-                        for distribution in self
-                            .component_extractor
-                            .get_component_distributions(component)
-                        {
-                            let distribution_proba: f64 = self
-                                .graph
-                                .distribution_iter(*distribution)
-                                .filter(|n| !self.graph.is_node_bound(*n, &self.state))
-                                .map(|n| self.graph.get_node_weight(n).unwrap())
-                                .sum();
-                            solution.probability *= distribution_proba;
+                        // /!\ This code works **only** because the distributions are explored first
+                        // in the component detection method. Thus, nodes of one distribution are next
+                        // to each other in the `nodes` vector.
+                        let mut proba = f128!(0.0);
+                        let mut current_distribution: Option<DistributionIndex> = None;
+                        let mut current_proba = f128!(0.0);
+                        for node in self.component_extractor.component_iter(sub_component).copied() {
+                            let distribution = self.graph.get_distribution(node).unwrap();
+                            if current_distribution.is_none() {
+                                current_proba += &self.graph.get_node_weight(node).unwrap();
+                                current_distribution = Some(distribution);
+                            } else if current_distribution.unwrap() != distribution {
+                                proba *= &current_proba;
+                                current_proba.assign(self.graph.get_node_weight(node).unwrap());
+                                current_distribution = Some(distribution);
+                            } else {
+                                current_proba += self.graph.get_node_weight(node).unwrap();
+                            }
                         }
                     } else {
                         solution *= self.get_cached_component_or_compute(sub_component);

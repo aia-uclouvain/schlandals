@@ -409,6 +409,12 @@ impl ComponentExtractor {
         ComponentIterator { limit, next: start }
     }
     
+    /// Returns an iterator over the node in a component
+    pub fn component_iter(&self, component: ComponentIndex) -> impl Iterator<Item = &NodeIndex> {
+        let comp = self.components[component.0];
+        self.nodes[comp.start..(comp.start+comp.size)].iter()
+    }
+    
     /// Returns true if there are only probabilistic nodes in the component
     pub fn has_only_probabilistic(&self, component: ComponentIndex) -> bool {
         let comp = self.components[component.0];
