@@ -1,7 +1,7 @@
 // Re-export the modules
+mod common;
 mod core;
 mod parser;
-mod common;
 pub mod solver;
 
 pub use self::core::*;

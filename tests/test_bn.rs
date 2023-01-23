@@ -1,10 +1,10 @@
+use rug::Float;
 use schlandals;
 use schlandals::branching::*;
 use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::QuietSolver;
 use schlandals::trail::StateManager;
-use rug::Float;
 
 use std::path::PathBuf;
 
@@ -21,6 +21,7 @@ macro_rules! integration_tests_bn {
                 let mut branching_heuristic = ChildrenFiedlerAvg::default();
                 let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic);
                 let mut sol = solver.solve();
+                println!("Proba: {}", sol);
                 sol.probability *= v.unwrap();
                 let expected = Float::with_val(113, $value);
                 println!("Expected: {:?}", expected);

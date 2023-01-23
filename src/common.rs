@@ -17,7 +17,7 @@
 macro_rules! f128 {
     ($v:expr) => {
         Float::with_val(113, $v)
-    }
+    };
 }
 
 pub(crate) use f128;

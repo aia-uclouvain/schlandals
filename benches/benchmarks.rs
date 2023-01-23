@@ -8,7 +8,6 @@ use schlandals::trail::StateManager;
 
 use std::path::PathBuf;
 
-
 macro_rules! set_up_solvers {
     ($($name:ident: [$instance:expr, $b:ident, $c:ident],)*) => {
         $(

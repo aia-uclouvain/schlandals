@@ -57,7 +57,7 @@ impl<const B: bool> Statistics<B> {
             self.total_and_decompositions += number_components;
         }
     }
-    
+
     pub fn print(&self) {
         if B {
             println!("{}", self);

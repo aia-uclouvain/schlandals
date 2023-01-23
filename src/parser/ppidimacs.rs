@@ -49,8 +49,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use rug::Float;
 use crate::common::f128;
+use rug::Float;
 
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
@@ -139,7 +139,7 @@ pub fn graph_from_ppidimacs(
         if !g.is_node_bound(node, state) {
             match g.propagate_node(node, value, state) {
                 Err(err) => return (g, PropagationResult::Err(err)),
-                Ok(value) => v *= value
+                Ok(value) => v *= value,
             }
         }
     }
@@ -147,8 +147,8 @@ pub fn graph_from_ppidimacs(
         Ok(value) => {
             v *= &value;
             (g, PropagationResult::Ok(v))
-        },
-        Err(err) => (g, PropagationResult::Err(err))
+        }
+        Err(err) => (g, PropagationResult::Err(err)),
     }
 }
 
