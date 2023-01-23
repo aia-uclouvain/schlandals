@@ -119,14 +119,17 @@ pub struct ComponentExtractor {
     /// Cache score, decremented each time a variable is store in the cache or hitted
     cache_score: Vec<isize>,
     /// Counter for the number of time the cache score have been decremented and should be incremented
-    cache_score_decrement_count: usize
+    cache_score_decrement_count: usize,
 }
 
 impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
         let positions = (0..g.number_nodes()).collect();
-        let number_probabilistic = g.nodes_iter().filter(|n| g.is_node_probabilistic(*n)).count();
+        let number_probabilistic = g
+            .nodes_iter()
+            .filter(|n| g.is_node_probabilistic(*n))
+            .count();
         let components = vec![Component {
             start: 0,
             size: g.number_nodes(),
@@ -263,14 +266,10 @@ impl ComponentExtractor {
                         if !g.is_node_bound(src, state) && !g.is_node_bound(dst, state) {
                             let src_pos = self.positions[src.0];
                             let dst_pos = self.positions[dst.0];
-                            laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] =
-                                -1.0;
-                            laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] =
-                                -1.0;
-                            laplacians[src_pos - laplacian_start][src_pos - laplacian_start] +=
-                                0.5;
-                            laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] +=
-                                0.5;
+                            laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
+                            laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
+                            laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
+                            laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
                         }
                     }
                 }
@@ -322,13 +321,23 @@ impl ComponentExtractor {
                     &mut laplacians,
                     super_comp.start,
                 );
-                if !self.distributions.last().unwrap().is_empty() {
+                if !self.distributions.last().unwrap().is_empty()
+                    && g.get_distribution_unassigned_nodes(
+                        *self.distributions.last().unwrap().iter().next().unwrap(),
+                        state,
+                    ) != size
+                {
                     let ds = self.distributions.last().unwrap();
                     let mut number_probabilistic = 0;
                     for d in ds {
                         number_probabilistic += g.get_distribution_unassigned_nodes(*d, state);
                     }
-                    self.components.push(Component { start, size, number_probabilistic, hash });
+                    self.components.push(Component {
+                        start,
+                        size,
+                        number_probabilistic,
+                        hash,
+                    });
                 }
                 start += size;
             } else {
@@ -345,7 +354,9 @@ impl ComponentExtractor {
                 let comp = self.components[cid.0];
                 let size = comp.size;
                 // Extracts the laplacian matrix corresponding to this component
-                let deterministic_indexes = (comp.start..(comp.start+size)).filter(|i| g.is_node_deterministic(self.nodes[*i])).collect::<Vec<usize>>();
+                let deterministic_indexes = (comp.start..(comp.start + size))
+                    .filter(|i| g.is_node_deterministic(self.nodes[*i]))
+                    .collect::<Vec<usize>>();
                 let msize = deterministic_indexes.len();
                 if msize > 0 {
                     let sub_lp = DMatrix::from_fn(msize, msize, |r, c| {
@@ -408,21 +419,14 @@ impl ComponentExtractor {
         let limit = state.get_int(self.limit) as usize;
         ComponentIterator { limit, next: start }
     }
-    
-    /// Returns an iterator over the node in a component
-    pub fn component_iter(&self, component: ComponentIndex) -> impl Iterator<Item = &NodeIndex> {
-        let comp = self.components[component.0];
-        self.nodes[comp.start..(comp.start+comp.size)].iter()
-    }
-    
-    /// Returns true if there are only probabilistic nodes in the component
-    pub fn has_only_probabilistic(&self, component: ComponentIndex) -> bool {
-        let comp = self.components[component.0];
-        comp.size == comp.number_probabilistic
-    }
-    
+
     /// Returns the average of the fiedler values of the active (unassigned) children of a node
-    pub fn average_children_fiedler(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> Option<f64> {
+    pub fn average_children_fiedler(
+        &self,
+        g: &Graph,
+        node: NodeIndex,
+        state: &StateManager,
+    ) -> Option<f64> {
         let mut value = 0.0;
         let mut active_children = 0.0;
         for child in g.active_children(node, state) {
@@ -435,9 +439,14 @@ impl ComponentExtractor {
             None
         }
     }
-    
+
     /// Returns the minimum of the active (unassigned) children's fiedler value of a node
-    pub fn minimum_children_fiedler(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> f64 {
+    pub fn minimum_children_fiedler(
+        &self,
+        g: &Graph,
+        node: NodeIndex,
+        state: &StateManager,
+    ) -> f64 {
         let mut value = f64::INFINITY;
         for child in g.active_children(node, state) {
             let child_value = self.fiedler_score[self.positions[child.0]].abs();
@@ -452,11 +461,11 @@ impl ComponentExtractor {
     pub fn number_components(&self, state: &StateManager) -> usize {
         (state.get_int(self.limit) - state.get_int(self.base)) as usize
     }
-    
+
     /// Decrements the cache score of the variables in component
     pub fn decrement_cache_score(&mut self, component: ComponentIndex) {
         let comp = self.components[component.0];
-        for node in &self.nodes[comp.start..(comp.start+comp.size)] {
+        for node in &self.nodes[comp.start..(comp.start + comp.size)] {
             self.cache_score[node.0] -= 1;
         }
         self.cache_score_decrement_count = (self.cache_score_decrement_count + 1) % CS_LIMIT;
@@ -466,9 +475,14 @@ impl ComponentExtractor {
             }
         }
     }
-    
+
     /// Returns the average difference between a node's cache score and its children
-    pub fn average_diff_children_cs(&self, g: &Graph, node: NodeIndex, state: &StateManager) -> Option<f64> {
+    pub fn average_diff_children_cs(
+        &self,
+        g: &Graph,
+        node: NodeIndex,
+        state: &StateManager,
+    ) -> Option<f64> {
         let node_score = self.cache_score[node.0];
         let mut diff = 0;
         let mut active_child = 0;
@@ -694,13 +708,18 @@ mod test_dfs_component {
     fn test_breaking_components() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
+        // np[0] --
+        //         | - n[1]  --
+        // n[0]  --            | - n[2]
+        //             np[1] --
+        //
         g.add_distribution(&vec![0.5], &mut state);
         g.add_distribution(&vec![0.5], &mut state);
         let n = (0..3)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
         let np = vec![NodeIndex(0), NodeIndex(1)];
-        g.add_clause(n[1], &vec![n[0], n[0]], &mut state);
+        g.add_clause(n[1], &vec![np[0], n[0]], &mut state);
         g.add_clause(n[2], &vec![n[1], np[1]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
@@ -771,6 +790,13 @@ mod test_dfs_component {
     fn distributions_in_components() {
         let mut state = StateManager::default();
         let mut g = Graph::new();
+        // d1[0] --
+        // d1[1] -- | - n[0]
+        // d1[2] --       |
+        //              n[1]
+        // d3[0] --------|
+        // d3[1] --------|
+        //              d2[0]
         let n = (0..2)
             .map(|_| g.add_node(false, None, None, &mut state))
             .collect::<Vec<NodeIndex>>();
@@ -779,8 +805,9 @@ mod test_dfs_component {
         let d3 = g.add_distribution(&vec![0.3, 0.7], &mut state);
 
         g.add_clause(n[0], &d1, &mut state);
-        g.add_clause(d2[0], &vec![n[0], n[1]], &mut state);
+        g.add_clause(n[0], &vec![n[1]], &mut state);
         g.add_clause(n[1], &d3, &mut state);
+        g.add_clause(n[1], &vec![d2[0]], &mut state);
 
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
@@ -796,11 +823,8 @@ mod test_dfs_component {
 
         component_extractor.detect_components(&g, &mut state, components[0]);
         let components: Vec<ComponentIndex> = component_extractor.components_iter(&state).collect();
-        assert_eq!(2, components.len());
-        let distribution_comp1 = component_extractor.get_component_distributions(components[0]);
-        assert_eq!(1, distribution_comp1.len());
-        assert!(distribution_comp1.contains(&DistributionIndex(0)));
-        let distribution_comp2 = component_extractor.get_component_distributions(components[1]);
+        assert_eq!(1, components.len());
+        let distribution_comp2 = component_extractor.get_component_distributions(components[0]);
         assert_eq!(2, distribution_comp2.len());
         assert!(distribution_comp2.contains(&DistributionIndex(1)));
         assert!(distribution_comp2.contains(&DistributionIndex(2)));
@@ -830,7 +854,10 @@ mod test_fiedler {
         g.add_clause(n[1], &vec![n[0]], &mut state);
         g.add_clause(n[2], &vec![n[1]], &mut state);
         g.add_clause(n[4], &vec![n[2]], &mut state);
-        let laplacian = Matrix5::from_vec(vec![3.0, -1.0, 0.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 3.0, -1.0, -1.0, -1.0, 0.0, -1.0, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0]);
+        let laplacian = Matrix5::from_vec(vec![
+            3.0, -1.0, 0.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 3.0, -1.0, -1.0, -1.0,
+            0.0, -1.0, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0,
+        ]);
         let decomp = laplacian.hermitian_part().symmetric_eigen();
         let mut smallest_eigenvalue = f64::INFINITY;
         let mut second_smallest_eigenvalue = f64::INFINITY;
@@ -849,7 +876,7 @@ mod test_fiedler {
                 fiedler_index = i;
             }
         }
-        
+
         let mut component_extractor = ComponentExtractor::new(&g, &mut state);
         component_extractor.detect_components(&g, &mut state, ComponentIndex(0));
         assert_float_relative_eq!(

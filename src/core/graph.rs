@@ -159,6 +159,8 @@ pub struct Distribution {
     active_edges: ReversibleInt,
     /// Number of nodes set to false in the distribution
     nodes_false: ReversibleInt,
+    /// True if there is a node set to true in the distribution
+    bound: ReversibleBool,
 }
 
 /// Data structure representing the Graph.
@@ -354,6 +356,7 @@ impl Graph {
             size: nodes.len(),
             active_edges: state.manage_int(0),
             nodes_false: state.manage_int(0),
+            bound: state.manage_boolean(false),
         });
         nodes
     }
@@ -366,17 +369,23 @@ impl Graph {
     ) -> isize {
         state.get_int(self.distributions[distribution.0].nodes_false)
     }
-    
+
     /// Gets the number of unassigned nodes in the distribution
-    pub fn get_distribution_unassigned_nodes(&self, distribution: DistributionIndex, state: &StateManager) -> usize {
-        self.distribution_iter(distribution).filter(|n| !self.is_node_bound(*n, state)).count()
+    pub fn get_distribution_unassigned_nodes(
+        &self,
+        distribution: DistributionIndex,
+        state: &StateManager,
+    ) -> usize {
+        self.distribution_iter(distribution)
+            .filter(|n| !self.is_node_bound(*n, state))
+            .count()
     }
-    
+
     /// Gets the number of nodes in a distribution
     pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
         self.distributions[distribution.0].size
     }
-    
+
     /// Returns the number of probabilistic nodes in the graph
     pub fn get_number_probabilistic(&self) -> usize {
         self.number_probabilistic
@@ -393,9 +402,11 @@ impl Graph {
         if n.probabilistic {
             // If the node is set to true, then its weight is added to the objective. If not, then
             // the counter of node set to false for the distribution of `node` is incremented
+            let distribution = self.get_distribution(node).unwrap();
             if !value {
-                let distribution = self.get_distribution(node).unwrap();
                 state.increment(self.distributions[distribution.0].nodes_false);
+            } else {
+                state.set_bool(self.distributions[distribution.0].bound, true);
             }
         }
         // Assigning the value to the node
@@ -406,6 +417,15 @@ impl Graph {
     /// Returns true if `node` is bound to a value, false otherwise
     pub fn is_node_bound(&self, node: NodeIndex, state: &StateManager) -> bool {
         state.get_int(self.nodes[node.0].domain_size) == 1
+    }
+
+    /// Returns true if there is a node set to true in the distribution
+    pub fn is_distribution_bound(
+        &self,
+        distribution: DistributionIndex,
+        state: &StateManager,
+    ) -> bool {
+        state.get_bool(self.distributions[distribution.0].bound)
     }
 
     /// Gets the value assigned to a node
@@ -496,6 +516,14 @@ impl Graph {
             let distribution = self.get_distribution(edge.dst).unwrap();
             state.decrement(self.distributions[distribution.0].active_edges);
         }
+    }
+
+    pub fn get_distribution_active_edges(
+        &self,
+        distribution: DistributionIndex,
+        state: &mut StateManager,
+    ) -> isize {
+        state.get_int(self.distributions[distribution.0].active_edges)
     }
 
     /// Return true if the edge is still active
