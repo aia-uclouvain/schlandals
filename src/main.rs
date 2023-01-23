@@ -14,10 +14,10 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+mod common;
 mod core;
 mod parser;
 mod solver;
-mod common;
 
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
@@ -43,14 +43,16 @@ struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Branching {
-    // Averages the fiedler value of each node in a distribution
+    /// Averages the fiedler value of each node in a distribution
     ChildrenFiedlerAvg,
-    // Takes the minimum of the fiedler value of each node in a distribution
+    /// Takes the minimum of the fiedler value of each node in a distribution
     ChildrenFiedlerMin,
-    // ChildrenFiedlerAvg with cache score
+    /// ChildrenFiedlerAvg with cache score
     CSChildrenFiedlerAvg,
-    // ChildrenFiedlerMin with cache score
+    /// ChildrenFiedlerMin with cache score
     CSChildrenFiedlerMin,
+    /// VSIDS
+    VSIDS,
 }
 
 fn main() {
@@ -66,6 +68,7 @@ fn main() {
                 Branching::ChildrenFiedlerMin => Box::new(ChildrenFiedlerMin::default()),
                 Branching::CSChildrenFiedlerAvg => Box::new(CSChildrenFiedlerAvg::default()),
                 Branching::CSChildrenFiedlerMin => Box::new(CSChildrenFiedlerMin::default()),
+                Branching::VSIDS => Box::new(VSIDS::default()),
             };
             if args.statistics {
                 let mut solver = DefaultSolver::new(

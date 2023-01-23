@@ -47,7 +47,11 @@ impl BranchingDecision for ChildrenFiedlerAvg {
         for d in distributions {
             let mut sum = 0.0;
             let mut count = 0.0;
-            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| component_extractor.average_children_fiedler(g, n, state)) {
+            for node_value in g
+                .distribution_iter(*d)
+                .filter(|n| !g.is_node_bound(*n, state))
+                .map(|n| component_extractor.average_children_fiedler(g, n, state))
+            {
                 if let Some(v) = node_value {
                     sum += v;
                     count += 1.0;
@@ -79,7 +83,11 @@ impl BranchingDecision for ChildrenFiedlerMin {
         let mut best_score = f64::INFINITY;
         for d in distributions {
             let mut score = f64::INFINITY;
-            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| component_extractor.minimum_children_fiedler(g, n, state)) {
+            for node_value in g
+                .distribution_iter(*d)
+                .filter(|n| !g.is_node_bound(*n, state))
+                .map(|n| component_extractor.minimum_children_fiedler(g, n, state))
+            {
                 if node_value < score {
                     score = node_value;
                 }
@@ -110,15 +118,20 @@ impl BranchingDecision for CSChildrenFiedlerAvg {
         for d in distributions {
             let mut sum = 0.0;
             let mut count = 0.0;
-            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| {
-                let mul = component_extractor.average_diff_children_cs(g, n, state);
-                let fiedler_value = component_extractor.average_children_fiedler(g, n,state); 
-                if mul.is_some() {
-                    Some((1.0 - mul.unwrap())*fiedler_value.unwrap())
-                } else {
-                    None
-                }
-            }).filter(|v| v.is_some()) {
+            for node_value in g
+                .distribution_iter(*d)
+                .filter(|n| !g.is_node_bound(*n, state))
+                .map(|n| {
+                    let mul = component_extractor.average_diff_children_cs(g, n, state);
+                    let fiedler_value = component_extractor.average_children_fiedler(g, n, state);
+                    if mul.is_some() {
+                        Some((1.0 - mul.unwrap()) * fiedler_value.unwrap())
+                    } else {
+                        None
+                    }
+                })
+                .filter(|v| v.is_some())
+            {
                 sum += node_value.unwrap();
                 count += 1.0;
             }
@@ -148,15 +161,20 @@ impl BranchingDecision for CSChildrenFiedlerMin {
         let mut best_score = f64::INFINITY;
         for d in distributions {
             let mut score = f64::INFINITY;
-            for node_value in g.distribution_iter(*d).filter(|n| !g.is_node_bound(*n, state)).map(|n| {
-                let mul = component_extractor.average_diff_children_cs(g, n, state);
-                let fiedler_value = component_extractor.minimum_children_fiedler(g, n, state);
-                if mul.is_some() {
-                    Some((1.0 - mul.unwrap())*fiedler_value)
-                } else {
-                    None
-                }
-            }).filter(|v| v.is_some()) {
+            for node_value in g
+                .distribution_iter(*d)
+                .filter(|n| !g.is_node_bound(*n, state))
+                .map(|n| {
+                    let mul = component_extractor.average_diff_children_cs(g, n, state);
+                    let fiedler_value = component_extractor.minimum_children_fiedler(g, n, state);
+                    if mul.is_some() {
+                        Some((1.0 - mul.unwrap()) * fiedler_value)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|v| v.is_some())
+            {
                 let v = node_value.unwrap();
                 if v < score {
                     score = v;
@@ -164,6 +182,40 @@ impl BranchingDecision for CSChildrenFiedlerMin {
             }
             if score < best_score {
                 best_score = score;
+                distribution = Some(*d);
+            }
+        }
+        distribution
+    }
+}
+
+#[derive(Default)]
+pub struct VSIDS;
+
+impl BranchingDecision for VSIDS {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let distributions = component_extractor.get_component_distributions(component);
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = -1;
+        for d in distributions {
+            let max_activity = g
+                .distribution_iter(*d)
+                .filter(|n| !g.is_node_bound(*n, state))
+                .map(|n| {
+                    g.node_clauses(n)
+                        .filter(|c| g.is_clause_active(*c, state))
+                        .count()
+                })
+                .max()
+                .unwrap() as i32;
+            if max_activity > best_score {
+                best_score = max_activity;
                 distribution = Some(*d);
             }
         }
