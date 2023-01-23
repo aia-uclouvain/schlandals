@@ -163,15 +163,13 @@ where
             .component_extractor
             .detect_components(&self.graph, &mut self.state, component)
         {
-            if self.component_extractor.number_components(&self.state) != 0 {
-                self.statistics.and_node();
-                self.statistics
-                    .decomposition(self.component_extractor.number_components(&self.state));
-                for sub_component in self.component_extractor.components_iter(&self.state) {
-                    solution *= self.get_cached_component_or_compute(sub_component);
-                    if solution.probability == 0.0 {
-                        break;
-                    }
+            self.statistics.and_node();
+            self.statistics
+                .decomposition(self.component_extractor.number_components(&self.state));
+            for sub_component in self.component_extractor.components_iter(&self.state) {
+                solution *= self.get_cached_component_or_compute(sub_component);
+                if solution.probability == 0.0 {
+                    break;
                 }
             }
         }
