@@ -49,8 +49,6 @@ pub struct Component {
     start: usize,
     /// Size of the component
     size: usize,
-    /// Number of probabilistic nodes in the component
-    number_probabilistic: usize,
     /// Hash of the component (computed during the detection, or afterward)
     hash: u64,
 }
@@ -126,14 +124,9 @@ impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
         let positions = (0..g.number_nodes()).collect();
-        let number_probabilistic = g
-            .nodes_iter()
-            .filter(|n| g.is_node_probabilistic(*n))
-            .count();
         let components = vec![Component {
             start: 0,
             size: g.number_nodes(),
-            number_probabilistic,
             hash: 0,
         }];
         let first_distributions = (0..g.number_distributions())
@@ -327,17 +320,13 @@ impl ComponentExtractor {
                         state,
                     ) != size
                 {
-                    let ds = self.distributions.last().unwrap();
-                    let mut number_probabilistic = 0;
-                    for d in ds {
-                        number_probabilistic += g.get_distribution_unassigned_nodes(*d, state);
-                    }
                     self.components.push(Component {
                         start,
                         size,
-                        number_probabilistic,
                         hash,
                     });
+                } else {
+                    self.distributions.pop().unwrap();
                 }
                 start += size;
             } else {
