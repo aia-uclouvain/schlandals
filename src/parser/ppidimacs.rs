@@ -135,7 +135,14 @@ pub fn graph_from_ppidimacs(
         line_count += 1;
     }
     let mut v = f128!(1.0);
+    let mut sources_true: Vec<NodeIndex> = vec![];
+    let mut targets_false: Vec<NodeIndex> = vec![];
     for (node, value) in node_to_propagate {
+        if value {
+            sources_true.push(node);
+        } else {
+            targets_false.push(node);
+        }
         if !g.is_node_bound(node, state) {
             match g.propagate_node(node, value, state) {
                 Err(err) => return (g, PropagationResult::Err(err)),
@@ -144,11 +151,48 @@ pub fn graph_from_ppidimacs(
         }
     }
     match g.propagate(state) {
-        Ok(value) => {
-            v *= &value;
-            (g, PropagationResult::Ok(v))
+        Ok(value) => v *= &value,
+        Err(err) => return (g, PropagationResult::Err(err)),
+    }
+    let mut accessible_from_true: Vec<bool> = (0..g.number_nodes()).map(|_| false).collect();
+    let mut accessible_from_false: Vec<bool> = (0..g.number_nodes()).map(|_| false).collect();
+    for n in sources_true.iter() {
+        find_reachables(&g, *n, &mut accessible_from_true, false);
+    }
+    for n in targets_false.iter() {
+        find_reachables(&g, *n, &mut accessible_from_false, true);
+    }
+    for n in g.nodes_iter() {
+        if g.is_node_deterministic(n) && !g.is_node_bound(n, state) {
+            if (!accessible_from_true[n.0] && sources_true.len() != 0) || (!accessible_from_false[n.0] && targets_false.len() != 0) {
+                match g.propagate_node(n, true, state) {
+                    Ok(value) => v *= &value,
+                    Err(err) => {
+                        return (g, PropagationResult::Err(err))
+                    },
+                }
+            }
         }
-        Err(err) => (g, PropagationResult::Err(err)),
+    }
+    (g, PropagationResult::Ok(v))
+}
+
+fn find_reachables(g: &Graph, source: NodeIndex, reachables: &mut Vec<bool>, reverse: bool) {
+    reachables[source.0] = true;
+    if !reverse {
+        for edge in g.outgoings(source) {
+            let dst = g.get_edge_destination(edge);
+            if !reachables[dst.0] {
+                find_reachables(g, dst, reachables, reverse);
+            }
+        }
+    } else {
+        for edge in g.incomings(source) {
+            let src = g.get_edge_source(edge);
+            if !reachables[src.0] {
+                find_reachables(g, src, reachables, reverse);
+            }
+        }
     }
 }
 
