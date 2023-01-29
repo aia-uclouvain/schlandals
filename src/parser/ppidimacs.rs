@@ -165,7 +165,8 @@ pub fn graph_from_ppidimacs(
     for n in g.nodes_iter() {
         if g.is_node_deterministic(n) && !g.is_node_bound(n, state) {
             if (!accessible_from_true[n.0] && sources_true.len() != 0) || (!accessible_from_false[n.0] && targets_false.len() != 0) {
-                match g.propagate_node(n, true, state) {
+                let value = accessible_from_true[n.0];
+                match g.propagate_node(n, value, state) {
                     Ok(value) => v *= &value,
                     Err(err) => {
                         return (g, PropagationResult::Err(err))
