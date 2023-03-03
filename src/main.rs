@@ -21,6 +21,7 @@ mod solver;
 
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+use sysinfo::{SystemExt, System};
 
 use crate::core::components::ComponentExtractor;
 use crate::core::trail::StateManager;
@@ -39,6 +40,9 @@ struct Args {
     // Collect stats during the search, default yes
     #[clap(short, long, action)]
     statistics: bool,
+    // The memory limit, in mega-bytes
+    #[clap(short, long)]
+    memory: Option<u64>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -70,12 +74,19 @@ fn main() {
                 Branching::CSChildrenFiedlerMin => Box::new(CSChildrenFiedlerMin::default()),
                 Branching::VSIDS => Box::new(VSIDS::default()),
             };
+            let mlimit = if args.memory.is_some() {
+                args.memory.unwrap()
+            } else {
+                let sys = System::new_all();
+                sys.total_memory() / 1000000
+            };
             if args.statistics {
                 let mut solver = DefaultSolver::new(
                     graph,
                     state,
                     component_extractor,
                     branching_heuristic.as_mut(),
+                    mlimit,
                 );
                 let mut solution = solver.solve();
                 solution.probability *= v;
@@ -86,6 +97,7 @@ fn main() {
                     state,
                     component_extractor,
                     branching_heuristic.as_mut(),
+                    mlimit,
                 );
                 let mut solution = solver.solve();
                 solution.probability *= v;

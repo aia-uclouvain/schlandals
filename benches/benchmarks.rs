@@ -17,7 +17,7 @@ macro_rules! set_up_solvers {
             let (g, _v) = graph_from_ppidimacs(&path, &mut state);
             let component_extractor = ComponentExtractor::new(&g, &mut state);
             let mut branching_heuristic = $b::default();
-            let mut solver = QuietSolver::new(g, state, component_extractor, &mut branching_heuristic);
+            let mut solver = QuietSolver::new(g, state, component_extractor, &mut branching_heuristic, 2000);
             $c.bench_function($instance, |b| b.iter(|| solver.solve()));
         )*
     }

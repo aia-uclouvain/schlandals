@@ -21,7 +21,7 @@ macro_rules! integration_tests {
                 let (graph, v) = graph_from_ppidimacs(&path, &mut state);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = ChildrenFiedlerAvg::default();
-                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic);
+                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, 1000);
                 let mut sol = solver.solve();
                 sol.probability *= v.unwrap();
                 let expected = Float::with_val(113, $value);

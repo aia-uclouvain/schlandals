@@ -21,6 +21,7 @@ use crate::core::trail::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::SimplePropagator;
 use crate::solver::statistics::Statistics;
+use crate::common::PEAK_ALLOC;
 use rustc_hash::FxHashMap;
 
 use rug::{Float, Integer};
@@ -74,6 +75,8 @@ where
     cache: FxHashMap<u64, Solution>,
     /// Statistics collectors
     statistics: Statistics<S>,
+    /// memory limit in megabytes,
+    mlimit: f64,
 }
 
 impl<'b, B, const S: bool> Solver<'b, B, S>
@@ -85,6 +88,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
+        mlimit: u64,
     ) -> Self {
         Self {
             graph,
@@ -93,6 +97,7 @@ where
             branching_heuristic,
             cache: FxHashMap::default(),
             statistics: Statistics::default(),
+            mlimit: mlimit as f64,
         }
     }
 
@@ -151,6 +156,9 @@ where
 
     /// Solves the problem for the sub-graph identified by component.
     pub fn _solve(&mut self, component: ComponentIndex) -> Solution {
+        if PEAK_ALLOC.current_usage_as_mb() as f64 > self.mlimit {
+            panic!("The solver used the maximum available memory");
+        }
         self.state.save_state();
         let mut count = Integer::with_capacity(self.graph.get_number_probabilistic());
         count += 1;
