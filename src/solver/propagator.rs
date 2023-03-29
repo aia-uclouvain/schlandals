@@ -13,196 +13,247 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
+use search_trail::StateManager;
 
 use crate::common::f128;
-use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, NodeIndex};
-use crate::core::trail::StateManager;
+use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, VariableIndex};
 use rug::Float;
-use rustc_hash::FxHashSet;
 
 #[derive(Debug)]
 pub struct Unsat;
 
 pub type PropagationResult = Result<Float, Unsat>;
 
-/// This is a simple propagator that makes very basic local assumption and propagate them to the
-/// graph in a DFS manner.
-/// The following rules are enforced
-///     1. If a deterministic node has no outgoing or incoming active edges, set it to,
-///        respectively, true or false.
-///     2. If a node is set to true (resp. false) and is the head (resp. in the body) of the
-///        clause, the clause (and all its edges) are deactivated).
-///     2. If a node n in the body of a clause (with head h) is set to true, deactivate the edge
-///        n->h
-///     3. If an active clause has no more active edge, and the head is not bound, set the head to true.
-///        In that case all the edges are deactived because their source is true and so the head
-///        must be true
-///     4. If a node in a distribution is set to true, then all other node in the distribution must
-///        be false
-///     5. If there is only 1 node unset in a distribution, set it to true
-///     6. If a distribution has no active edges after the propagation, then the sum of the weights of its
-///        unassigned nodes are summed up. This sum multiplies the propagation probability. The rationale is that
-///        if a distribution has no active edges, then branching on it will never affect the rest of the graph (it
-///        is its own component).
-pub trait SimplePropagator {
-    /// This is the global propagation algorithm. This run on the whole graph and when the value of
-    /// a node can be infered, it launches `propagate_node`.
-    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult;
-    /// This implement the propagation of `node` to `value`. It ensures that all the nodes for
-    /// which a value can be inferred, after setting `node` to `value` are propagated recursively.
-    /// Returns either Unsat if the assignment make the clauses not satisfiable or a float
-    /// representing the probability of the assigned node (i.e. the product (or sum in log-space)
-    /// of the probability of the probabilistic nodes set to true).
-    fn propagate_node(
-        &mut self,
-        node: NodeIndex,
-        value: bool,
-        state: &mut StateManager,
-    ) -> PropagationResult;
-    fn propagate_node_(
-        &mut self,
-        node: NodeIndex,
-        value: bool,
-        state: &mut StateManager,
-        distribution_simple: &mut FxHashSet<DistributionIndex>,
-    ) -> PropagationResult;
+#[derive(Default)]
+pub struct FTReachablePropagator {
+    propagation_stack: Vec<(VariableIndex, bool)>,
+    unconstrained_clauses: Vec<ClauseIndex>,
 }
 
-impl SimplePropagator for Graph {
-    fn propagate(&mut self, state: &mut StateManager) -> PropagationResult {
-        let mut v = f128!(1.0);
-        for node in self.nodes_iter() {
-            if !self.is_node_bound(node, state) && self.is_node_deterministic(node) {
-                if self.node_number_incoming(node, state) == 0 {
-                    v *= self.propagate_node(node, false, state)?;
-                } else if self.node_number_outgoing(node, state) == 0 {
-                    v *= self.propagate_node(node, true, state)?;
+impl FTReachablePropagator {
+    
+    pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool) {
+        self.propagation_stack.push((variable, value));
+    }
+    
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        self.add_to_propagation_stack(variable, value);
+        self.propagate(g, state)
+    }
+    
+    fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Graph, state: &mut StateManager) {
+        if g.is_clause_constrained(clause, state) {
+            g.set_clause_unconstrained(clause, state);
+            self.unconstrained_clauses.push(clause);
+        }
+    }
+    
+    pub fn propagate_unreachable_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        for clause in g.clause_iter() {
+            if !g.is_clause_f_reachable(clause, state) || !g.is_clause_t_reachable(clause, state) {
+                self.add_unconstrained_clause(clause, g, state);
+            }
+        }
+        self.propagate(g, state)
+    }
+    
+    fn get_simplified_distribution_prob(&self, g: &Graph, distribution: DistributionIndex, state: &StateManager) -> Float {
+        let mut p = f128!(0.0);
+        for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+            p += w;
+        }
+        p
+    }
+    
+    fn deactivate_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        let mut p = f128!(1.0);
+        while let Some(clause) = self.unconstrained_clauses.pop() {
+            for variable in g.clause_body_iter(clause) {
+                if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
+                    let distribution = g.get_variable_distribution(variable).unwrap();
+                    if g.decrement_distribution_clause_counter(distribution, state) == 0 {
+                        p *= self.get_simplified_distribution_prob(g, distribution, state);
+                    }
+                }
+            }
+            // The clause is no more f-reachable, need to update the parents if necessary
+            // Since the iterator on the edges borrow the graph, we must collect it into a vec.
+            // In practice this update of t and f reachability should not happen at every node of the search, so the cost is
+            // limited
+            for edge in g.parents_clause_iter(clause) {
+                let parent = g.get_edge_source(edge);
+                let head = g.get_clause_head(parent);
+                let head_value = g.get_variable_value(head, state);
+                let head_false = head_value.is_some() && !head_value.unwrap();
+                if !head_false && g.is_clause_constrained(parent, state) && g.clause_decrement_active_children(parent, state) == 0 {
+                    self.add_unconstrained_clause(parent, g, state);
+                }
+            }
+            // Same for t-reachability
+            for edge in g.children_clause_iter(clause) {
+                let child = g.get_edge_destination(edge);
+                if g.is_clause_constrained(child, state) && g.clause_decrement_active_parents(child, state) == 0 && g.clause_number_deterministic(child, state) != 0 {
+                    self.add_unconstrained_clause(child, g, state);
                 }
             }
         }
-        PropagationResult::Ok(v)
+        PropagationResult::Ok(p)
     }
 
-    fn propagate_node_(
-        &mut self,
-        node: NodeIndex,
-        value: bool,
-        state: &mut StateManager,
-        distribution_simple: &mut FxHashSet<DistributionIndex>,
-    ) -> PropagationResult {
-        if self.is_node_bound(node, state) {
-            if self.get_node_value(node) != value {
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        let mut propagation_prob = f128!(1.0);
+        while let Some((variable, value)) = self.propagation_stack.pop() {
+            if let Some(v) = g.get_variable_value(variable, state) {
+                if v == value {
+                    continue;
+                }
                 return PropagationResult::Err(Unsat);
-            } else {
-                return PropagationResult::Ok(f128!(1.0));
             }
-        }
-        self.set_node(node, value, state);
-        let mut propagation_prob = if value && self.is_node_probabilistic(node) {
-            f128!(self.get_node_weight(node).unwrap())
-        } else {
-            f128!(1.0)
-        };
-
-        if propagation_prob == 0.0 {
-            return PropagationResult::Err(Unsat);
-        }
-
-        let clauses = self
-            .node_clauses(node)
-            .filter(|clause| self.is_clause_active(*clause, state))
-            .collect::<Vec<ClauseIndex>>();
-        for clause in clauses {
-            let head = self.get_clause_head(clause);
-            if (value && node == head) || (!value && node != head) {
-                // The clause can be deactivated. That means that each edge is deactivated and
-                // the sources/destinations are propagated if necessary
-                self.deactivate_clause(clause, state);
-                for edge in self.edges_clause(clause) {
-                    if self.is_edge_active(edge, state) {
-                        self.deactivate_edge(edge, state);
-                        let src = self.get_edge_source(edge);
-                        if !self.is_node_bound(src, state)
-                            && self.is_node_deterministic(src)
-                            && self.node_number_outgoing(src, state) == 0
-                        {
-                            propagation_prob *= self.propagate_node(src, true, state)?;
-                        } else if self.is_node_probabilistic(src) {
-                            let d = self.get_distribution(src).unwrap();
-                            if !self.is_distribution_bound(d, state)
-                                && self.get_distribution_active_edges(d, state) == 0
-                            {
-                                distribution_simple.insert(d);
+            g.set_variable(variable, value, state);
+            let is_p = g.is_variable_probabilistic(variable);
+            for clause in g.variable_clause_body_iter(variable) {
+                if g.is_clause_constrained(clause, state) {
+                    // The clause is constrained, and var is in its body. If value = T then we need to remove the variable from the body
+                    // otherwise the clause is deactivated
+                    if value {
+                        let head = g.get_clause_head(clause);
+                        let head_value = g.get_variable_value(head, state);
+                        //debug_assert!(!(head_value.is_some() && head_value.unwrap()));
+                        let head_false = head_value.is_some() && !head_value.unwrap();
+                        let body_remaining = if is_p {
+                            g.clause_decrement_number_probabilistic(clause, state)
+                        } else {
+                            g.clause_decrement_number_deterministic(clause, state)
+                        };
+                        if body_remaining == 0 {
+                            match head_value {
+                                None => self.add_to_propagation_stack(head, true),
+                                Some(v) => {
+                                    debug_assert!(!v);
+                                    return PropagationResult::Err(Unsat);
+                                }
                             }
+                        } else if body_remaining == 1 && head_false {
+                            let v = g.clause_body_iter(clause).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                            self.add_to_propagation_stack(v, false);
                         }
-                        let dst = self.get_edge_destination(edge);
-                        if !self.is_node_bound(dst, state)
-                            && self.is_node_deterministic(dst)
-                            && self.node_number_incoming(dst, state) == 0
-                        {
-                            propagation_prob *= self.propagate_node(dst, false, state)?;
-                        } else if self.is_node_probabilistic(dst) {
-                            let d = self.get_distribution(dst).unwrap();
-                            if !self.is_distribution_bound(d, state)
-                                && self.get_distribution_active_edges(d, state) == 0
-                            {
-                                distribution_simple.insert(d);
-                            }
-                        }
+                    } else {
+                        self.add_unconstrained_clause(clause, g, state);
                     }
                 }
-            } else {
+            }
+            
+            for clause in g.variable_clause_head_iter(variable) {
+                if g.is_clause_constrained(clause, state) {
+                    if value {
+                        self.add_unconstrained_clause(clause, g, state);
+                    } else if g.clause_number_unassigned(clause, state) == 1 {
+                        let v = g.clause_body_iter(clause).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                        self.propagation_stack.push((v, false));
+                    }
+                }
+            }
+            
+            if is_p {
+                let distribution = g.get_variable_distribution(variable).unwrap();
                 if value {
-                    let e = self.get_edge_with_implicant(clause, node).unwrap();
-                    self.deactivate_edge(e, state);
-                    let src = self.get_edge_source(e);
-                    let dst = self.get_edge_destination(e);
-                    for n in vec![src, dst] {
-                        if self.is_node_probabilistic(n) {
-                            let d = self.get_distribution(n).unwrap();
-                            if !self.is_distribution_bound(d, state)
-                                && self.get_distribution_active_edges(d, state) == 0
-                            {
-                                distribution_simple.insert(d);
-                            }
-                        }
+                    propagation_prob *= g.get_variable_weight(variable).unwrap();
+                    for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {
+                        // TODO: opti, check if variable is bound before adding to propagation stack
+                        self.add_to_propagation_stack(v, false);
                     }
-                }
-                // The whole clause can not be deactivated. However, we can still reason about the
-                // edges in the clause
-                let nb_active_edge = self.clause_number_active_edges(clause, state);
-                if value && nb_active_edge == 0 {
-                    // The head is not true, but there are no more unassigned implicants. And
-                    // they are all true.
-                    propagation_prob *= self.propagate_node(head, true, state)?;
-                } else if nb_active_edge == 1 {
-                    let last_active_edge = self.get_first_active_edge(clause, state).unwrap();
-
-                    if self.is_node_bound(head, state) && !self.get_node_value(head) {
-                        let n = self.get_edge_source(last_active_edge);
-                        propagation_prob *= self.propagate_node(n, false, state)?;
+                } else if g.distribution_one_left(distribution, state) {
+                    if let Some(v) = g.distribution_variable_iter(distribution).find(|v| !g.is_variable_bound(*v, state)) {
+                        self.add_to_propagation_stack(v, true);
                     }
                 }
             }
         }
-        if self.is_node_probabilistic(node) {
+        propagation_prob *= self.deactivate_clauses(g, state)?;
+        PropagationResult::Ok(propagation_prob)
+    }
+
+    /*
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        while !self.propagation_stack.is_empty() {
+            g.set_variable(variable, value, state);
+            let is_p = g.is_variable_probabilistic(variable);
+            // For probabilistic variables add the probability to the propagation prob.
+            // If the probability goes down to 0 then it can never be higher than that, return
+            // Actually do the propagations.
+            // If value is T then
+            //      - Remove the variable from the body of every active clause in which it appears
+            //      - Deactivate all the clauses in which it is the head
+            // If value is F then
+            //      - Deactive all the clauses in which it is in the body
+            //      - For all clause in which it is the head, check if the body is of length 1.
+            //        If so, set the remaining var to F
             if value {
-                for other in self.nodes_distribution_iter(node).filter(|x| *x != node) {
-                    propagation_prob *= self.propagate_node(other, false, state)?;
+                for clause in g.variable_clause_body_iter(variable) {
+                    g.clause_remove_variable_hash(clause, variable, state);
+                    let head = g.get_clause_head(clause);
+                    let head_false = g.is_variable_bound(head, state) && !g.get_variable_value(head);
+                    let head_true = g.is_variable_bound(variable, state) && g.get_variable_value(head);
+                    let body_remaining = if is_p {
+                        let distribution = g.get_variable_distribution(variable).unwrap();
+                        if g.decrement_distribution_clause_counter(distribution, state) == 0 {
+                            propagation_prob *= self.get_simplified_distribution_prob(g, distribution, state);
+                            if propagation_prob == 0.0 {
+                                return PropagationResult::Ok(propagation_prob);
+                            }
+                        }
+                        g.clause_decrement_number_probabilistic(clause, state)
+                    } else {
+                        g.clause_decrement_number_deterministic(clause, state)
+                    };
+                    if body_remaining == 0 && head_true {
+                        g.deactivate_clause(clause, state);
+                    } else if body_remaining == 1 && head_false {
+                        let v = g.clause_body_iter(clause).filter(|v| !g.is_variable_bound(*v, state)).next().unwrap();
+                        self.propagation_stack.push((v, false));
+                        g.deactivate_clause(clause, state);
+                    } else if body_remaining == 0 {
+                        self.propagation_stack.push((head, true));
+                        g.deactivate_clause(clause, state);
+                    }
+                }
+                
+                for clause in g.variable_clause_head_iter(variable).collect::<Vec<ClauseIndex>>() {
+                    propagation_prob *= self.deactivate_clause(g, clause, state)?;
                 }
             } else {
-                let distribution = self.get_distribution(node).unwrap();
-                // If the distribution has 0 active edge, then it already has been counted. We can safely skip
-                // this
-                let number_assigned =
-                    self.get_distribution_false_nodes(distribution, state) as usize;
-                let number_nodes = self.get_distribution_size(distribution);
-                if number_assigned == number_nodes - 1 {
-                    // Only 1 node not assigned in the distribution -> set to true
-                    for other in self.nodes_distribution_iter(node) {
-                        if !self.is_node_bound(other, state) {
-                            propagation_prob *= self.propagate_node(other, true, state)?;
-                            break;
+                for clause in g.variable_clause_head_iter(variable) {
+                    if !g.is_clause_f_reachable(clause, state) {
+                        g.set_clause_bot_reachable(clause, state);
+                    }
+                    if g.clause_number_unassigned(clause, state) == 1 {
+                        let v = g.clause_body_iter(clause).filter(|v| !g.is_variable_bound(*v, state)).next().unwrap();
+                        self.propagation_stack.push((v, false));
+                    }
+                }
+                for clause in g.variable_clause_body_iter(variable).collect::<Vec<ClauseIndex>>() {
+                    propagation_prob *= self.deactivate_clause(g, clause, state)?;
+                }
+            }
+            if is_p {
+                let distribution = g.get_variable_distribution(variable).unwrap();
+                if value {
+                    propagation_prob *= g.get_variable_weight(variable).unwrap();
+                    if propagation_prob == 0.0 {
+                        return PropagationResult::Ok(propagation_prob);
+                    }
+                    for other in g.distribution_variable_iter(distribution).filter(|v| *v != variable) {
+                        if !g.is_variable_bound(other, state) {
+                            self.add_to_propagation_stack(other, false);
+                        } else if g.get_variable_value(other) {
+                            return PropagationResult::Err(Unsat);
+                        }
+                    }
+                } else {
+                    if g.distribution_one_left(distribution, state) {
+                        match g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).next() {
+                            Some(v) => self.add_to_propagation_stack(v, true),
+                            None => (),
                         }
                     }
                 }
@@ -210,36 +261,10 @@ impl SimplePropagator for Graph {
         }
         PropagationResult::Ok(propagation_prob)
     }
-
-    fn propagate_node(
-        &mut self,
-        node: NodeIndex,
-        value: bool,
-        state: &mut StateManager,
-    ) -> PropagationResult {
-        let mut distribution_simple: FxHashSet<DistributionIndex> = FxHashSet::default();
-        let mut p = self.propagate_node_(node, value, state, &mut distribution_simple)?;
-        for d in distribution_simple
-            .iter()
-            .copied()
-            .filter(|x| !self.is_distribution_bound(*x, state))
-        {
-            let mut dproba = f128!(0.0);
-            for n in self
-                .distribution_iter(d)
-                .filter(|x| !self.is_node_bound(*x, state))
-            {
-                dproba += self.get_node_weight(n).unwrap();
-            }
-            if dproba == 0.0 {
-                return PropagationResult::Err(Unsat);
-            }
-            p *= dproba;
-        }
-        PropagationResult::Ok(p)
-    }
+    */
 }
 
+/*
 #[cfg(test)]
 mod test_simple_propagator_propagation {
 
@@ -258,7 +283,7 @@ mod test_simple_propagator_propagation {
             .map(|_| g.add_distribution(&vec![0.1], &mut state)[0])
             .collect();
 
-        // deterministic -> deterministic
+        // determinisdeativae_lause
         // d[1] -> d[0]
         g.add_clause(d[0], &vec![d[1]], &mut state);
         // deterministic -> probabilistic
@@ -539,3 +564,4 @@ mod test_simple_propagator_node_propagation {
         assert_eq!(false, g.get_node_value(NodeIndex(2)));
     }
 }
+*/

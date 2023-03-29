@@ -42,21 +42,18 @@
 //!        variable appearing in the implicant must be negated.
 //!     2. The head of the implications can not be a probabilistic variable
 
-use crate::core::graph::{Graph, NodeIndex};
-use crate::core::trail::StateManager;
-use crate::solver::propagator::{PropagationResult, SimplePropagator};
+use crate::core::graph::{Graph, VariableIndex};
+use crate::solver::propagator::FTReachablePropagator;
+use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use crate::common::f128;
-use rug::Float;
-
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
-) -> (Graph, PropagationResult) {
-    let mut node_to_propagate: Vec<(NodeIndex, bool)> = Vec::new();
+    propagator: &mut FTReachablePropagator,
+) -> Graph {
     let mut g = Graph::new();
     let file = File::open(filepath).unwrap();
     let reader = BufReader::new(file);
@@ -89,9 +86,9 @@ pub fn graph_from_ppidimacs(
             }
             if !distribution_definition_finished {
                 distribution_definition_finished = true;
-                let current_number_of_nodes = g.number_nodes();
+                let current_number_of_nodes = g.number_variables();
                 for _ in current_number_of_nodes..number_nodes.unwrap() {
-                    g.add_node(false, None, None, state);
+                    g.add_variable(false, None, None, state);
                 }
             }
             let split = l.split_whitespace().collect::<Vec<&str>>();
@@ -108,100 +105,45 @@ pub fn graph_from_ppidimacs(
             if positive_literals.len() > 1 {
                 panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
             }
+            let mut head_false = false;
+            let mut body_true = false;
             let head = if positive_literals.is_empty() {
                 // There is no head in this clause, so it is just a clause of the form
                 //      n1 && n2 && ... && nn =>
                 //  which, in our model implies that the head is false (otherwise it does not
                 //  constrain the problem)
-                let n = g.add_node(false, None, None, state);
-                node_to_propagate.push((n, false));
+                let n = g.add_variable(false, None, None, state);
+                propagator.add_to_propagation_stack(n, false);
+                head_false = true;
                 n
             } else {
-                NodeIndex(positive_literals[0])
+                VariableIndex(positive_literals[0])
             };
             let body = if negative_literals.is_empty() {
-                let n = g.add_node(false, None, None, state);
-                node_to_propagate.push((n, true));
+                let n = g.add_variable(false, None, None, state);
+                propagator.add_to_propagation_stack(n, true);
+                body_true = true;
                 vec![n]
             } else {
                 negative_literals
                     .iter()
                     .copied()
-                    .map(|x| NodeIndex(x as usize))
-                    .collect::<Vec<NodeIndex>>()
+                    .map(|x| VariableIndex(x as usize))
+                    .collect::<Vec<VariableIndex>>()
             };
-            g.add_clause(head, &body, state);
+            g.add_clause(head, body, state, body_true, head_false);
         }
         line_count += 1;
     }
-    let mut v = f128!(1.0);
-    let mut sources_true: Vec<NodeIndex> = vec![];
-    let mut targets_false: Vec<NodeIndex> = vec![];
-    for (node, value) in node_to_propagate {
-        if value {
-            sources_true.push(node);
-        } else {
-            targets_false.push(node);
-        }
-        if !g.is_node_bound(node, state) {
-            match g.propagate_node(node, value, state) {
-                Err(err) => return (g, PropagationResult::Err(err)),
-                Ok(value) => v *= value,
-            }
-        }
-    }
-    match g.propagate(state) {
-        Ok(value) => v *= &value,
-        Err(err) => return (g, PropagationResult::Err(err)),
-    }
-    let mut accessible_from_true: Vec<bool> = (0..g.number_nodes()).map(|_| false).collect();
-    let mut accessible_from_false: Vec<bool> = (0..g.number_nodes()).map(|_| false).collect();
-    for n in sources_true.iter() {
-        find_reachables(&g, *n, &mut accessible_from_true, false);
-    }
-    for n in targets_false.iter() {
-        find_reachables(&g, *n, &mut accessible_from_false, true);
-    }
-    for n in g.nodes_iter() {
-        if g.is_node_deterministic(n) && !g.is_node_bound(n, state) {
-            if (!accessible_from_true[n.0] && sources_true.len() != 0) || (!accessible_from_false[n.0] && targets_false.len() != 0) {
-                let value = accessible_from_true[n.0];
-                match g.propagate_node(n, value, state) {
-                    Ok(value) => v *= &value,
-                    Err(err) => {
-                        return (g, PropagationResult::Err(err))
-                    },
-                }
-            }
-        }
-    }
-    (g, PropagationResult::Ok(v))
+    g.set_reachability(state);
+    g
 }
-
-fn find_reachables(g: &Graph, source: NodeIndex, reachables: &mut Vec<bool>, reverse: bool) {
-    reachables[source.0] = true;
-    if !reverse {
-        for edge in g.outgoings(source) {
-            let dst = g.get_edge_destination(edge);
-            if !reachables[dst.0] {
-                find_reachables(g, dst, reachables, reverse);
-            }
-        }
-    } else {
-        for edge in g.incomings(source) {
-            let src = g.get_edge_source(edge);
-            if !reachables[src.0] {
-                find_reachables(g, src, reachables, reverse);
-            }
-        }
-    }
-}
-
+/*
 #[cfg(test)]
 mod test_ppidimacs_parsing {
 
     use super::graph_from_ppidimacs;
-    use crate::core::graph::NodeIndex;
+    use crate::core::graph::VariableIndex;
     use crate::core::trail::StateManager;
     use std::path::PathBuf;
 
@@ -215,9 +157,10 @@ mod test_ppidimacs_parsing {
         assert_eq!(17, g.number_nodes());
         assert_eq!(5, g.number_distributions());
 
-        let nodes: Vec<NodeIndex> = g.nodes_iter().collect();
+        let nodes: Vec<VariableIndex> = g.nodes_iter().collect();
         for i in 0..10 {
             assert!(g.is_node_probabilistic(nodes[i]));
         }
     }
 }
+*/

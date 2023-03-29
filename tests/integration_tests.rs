@@ -2,10 +2,11 @@
 use rug::Float;
 use schlandals;
 use schlandals::branching::*;
+use schlandals::propagator::FTReachablePropagator;
 use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::QuietSolver;
-use schlandals::trail::StateManager;
+use search_trail::StateManager;
 
 use std::path::PathBuf;
 
@@ -17,15 +18,16 @@ macro_rules! integration_tests {
             fn $name() {
                 let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::default();
                 let path = PathBuf::from(filename);
-                let (graph, v) = graph_from_ppidimacs(&path, &mut state);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = ChildrenFiedlerAvg::default();
-                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, 1000);
-                let mut sol = solver.solve();
-                sol.probability *= v.unwrap();
+                let mut branching_heuristic = Fiedler::default();
+                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
+                let sol = solver.solve().unwrap();
                 let expected = Float::with_val(113, $value);
-                assert!((expected - sol.probability).abs() < 0.000001);
+                println!("Expected {:}, actual {:?}", expected, sol);
+                assert!((expected - sol).abs() < 0.000001);
             }
         )*
     }

@@ -22,11 +22,12 @@ mod solver;
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 use sysinfo::{SystemExt, System};
+use search_trail::StateManager;
 
 use crate::core::components::ComponentExtractor;
-use crate::core::trail::StateManager;
 use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::*;
+use solver::propagator::FTReachablePropagator;
 use solver::{DefaultSolver, QuietSolver};
 
 #[derive(Parser)]
@@ -47,62 +48,53 @@ struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Branching {
-    /// Averages the fiedler value of each node in a distribution
-    ChildrenFiedlerAvg,
-    /// Takes the minimum of the fiedler value of each node in a distribution
-    ChildrenFiedlerMin,
-    /// ChildrenFiedlerAvg with cache score
-    CSChildrenFiedlerAvg,
-    /// ChildrenFiedlerMin with cache score
-    CSChildrenFiedlerMin,
+    /// Heuristic based on the fiedler value of the clause graph
+    Fiedler,
     /// VSIDS
-    VSIDS,
+    Vsids,
 }
 
 fn main() {
     let args = Args::parse();
     let mut state = StateManager::default();
-    let (graph, prob) = graph_from_ppidimacs(&args.input, &mut state);
-    match prob {
-        Err(_) => println!("Initial model Unsat"),
-        Ok(v) => {
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
-            let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
-                Branching::ChildrenFiedlerAvg => Box::new(ChildrenFiedlerAvg::default()),
-                Branching::ChildrenFiedlerMin => Box::new(ChildrenFiedlerMin::default()),
-                Branching::CSChildrenFiedlerAvg => Box::new(CSChildrenFiedlerAvg::default()),
-                Branching::CSChildrenFiedlerMin => Box::new(CSChildrenFiedlerMin::default()),
-                Branching::VSIDS => Box::new(VSIDS::default()),
-            };
-            let mlimit = if args.memory.is_some() {
-                args.memory.unwrap()
-            } else {
-                let sys = System::new_all();
-                sys.total_memory() / 1000000
-            };
-            if args.statistics {
-                let mut solver = DefaultSolver::new(
-                    graph,
-                    state,
-                    component_extractor,
-                    branching_heuristic.as_mut(),
-                    mlimit,
-                );
-                let mut solution = solver.solve();
-                solution.probability *= v;
-                println!("{}", solution);
-            } else {
-                let mut solver = QuietSolver::new(
-                    graph,
-                    state,
-                    component_extractor,
-                    branching_heuristic.as_mut(),
-                    mlimit,
-                );
-                let mut solution = solver.solve();
-                solution.probability *= v;
-                println!("{}", solution);
-            }
-        }
+    let mut propagator = FTReachablePropagator::default();
+    let graph = graph_from_ppidimacs(&args.input, &mut state, &mut propagator);
+    let component_extractor = ComponentExtractor::new(&graph, &mut state);
+    let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
+        Branching::Fiedler => Box::<Fiedler>::default(),
+        Branching::Vsids => Box::<Vsids>::default(),
     };
+    let mlimit = if args.memory.is_some() {
+        args.memory.unwrap()
+    } else {
+        let sys = System::new_all();
+        sys.total_memory() / 1000000
+    };
+    if args.statistics {
+        let mut solver = DefaultSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+        );
+        match solver.solve() {
+            Ok(s) => println!("{}", s),
+            Err(_) => println!("Model UNSAT"),
+        }
+    } else {
+        let mut solver = QuietSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+        );
+        match solver.solve() {
+            Ok(s) => println!("{}", s),
+            Err(_) => println!("Model UNSAT"),
+        }
+    }
 }

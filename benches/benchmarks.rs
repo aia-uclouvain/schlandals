@@ -1,10 +1,11 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use schlandals::branching::*;
+use schlandals::branching::Fiedler;
 use schlandals::components::ComponentExtractor;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::QuietSolver;
-use schlandals::trail::StateManager;
+use schlandals::solver::propagator::FTReachablePropagator;
+use search_trail::StateManager;
 
 use std::path::PathBuf;
 
@@ -14,10 +15,11 @@ macro_rules! set_up_solvers {
             let filename = format!("benches/instances/{}.ppidimacs", $instance);
             let path = PathBuf::from(filename);
             let mut state = StateManager::default();
-            let (g, _v) = graph_from_ppidimacs(&path, &mut state);
+            let mut propagator = FTReachablePropagator::default();
+            let g = graph_from_ppidimacs(&path, &mut state, &mut propagator);
             let component_extractor = ComponentExtractor::new(&g, &mut state);
             let mut branching_heuristic = $b::default();
-            let mut solver = QuietSolver::new(g, state, component_extractor, &mut branching_heuristic, 2000);
+            let mut solver = QuietSolver::new(g, state, component_extractor, &mut branching_heuristic, propagator, 2000);
             $c.bench_function($instance, |b| b.iter(|| solver.solve()));
         )*
     }
@@ -28,7 +30,7 @@ macro_rules! make_benches {
         pub fn bench(c: &mut Criterion) {
             $(
                 set_up_solvers! {
-                    fiedler_nb_diff: [$instance,  CSChildrenFiedlerAvg, c],
+                    fiedler_nb_diff: [$instance,  Fiedler, c],
                 }
             )*
         }

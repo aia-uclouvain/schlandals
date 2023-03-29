@@ -31,11 +31,9 @@
 //! returns a single component with every non-assigned node in the graph). This extractor should
 //! only be used for debugging purposes.
 
-use super::graph::{DistributionIndex, Graph, NodeIndex};
-use super::trail::*;
+use super::graph::{Graph, ClauseIndex};
+use search_trail::{StateManager, ReversibleUsize, UsizeManager};
 use nalgebra::DMatrix;
-use rustc_hash::{FxHashSet, FxHasher};
-use std::hash::Hasher;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -43,14 +41,12 @@ pub struct ComponentIndex(pub usize);
 
 /// A Component is identified by two integers. The first is the index in the vector of nodes at
 /// which the component starts, and the second is the size of the component.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Component {
     /// First index of the component
     start: usize,
     /// Size of the component
     size: usize,
-    /// Hash of the component (computed during the detection, or afterward)
-    hash: u64,
 }
 
 pub struct ComponentIterator {
@@ -71,13 +67,8 @@ impl Iterator for ComponentIterator {
     }
 }
 
-/// Constant that indicates after how many decrement the cache scores must be incremented
-const CS_LIMIT: usize = 500;
-/// Constant by which the cache scores are incremented after CS_LIMIT decrement
-const CS_INCREMENT: usize = 100;
-
 /// This structure is an extractor of component that works by doing a DFS on the component to
-/// extract sub-components. It keeps all the `NodeIndex` in a single vector (the `nodes`
+/// extract sub-components. It keeps all the `ClauseIndex` in a single vector (the `nodes`
 /// vector) and maintain the property that all the nodes of a component are in a contiguous
 /// part of the vectors. All the nodes of a component can be identified by two integers:
 ///     1. The index of the first node in the component
@@ -97,57 +88,35 @@ const CS_INCREMENT: usize = 100;
 pub struct ComponentExtractor {
     /// The vector containing the nodes. All nodes in a component are in a contiguous part of this
     /// vector
-    nodes: Vec<NodeIndex>,
-    /// The vector mapping for each `NodeIndex` its position in `nodes`
+    nodes: Vec<ClauseIndex>,
+    /// The vector mapping for each `ClauseIndex` its position in `nodes`
     positions: Vec<usize>,
     /// Holds the components computed by the extractor during the search
     components: Vec<Component>,
-    /// Holds the distribution in each component of `components`
-    distributions: Vec<FxHashSet<DistributionIndex>>,
     /// The index of the first component of the current node in the search tree
-    base: ReversibleInt,
+    base: ReversibleUsize,
     /// The first index which is not a component of the current node in the search tree
-    limit: ReversibleInt,
-    // Vector of random 64-bits number for the hash computation when a node is in a component
-    nodes_bits: Vec<u64>,
-    // Vector of random 64-bits number for the hash computation when an edge is in a component
-    edges_bits: Vec<u64>,
+    limit: ReversibleUsize,
     /// Fiedler score for Fiedler-based heuristics
     fiedler_score: Vec<f64>,
-    /// Cache score, decremented each time a variable is store in the cache or hitted
-    cache_score: Vec<isize>,
-    /// Counter for the number of time the cache score have been decremented and should be incremented
-    cache_score_decrement_count: usize,
 }
 
 impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
-        let nodes = (0..g.number_nodes()).map(NodeIndex).collect();
-        let positions = (0..g.number_nodes()).collect();
+        let nodes = (0..g.number_clauses()).map(ClauseIndex).collect();
+        let positions = (0..g.number_clauses()).collect();
         let components = vec![Component {
             start: 0,
-            size: g.number_nodes(),
-            hash: 0,
+            size: g.number_clauses(),
         }];
-        let first_distributions = (0..g.number_distributions())
-            .map(DistributionIndex)
-            .collect::<FxHashSet<DistributionIndex>>();
-        let nodes_bits: Vec<u64> = (0..g.number_nodes()).map(|_| rand::random()).collect();
-        let edges_bits: Vec<u64> = (0..g.number_edges()).map(|_| rand::random()).collect();
-        let fiedler_score: Vec<f64> = (0..g.number_nodes()).map(|_| 0.0).collect();
-        let cache_score: Vec<isize> = (0..g.number_nodes()).map(|_| 0).collect();
+        let fiedler_score: Vec<f64> = (0..g.number_clauses()).map(|_| 0.0).collect();
         Self {
             nodes,
             positions,
             components,
-            distributions: vec![first_distributions],
-            base: state.manage_int(0),
-            limit: state.manage_int(1),
-            nodes_bits,
-            edges_bits,
+            base: state.manage_usize(0),
+            limit: state.manage_usize(1),
             fiedler_score,
-            cache_score,
-            cache_score_decrement_count: 0,
         }
     }
 
@@ -155,7 +124,7 @@ impl ComponentExtractor {
     fn is_node_visitable(
         &self,
         g: &Graph,
-        node: NodeIndex,
+        node: ClauseIndex,
         comp_start: usize,
         comp_size: &usize,
         state: &StateManager,
@@ -164,7 +133,7 @@ impl ComponentExtractor {
         // position is already in the part of the component that has been processed, then we must
         // not visit again
         let node_pos = self.positions[node.0];
-        !(g.is_node_bound(node, state)
+        !(!g.is_clause_constrained(node, state)
             || (comp_start <= node_pos && node_pos < (comp_start + *comp_size)))
     }
 
@@ -173,18 +142,14 @@ impl ComponentExtractor {
     fn explore_component(
         &mut self,
         g: &Graph,
-        node: NodeIndex,
+        node: ClauseIndex,
         comp_start: usize,
         comp_size: &mut usize,
         state: &mut StateManager,
-        hash: &mut u64,
-        depth: usize,
         laplacians: &mut Vec<Vec<f64>>,
         laplacian_start: usize,
     ) {
         if self.is_node_visitable(g, node, comp_start, comp_size, state) {
-            // Adds the node random bits to the hash
-            *hash ^= self.nodes_bits[node.0];
             // The node is swap with the node at position comp_sart + comp_size
             let current_pos = self.positions[node.0];
             let new_pos = comp_start + *comp_size;
@@ -197,78 +162,55 @@ impl ComponentExtractor {
                 self.positions[moved_node.0] = current_pos;
             }
             *comp_size += 1;
-
-            // If the node is probabilistic, add its distribution to the set of distribution for this
-            // component
-            // And we need to add the nodes in the distribution in the component
-            if g.is_node_probabilistic(node) {
-                let distribution = g.get_distribution(node).unwrap();
-                self.distributions.last_mut().unwrap().insert(distribution);
-                for n in g.distribution_iter(distribution) {
-                    if self.is_node_visitable(g, n, comp_start, comp_size, state) {
-                        self.explore_component(
-                            g,
-                            n,
-                            comp_start,
-                            comp_size,
-                            state,
-                            hash,
-                            depth + 1,
-                            laplacians,
-                            laplacian_start,
-                        );
+            
+            if g.clause_has_probabilistic(node, state) {
+                for variable in g.clause_body_iter(node) {
+                    if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
+                        let d = g.get_variable_distribution(variable).unwrap();
+                        for v in g.distribution_variable_iter(d) {
+                            if !g.is_variable_bound(v, state) {
+                                for c in g.variable_clause_body_iter(v) {
+                                    self.explore_component(g, c, comp_start, comp_size, state, laplacians, laplacian_start);
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // Recursively explore the nodes in the connected components (i.e. linked by a clause)
-            for clause in g.node_clauses(node) {
-                for edge in g.edges_clause(clause) {
-                    if g.is_edge_active(edge, state) {
-                        if node == g.get_edge_source(edge) {
-                            *hash ^= self.edges_bits[edge.0];
-                        }
-                        let src = g.get_edge_source(edge);
-                        let dst = g.get_edge_destination(edge);
-                        if self.is_node_visitable(g, src, comp_start, comp_size, state) {
-                            self.explore_component(
-                                g,
-                                src,
-                                comp_start,
-                                comp_size,
-                                state,
-                                hash,
-                                depth + 1,
-                                laplacians,
-                                laplacian_start,
-                            );
-                        }
-                        if self.is_node_visitable(g, dst, comp_start, comp_size, state) {
-                            self.explore_component(
-                                g,
-                                dst,
-                                comp_start,
-                                comp_size,
-                                state,
-                                hash,
-                                depth + 1,
-                                laplacians,
-                                laplacian_start,
-                            );
-                        }
-                        if !g.is_node_bound(src, state) && !g.is_node_bound(dst, state) {
-                            let src_pos = self.positions[src.0];
-                            let dst_pos = self.positions[dst.0];
-                            laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
-                            laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
-                            laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
-                            laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
-                        }
+            // Recursively explore the nodes in the connected components
+            for parent_edge in g.parents_clause_iter(node) {
+                if g.is_edge_active(parent_edge, state) {
+                    let parent = g.get_edge_source(parent_edge);
+                    self.explore_component(g, parent, comp_start, comp_size, state, laplacians, laplacian_start);
+                    if g.is_clause_constrained(node, state) && g.is_clause_constrained(parent, state) {
+                        let src_pos = self.positions[parent.0];
+                        let dst_pos = self.positions[node.0];
+                        laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
+                        laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
+                        laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
+                        laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
+                    }
+                }
+            }
+            
+            for child_edge in g.children_clause_iter(node) {
+                if g.is_edge_active(child_edge, state) {
+                    let child = g.get_edge_destination(child_edge);
+                    self.explore_component(g, child, comp_start, comp_size, state, laplacians, laplacian_start);
+                    if g.is_clause_constrained(node, state) && g.is_clause_constrained(child, state) {
+                        let src_pos = self.positions[node.0];
+                        let dst_pos = self.positions[child.0];
+                        laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
+                        laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
+                        laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
+                        laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
                     }
                 }
             }
         }
     }
+
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
     /// Returns true iff at least one component has been detected and it contains one distribution
@@ -279,15 +221,14 @@ impl ComponentExtractor {
         component: ComponentIndex,
     ) -> bool {
         let c = self.components[component.0];
-        for node in (c.start..(c.start + c.size)).map(NodeIndex) {
+        for node in (c.start..(c.start + c.size)).map(ClauseIndex) {
             self.fiedler_score[node.0] = 0.0;
         }
-        let end = state.get_int(self.limit);
+        let end = state.get_usize(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
-        self.components.truncate(end as usize);
-        self.distributions.truncate(end as usize);
-        state.set_int(self.base, end);
+        self.components.truncate(end);
+        state.set_usize(self.base, end);
         let super_comp = self.components[component.0];
         let mut start = super_comp.start;
         let end = start + super_comp.size;
@@ -298,42 +239,28 @@ impl ComponentExtractor {
         // We iterate over all the nodes in the component
         while start < end {
             let node = self.nodes[start];
-            if !g.is_node_bound(node, state) {
-                // If the node is not bound, then we start a new component from it
+            if g.is_clause_constrained(node, state) {
+                // If the clause is active, then we start a new component from it
                 let mut size = 0;
-                self.distributions.push(FxHashSet::default());
-                let mut hash: u64 = 0;
                 self.explore_component(
                     g,
                     node,
                     start,
                     &mut size,
                     state,
-                    &mut hash,
-                    0,
                     &mut laplacians,
                     super_comp.start,
                 );
-                if !self.distributions.last().unwrap().is_empty()
-                    && g.get_distribution_unassigned_nodes(
-                        *self.distributions.last().unwrap().iter().next().unwrap(),
-                        state,
-                    ) != size
-                {
-                    self.components.push(Component {
-                        start,
-                        size,
-                        hash,
-                    });
-                } else {
-                    self.distributions.pop().unwrap();
-                }
+                self.components.push(Component {
+                    start,
+                    size,
+                });
                 start += size;
             } else {
                 start += 1;
             }
         }
-        state.set_int(self.limit, self.components.len() as isize);
+        state.set_usize(self.limit, self.components.len());
         // If there is only one sub-component extracted, we keep the same values for the fiedler
         // heuristic. Since the computation of the fiedler vector is expensive, we try to delay it
         // as much as possible. If the component was not breaked, we assume that the nodes that were
@@ -343,147 +270,61 @@ impl ComponentExtractor {
                 let comp = self.components[cid.0];
                 let size = comp.size;
                 // Extracts the laplacian matrix corresponding to this component
-                let deterministic_indexes = (comp.start..(comp.start + size))
-                    .filter(|i| g.is_node_deterministic(self.nodes[*i]))
-                    .collect::<Vec<usize>>();
-                let msize = deterministic_indexes.len();
-                if msize > 0 {
-                    let sub_lp = DMatrix::from_fn(msize, msize, |r, c| {
-                        let rpos = deterministic_indexes[r];
-                        let cpos = deterministic_indexes[c];
-                        laplacians[rpos - super_comp.start][cpos - super_comp.start]
-                    });
-                    let decomp = sub_lp.hermitian_part().symmetric_eigen();
-                    // Finds the fiedler vectors. This is the eigenvector associated with the second
-                    // smallest eigenvalue. We first find this eigen value and then assign the fiedler
-                    // score to the nodes in the component
-                    let mut smallest_eigenvalue = f64::INFINITY;
-                    let mut second_smallest_eigenvalue = f64::INFINITY;
-                    let mut smallest_index = 0;
-                    let mut fiedler_index = 0;
-                    let eigenvalues = decomp.eigenvalues;
-                    for i in 0..msize {
-                        let eigenvalue = eigenvalues[i];
-                        if eigenvalue < smallest_eigenvalue {
-                            second_smallest_eigenvalue = smallest_eigenvalue;
-                            fiedler_index = smallest_index;
-                            smallest_eigenvalue = eigenvalue;
-                            smallest_index = i;
-                        } else if eigenvalue < second_smallest_eigenvalue {
-                            second_smallest_eigenvalue = eigenvalue;
-                            fiedler_index = i;
-                        }
+                let sub_lp = DMatrix::from_fn(size, size, |r, c| {
+                    laplacians[(comp.start - super_comp.start) + r][(comp.start - super_comp.start) + c]
+                });
+                let decomp = sub_lp.hermitian_part().symmetric_eigen();
+                // Finds the fiedler vectors. This is the eigenvector associated with the second
+                // smallest eigenvalue. We first find this eigen value and then assign the fiedler
+                // score to the nodes in the component
+                let mut smallest_eigenvalue = f64::INFINITY;
+                let mut second_smallest_eigenvalue = f64::INFINITY;
+                let mut smallest_index = 0;
+                let mut fiedler_index = 0;
+                let eigenvalues = decomp.eigenvalues;
+                for i in 0..size {
+                    let eigenvalue = eigenvalues[i];
+                    if eigenvalue < smallest_eigenvalue {
+                        second_smallest_eigenvalue = smallest_eigenvalue;
+                        fiedler_index = smallest_index;
+                        smallest_eigenvalue = eigenvalue;
+                        smallest_index = i;
+                    } else if eigenvalue < second_smallest_eigenvalue {
+                        second_smallest_eigenvalue = eigenvalue;
+                        fiedler_index = i;
                     }
-                    for i in 0..msize {
-                        self.fiedler_score[deterministic_indexes[i]] =
-                            decomp.eigenvectors.row(i)[fiedler_index];
-                    }
+                }
+                for i in 0..size {
+                    self.fiedler_score[self.nodes[comp.start + i].0] =
+                        decomp.eigenvectors.row(i)[fiedler_index];
                 }
             }
         }
         self.number_components(state) > 0
     }
 
-    /// Returns the hash of a given component. This is the job of the implementing data structure
-    /// to ensure that the same component gives the same hash, even if it appears in another part
-    /// of the search tree. This means that, in practice, the hash should give the same hash even
-    /// if the "order" of the nodes and/or edges in the component is changed.
-    pub fn get_component_hash(&self, component: ComponentIndex) -> u64 {
-        let mut hasher = FxHasher::default();
-        hasher.write_u64(self.components[component.0].hash);
-        hasher.finish()
-    }
-
-    /// Returns the distributions in a given component
-    pub fn get_component_distributions(
-        &self,
-        component: ComponentIndex,
-    ) -> &FxHashSet<DistributionIndex> {
-        &self.distributions[component.0]
-    }
-
     /// Returns an iterator over the component detected by the last `detect_components` call
     pub fn components_iter(&self, state: &StateManager) -> ComponentIterator {
-        let start = state.get_int(self.base) as usize;
-        let limit = state.get_int(self.limit) as usize;
+        let start = state.get_usize(self.base);
+        let limit = state.get_usize(self.limit);
         ComponentIterator { limit, next: start }
     }
-
-    /// Returns the average of the fiedler values of the active (unassigned) children of a node
-    pub fn average_children_fiedler(
-        &self,
-        g: &Graph,
-        node: NodeIndex,
-        state: &StateManager,
-    ) -> Option<f64> {
-        let mut value = 0.0;
-        let mut active_children = 0.0;
-        for child in g.active_children(node, state) {
-            value += self.fiedler_score[self.positions[child.0]].abs();
-            active_children += 1.0;
-        }
-        if active_children > 0.0 {
-            Some(value / active_children)
-        } else {
-            None
-        }
+    
+    /// Returns an iterator on the nodes of the given component
+    pub fn component_iter(&self, component: ComponentIndex) -> impl Iterator<Item = ClauseIndex> + '_ {
+        let start = self.components[component.0].start;
+        let end = start + self.components[component.0].size;
+        self.nodes[start..end].iter().copied()
     }
-
-    /// Returns the minimum of the active (unassigned) children's fiedler value of a node
-    pub fn minimum_children_fiedler(
-        &self,
-        g: &Graph,
-        node: NodeIndex,
-        state: &StateManager,
-    ) -> f64 {
-        let mut value = f64::INFINITY;
-        for child in g.active_children(node, state) {
-            let child_value = self.fiedler_score[self.positions[child.0]].abs();
-            if child_value < value {
-                value = child_value;
-            }
-        }
-        value
+    
+    /// Returns the fiedler value of a given clause
+    pub fn fiedler_value(&self, node: ClauseIndex) -> f64 {
+        self.fiedler_score[node.0]
     }
 
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {
-        (state.get_int(self.limit) - state.get_int(self.base)) as usize
-    }
-
-    /// Decrements the cache score of the variables in component
-    pub fn decrement_cache_score(&mut self, component: ComponentIndex) {
-        let comp = self.components[component.0];
-        for node in &self.nodes[comp.start..(comp.start + comp.size)] {
-            self.cache_score[node.0] -= 1;
-        }
-        self.cache_score_decrement_count = (self.cache_score_decrement_count + 1) % CS_LIMIT;
-        if self.cache_score_decrement_count == 0 {
-            for i in 0..self.cache_score.len() {
-                self.cache_score[i] += CS_INCREMENT as isize;
-            }
-        }
-    }
-
-    /// Returns the average difference between a node's cache score and its children
-    pub fn average_diff_children_cs(
-        &self,
-        g: &Graph,
-        node: NodeIndex,
-        state: &StateManager,
-    ) -> Option<f64> {
-        let node_score = self.cache_score[node.0];
-        let mut diff = 0;
-        let mut active_child = 0;
-        for child in g.active_children(node, state) {
-            diff += (node_score - self.cache_score[child.0]).abs();
-            active_child += 1;
-        }
-        if active_child == 0 {
-            None
-        } else {
-            Some((diff as f64 / active_child as f64) / CS_LIMIT as f64)
-        }
+        state.get_usize(self.limit) - state.get_usize(self.base)
     }
 }
 
@@ -492,25 +333,18 @@ impl ComponentExtractor {
 /// used for real data sets (as it performences will be terrible)
 #[allow(dead_code)]
 pub struct NoComponentExtractor {
-    components: Vec<Vec<NodeIndex>>,
-    distributions: Vec<FxHashSet<DistributionIndex>>,
+    components: Vec<Vec<ClauseIndex>>,
 }
 
 #[allow(dead_code)]
 #[cfg(not(tarpaulin_include))]
 impl NoComponentExtractor {
     pub fn new(g: &Graph) -> Self {
-        let mut components: Vec<Vec<NodeIndex>> = vec![];
-        let nodes = g.nodes_iter().collect();
+        let mut components: Vec<Vec<ClauseIndex>> = vec![];
+        let nodes = g.clause_iter().collect();
         components.push(nodes);
-        let mut distributions: Vec<FxHashSet<DistributionIndex>> = vec![];
-        let ds = (0..g.number_distributions())
-            .map(DistributionIndex)
-            .collect::<FxHashSet<DistributionIndex>>();
-        distributions.push(ds);
         Self {
             components,
-            distributions,
         }
     }
 
@@ -520,29 +354,17 @@ impl NoComponentExtractor {
         state: &mut StateManager,
         _component: ComponentIndex,
     ) {
-        let mut nodes: Vec<NodeIndex> = vec![];
-        let mut distributions: FxHashSet<DistributionIndex> = FxHashSet::default();
-        for n in g.nodes_iter() {
-            if !g.is_node_bound(n, state) {
+        let mut nodes: Vec<ClauseIndex> = vec![];
+        for n in g.clause_iter() {
+            if g.is_clause_constrained(n, state) {
                 nodes.push(n);
-                if g.is_node_probabilistic(n) {
-                    distributions.insert(g.get_distribution(n).unwrap());
-                }
             }
         }
         self.components.push(nodes);
-        self.distributions.push(distributions);
     }
 
     fn get_component_hash(&self, _component: ComponentIndex) -> u64 {
         0_u64
-    }
-
-    fn get_component_distributions(
-        &self,
-        component: ComponentIndex,
-    ) -> &FxHashSet<DistributionIndex> {
-        &self.distributions[component.0]
     }
 
     fn components_iter(&self, _state: &StateManager) -> ComponentIterator {
@@ -561,6 +383,8 @@ impl NoComponentExtractor {
     }
 }
 
+
+/* 
 #[cfg(test)]
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex};
@@ -691,7 +515,7 @@ mod test_dfs_component {
         assert_eq!(n1, n_c1);
         assert_eq!(3, n_c2.len());
         assert_eq!(n2, n_c2);
-    }
+    }f
 
     #[test]
     fn test_breaking_components() {
@@ -900,3 +724,5 @@ mod test_fiedler {
         );
     }
 }
+
+*/

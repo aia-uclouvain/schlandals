@@ -1,4 +1,4 @@
-//Schlandals
+//Schlandalhttps://www.youtube.com/watch?v=-9lrYoX2cMks
 //Copyright (C) 2022 A. Dubray
 //
 //This program is free software: you can redistribute it and/or modify
@@ -14,19 +14,17 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use search_trail::{StateManager, SaveAndRestore};
+
 use crate::common::f128;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::core::trail::*;
 use crate::solver::branching::BranchingDecision;
-use crate::solver::propagator::SimplePropagator;
+use crate::solver::propagator::FTReachablePropagator;
 use crate::solver::statistics::Statistics;
-use crate::common::PEAK_ALLOC;
-use rustc_hash::FxHashMap;
+use crate::solver::cache::{Cache};
 
-use rug::{Float, Integer};
-
-use std::{fmt, ops};
+use rug::{Float};
 
 /// A solution of a node in the search space. It gives its probability of the sub-graph induced in
 /// the node and the number of solutions in its subtree.
@@ -44,20 +42,12 @@ use std::{fmt, ops};
 ///     default
 ///     - If not, using the same procedure as above, the count is the sum of the count of the
 ///     children (multiplied for independent sub-components)
-#[derive(Clone)]
-pub struct Solution {
-    pub probability: Float,
-    pub sol_count: Integer,
-}
 
-impl Solution {
-    fn new(probability: Float, sol_count: Integer) -> Self {
-        Solution {
-            probability,
-            sol_count,
-        }
-    }
-}
+
+#[derive(Debug)]
+pub struct Unsat;
+
+type ProblemSolution = Result<Float, Unsat>;
 
 pub struct Solver<'b, B, const S: bool>
 where
@@ -71,12 +61,12 @@ where
     component_extractor: ComponentExtractor,
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
+    /// The propagator
+    propagator: FTReachablePropagator,
     /// Cache used to store results of subtrees
-    cache: FxHashMap<u64, Solution>,
+    cache: Cache,
     /// Statistics collectors
     statistics: Statistics<S>,
-    /// memory limit in megabytes,
-    mlimit: f64,
 }
 
 impl<'b, B, const S: bool> Solver<'b, B, S>
@@ -88,40 +78,43 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
+        propagator: FTReachablePropagator,
         mlimit: u64,
     ) -> Self {
+        let cache = Cache::new(mlimit, &graph);
         Self {
             graph,
             state,
             component_extractor,
             branching_heuristic,
-            cache: FxHashMap::default(),
+            propagator,
+            cache,
             statistics: Statistics::default(),
-            mlimit: mlimit as f64,
         }
     }
 
     /// Returns the solution for the sub-graph identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> &Solution {
-        let hash = self.component_extractor.get_component_hash(component);
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> Float {
         // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
         self.statistics.cache_access();
-        let should_compute = !self.cache.contains_key(&hash);
-        if should_compute {
-            let count = self.choose_and_branch(component);
-            self.cache.insert(hash, count);
-        } else {
-            self.statistics.cache_hit();
+        let cache_entry = self.cache.get(&self.component_extractor, component, &self.graph, &self.state);
+        match cache_entry.0 {
+            Some(v) => v,
+            None => {
+                self.statistics.cache_miss();
+                let v = self.choose_and_branch(component);
+                let (hash, start) = cache_entry.1;
+                self.cache.set(hash, start, v.clone());
+                v
+            }
         }
-        self.component_extractor.decrement_cache_score(component);
-        self.cache.get(&hash).unwrap()
     }
 
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
     /// solution of the component.
     /// The solution is the sum of the probability/count of the SAT children.
-    fn choose_and_branch(&mut self, component: ComponentIndex) -> Solution {
+    fn choose_and_branch(&mut self, component: ComponentIndex) -> Float {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
             &self.state,
@@ -130,15 +123,15 @@ where
         );
         if let Some(distribution) = decision {
             self.statistics.or_node();
-            let mut node_sol = Solution::new(f128!(0.0), Integer::new());
-            for node in self.graph.distribution_iter(distribution) {
+            let mut node_sol = f128!(0.0);
+            for variable in self.graph.distribution_variable_iter(distribution) {
                 self.state.save_state();
-                match self.graph.propagate_node(node, true, &mut self.state) {
-                    Err(_) => {}
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state) {
+                    Err(_) => {
+                    }
                     Ok(v) => {
-                        debug_assert_ne!(v, 0.0);
                         let mut child_sol = self._solve(component);
-                        child_sol.probability *= v;
+                        child_sol *= v;
                         node_sol += &child_sol;
                     }
                 };
@@ -148,24 +141,17 @@ where
         } else {
             // All distributions have been assigned 1 value, this is 1 assignement that is SAT for the probability variables
             // and extends to deterministic variables.
-            let mut count = Integer::new();
-            count += 1;
-            Solution::new(f128!(1.0), count)
+            f128!(1.0)
         }
     }
 
     /// Solves the problem for the sub-graph identified by component.
-    pub fn _solve(&mut self, component: ComponentIndex) -> Solution {
-        if PEAK_ALLOC.current_usage_as_mb() as f64 > self.mlimit {
-            panic!("The solver used the maximum available memory");
-        }
+    pub fn _solve(&mut self, component: ComponentIndex) -> Float {
         self.state.save_state();
-        let mut count = Integer::with_capacity(self.graph.get_number_probabilistic());
-        count += 1;
         // Default solution with a probability/count of 1
         // Since the probability are multiplied between the sub-components, it is neutral. And if
         // there are no sub-components, this is the default solution.
-        let mut solution = Solution::new(f128!(1.0), count);
+        let mut solution = f128!(1.0);
         // First we detect the sub-components in the graph
         if self
             .component_extractor
@@ -176,7 +162,7 @@ where
                 .decomposition(self.component_extractor.number_components(&self.state));
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 solution *= self.get_cached_component_or_compute(sub_component);
-                if solution.probability == 0.0 {
+                if solution == 0.0 {
                     break;
                 }
             }
@@ -191,33 +177,15 @@ where
     /// Each assignment is weighted by the product (or sum in log-domain) of the probabilistic
     /// nodes assigned to true. The solution of the root node is the sum of the weights of such
     /// assigments.
-    pub fn solve(&mut self) -> Solution {
-        let s = self._solve(ComponentIndex(0));
-        self.statistics.print();
-        s
-    }
-}
-
-impl ops::AddAssign<&Solution> for Solution {
-    fn add_assign(&mut self, rhs: &Solution) {
-        self.probability += &rhs.probability;
-        self.sol_count += &rhs.sol_count;
-    }
-}
-
-impl ops::MulAssign<&Solution> for Solution {
-    fn mul_assign(&mut self, rhs: &Solution) {
-        self.probability *= &rhs.probability;
-        self.sol_count *= &rhs.sol_count;
-    }
-}
-
-impl fmt::Display for Solution {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Node with probability {} and {} solutions",
-            self.probability, self.sol_count
-        )
+    pub fn solve(&mut self) -> ProblemSolution {
+        match self.propagator.propagate_unreachable_clauses(&mut self.graph, &mut self.state) {
+            Err(_) => ProblemSolution::Err(Unsat),
+            Ok(p) => {
+                let mut solution = self._solve(ComponentIndex(0));
+                solution *= p;
+                self.statistics.print();
+                ProblemSolution::Ok(solution)
+            }
+        }
     }
 }

@@ -20,7 +20,7 @@ use std::fmt;
 #[derive(Default)]
 #[cfg(not(tarpaulin_include))]
 pub struct Statistics<const B: bool> {
-    cache_hit: usize,
+    cache_miss: usize,
     cache_access: usize,
     number_or_nodes: usize,
     number_and_nodes: usize,
@@ -28,9 +28,9 @@ pub struct Statistics<const B: bool> {
 }
 
 impl<const B: bool> Statistics<B> {
-    pub fn cache_hit(&mut self) {
+    pub fn cache_miss(&mut self) {
         if B {
-            self.cache_hit += 1;
+            self.cache_miss += 1;
         }
     }
 
@@ -73,8 +73,8 @@ impl<const B: bool> fmt::Display for Statistics<B> {
             writeln!(
                 f,
                 "\tNumber of cache hit: {} ({:.3} %)",
-                self.cache_hit,
-                (self.cache_hit as f64 / self.cache_access as f64) * 100.0
+                self.cache_access - self.cache_miss,
+                100f64 - (self.cache_miss as f64 / self.cache_access as f64) * 100.0
             )?;
             writeln!(f, "\tNumber of OR nodes: {}", self.number_or_nodes)?;
             writeln!(f, "\tNumber of AND nodes: {}", self.number_and_nodes)?;

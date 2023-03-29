@@ -21,16 +21,16 @@
 //!
 //! A graph G = (V, E) is represented using two vectors containing, respectively, all the nodes and
 //! all the edges. A node (or an edge) is identified uniquely by its index in its enclosing vector.
-//! The `NodeIndex` and `EdgeIndex` structures are used to index the nodes and edges.
+//! The `VariableIndex` and `EdgeIndex` structures are used to index the nodes and edges.
 //!
 //! The parents and children of each node is implemented as a succession of 'pointers' of
 //! `EdgeIndex`.
 //! If a node n1 has two children n2, n3 then there are two directed edges in the graph n1 -> n2
 //! and n1 -> n3.
 //! These edges are respectively indexed by e1 and e2.
-//! In the `NodeData` structure, the field `children` is filled with the value `Some(e1)`, which
+//! In the `Variable` structure, the field `children` is filled with the value `Some(e1)`, which
 //! references the first of its outgoing edges (to its children n2).
-//! In the `EdgeData` for the edge e1, the field `next_outgoing` is set to `Some(e2)`, the second
+//! In the `Edge` for the edge e1, the field `next_outgoing` is set to `Some(e2)`, the second
 //! outgoing edge of n1.
 //! On the other hand, since there are no more child to n1 after n3, this field is `None` for the
 //! edge identified by e2.
@@ -39,46 +39,27 @@
 //! Once the graph is constructed, no edge/node should be removed from it. Thus this
 //! implementation does not have problems like dangling indexes.
 
-use super::trail::*;
+use search_trail::*;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
-// They are used to retrieve respectively `NodeData`, `EdgeData` and `Clause` in the `Graph`
+// They are used to retrieve respectively `Variable`, `Edge` and `Clause` in the `Graph`
 // structure.
 
-/// Abstraction used as a typesafe way of retrieving a `NodeData` in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a `Variable` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct NodeIndex(pub usize);
+pub struct VariableIndex(pub usize);
 
-/// Abstraction used as a typesafe way of retrieving a `EdgeData` in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a `Edge` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct EdgeIndex(pub usize);
 
 /// Abstraction used as a typesafe way of retrieving a `Clause` in the `Graph` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ClauseIndex(pub usize);
 
 /// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct DistributionIndex(pub usize);
-
-/// This structure represent a clause in the graph. A clause is of the form
-///     a && b && ... && d => e
-/// In the graph, this will be represented by n (the number of literals in the implicant) incoming
-/// edges in `e`.
-/// The edges of a clause are added at the same time, so a clause can be fully identified by an
-/// `EdgeIndex` (the first edge, in the example `a -> e`) and the size of the clause (n)
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Clause {
-    /// Index of the first edge of the clause in the `edges` vector in `Graph`
-    pub first: EdgeIndex,
-    /// Number of edges in the clause (i.e. size of the body)
-    pub size: usize,
-    /// Head of the clause
-    pub head: NodeIndex,
-    /// Number of active edges in the clause
-    active_edges: ReversibleInt,
-    active: ReversibleBool,
-}
 
 /// Data structure that actually holds the data of a  node in the graph
 /// A node in the graph is in four possible states: 1) Unassigned 2) True 3) False 4)
@@ -94,82 +75,99 @@ pub struct Clause {
 /// # Note:
 /// This might not be the best design, but it seems that a full handling of domain etc (like in
 /// a cp solver) is a bit overkill since at the moment we only need BoolVar.
-#[derive(Debug, Copy, Clone)]
-pub struct NodeData {
-    /// The value assigned to the node. Should only be read when `domain_size = 1`
-    pub value: bool,
-    /// The current size of the domain of the node
-    domain_size: ReversibleInt,
-
+#[derive(Debug, Clone)]
+pub struct Variable {
     /// Indicate if the literal represented by the node is a probabilistic literal (i.e. have a
     /// weight) or not
     pub probabilistic: bool,
-
     /// If `probabilistic` is `true`, then this is the weight associated to the node. Otherwise
     /// this is None. The weight is assumed to be log-transformed.
     pub weight: Option<f64>,
-
-    /// If present, the index of the first outgoing edge of the node
-    pub children: Option<EdgeIndex>,
-    /// If present, the index of the first incoming edge of the node
-    pub parents: Option<EdgeIndex>,
-    /// Number of active incoming edges
-    active_incoming: ReversibleInt,
-    /// Numbre of active outgoing edges
-    active_outgoing: ReversibleInt,
-
     /// If `probabilistic` is `true`, this is the index of the distribution containing this node
     pub distribution: Option<DistributionIndex>,
+    /// The clauses in which the variable appears as the head
+    pub clauses_head: Vec<ClauseIndex>,
+    /// The clauses in which the variable appears in the body
+    pub clauses_body: Vec<ClauseIndex>,
+    /// The value assigned to the variable
+    value: bool,
+    /// True if the variable is assigned
+    bound: ReversibleBool,
+    /// Number of active clause containing the variable
+    number_active_clause: ReversibleUsize,
+}
+
+/// This structure represent a clause in the graph. A clause is of the form
+///     a && b && ... && d => e
+/// In the graph, this will be represented by n (the number of literals in the implicant) incoming
+/// edges in `e`.
+/// The edges of a clause are added at the same time, so a clause can be fully identified by an
+/// `EdgeIndex` (the first edge, in the example `a -> e`) and the size of the clause (n)
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Clause {
+    /// Head of the clause
+    pub head: VariableIndex,
+    /// Body of the clause, cunjunction of all the variable in the body
+    pub body: Vec<VariableIndex>,
+    /// Is the clause constrained? A clause is unconstrained if it always evaluates to T, independently of its unassigned var
+    pub constrained: ReversibleBool,
+    /// Numbers of probabilistic variable active in the clause body
+    pub number_probabilistic: ReversibleUsize,
+    /// Numbers of deterministic variable active in the clause body
+    pub number_deterministic: ReversibleUsize,
+    /// Link to the first children in the graph of clauses
+    pub children: Option<EdgeIndex>,
+    /// Link to the first parent in the graph of clauses
+    pub parents: Option<EdgeIndex>,
+    /// Is the clause reachable from a _|_
+    pub bot_reachable: ReversibleBool,
+    /// Is the clause reachable from a T
+    pub t_reachable: ReversibleBool,
+    /// Number of active parents
+    pub number_active_parents: ReversibleUsize,
+    /// Number of active children
+    pub number_active_children: ReversibleUsize,
 }
 
 /// Data structure that actually holds the data of an edge in the graph
 #[derive(Debug, Copy, Clone)]
-pub struct EdgeData {
+pub struct Edge {
     /// The index of the source node in the Graph
-    pub src: NodeIndex,
-
+    pub src: ClauseIndex,
     /// The index of the target node in the Graph
-    pub dst: NodeIndex,
-
+    pub dst: ClauseIndex,
     /// If exists, the next incoming edge of `dst`
     pub next_incoming: Option<EdgeIndex>,
-
     /// If exists, the next outgoing edge of `src`
     pub next_outgoing: Option<EdgeIndex>,
-
-    // The clause in which this edges is
-    clause: ClauseIndex,
     /// Is the edge active or not
     active: ReversibleBool,
 }
 
 /// Represents a set of nodes in a same distribution. This assume that the nodes of a distribution
-/// are inserted in the graph one after the other (i.e. that their `NodeIndex` are consecutive).
+/// are inserted in the graph one after the other (i.e. that their `VariableIndex` are consecutive).
 /// Since no node should be removed from the graph once constructed, this should not be a problem.
-/// Thus a distribution is identified by the first `NodeIndex` and the number of nodes in the
+/// Thus a distribution is identified by the first `VariableIndex` and the number of nodes in the
 /// distribution.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Distribution {
     /// First node in the distribution
-    pub first: NodeIndex,
+    pub first: VariableIndex,
     /// Number of node in the distribution
     pub size: usize,
-    /// Number of active edges in the distribution. This is the sum of the active ingoing/outgoing
-    /// edges of all nodes of the distribution
-    active_edges: ReversibleInt,
-    /// Number of nodes set to false in the distribution
-    nodes_false: ReversibleInt,
-    /// True if there is a node set to true in the distribution
-    bound: ReversibleBool,
+    /// Number of clauses in which the distribution appears
+    pub number_clause_active: ReversibleUsize,
+    /// Number of nodes assigned to F in the distribution
+    pub number_false: ReversibleUsize,
 }
 
 /// Data structure representing the Graph.
 #[derive(Debug, Clone)]
 pub struct Graph {
     /// Vector containing the nodes of the graph
-    nodes: Vec<NodeData>,
+    variables: Vec<Variable>,
     /// Vector containing the edges of the graph
-    edges: Vec<EdgeData>,
+    edges: Vec<Edge>,
     /// Vector containing the clauses of the graph
     clauses: Vec<Clause>,
     /// Vector containing the distributions of the graph
@@ -185,9 +183,12 @@ impl Default for Graph {
 }
 
 impl Graph {
+    
+    // --- GRAPH CREATION --- //
+
     pub fn new() -> Self {
         Self {
-            nodes: vec![],
+            variables: vec![],
             edges: vec![],
             clauses: vec![],
             distributions: vec![],
@@ -195,148 +196,10 @@ impl Graph {
         }
     }
 
-    /// Returns the number of node in the graph
-    pub fn number_nodes(&self) -> usize {
-        self.nodes.len()
-    }
-
-    /// Returns the number of edges in the graph
-    pub fn number_edges(&self) -> usize {
-        self.edges.len()
-    }
-
-    /// Returns the number of distribution in the graph
-    pub fn number_distributions(&self) -> usize {
-        self.distributions.len()
-    }
-
-    /// Returns the distribution of a node if any
-    pub fn get_distribution(&self, node: NodeIndex) -> Option<DistributionIndex> {
-        self.nodes[node.0].distribution
-    }
-
-    // --- Methods that returns an iterator --- ///
-
-    /// Returns an iterator on the node indexes (`NodeIndex`)
-    pub fn nodes_iter(&self) -> Nodes {
-        Nodes {
-            limit: self.nodes.len(),
-            next: 0,
-        }
-    }
-
-    /// Returns an iterator over all the nodes in the distribution identified by `distribution`
-    pub fn distribution_iter(
-        &self,
-        distribution: DistributionIndex,
-    ) -> impl Iterator<Item = NodeIndex> {
-        let start = self.distributions[distribution.0].first.0;
-        let size = self.distributions[distribution.0].size;
-        let end = start + size;
-        (start..end).map(NodeIndex)
-    }
-
-    /// Returns an iterator on the node in the same distribution as `node`
-    pub fn nodes_distribution_iter(&self, node: NodeIndex) -> DistributionIterator {
-        if self.is_node_deterministic(node) {
-            DistributionIterator {
-                limit: node.0 + 1,
-                next: node.0,
-            }
-        } else {
-            let distribution = self.nodes[node.0].distribution.unwrap();
-            let next = self.distributions[distribution.0].first.0;
-            let limit = next + self.distributions[distribution.0].size;
-            DistributionIterator { limit, next }
-        }
-    }
-
-    /// Returns an iterator over the outgoing edges of `node`
-    pub fn outgoings(&self, node: NodeIndex) -> Outgoings<'_> {
-        let first = self.nodes[node.0].children;
-        Outgoings {
-            graph: self,
-            next: first,
-        }
-    }
-
-    /// Returns an iterator over the incoming edges of `node`
-    pub fn incomings(&self, node: NodeIndex) -> Incomings<'_> {
-        let first = self.nodes[node.0].parents;
-        Incomings {
-            graph: self,
-            next: first,
-        }
-    }
-
-    /// Returns an itertor on the active children of a node
-    pub fn active_children<'a>(
-        &'a self,
-        node: NodeIndex,
-        state: &'a StateManager,
-    ) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.outgoings(node)
-            .map(|edge| self.get_edge_destination(edge))
-            .filter(|node| !self.is_node_bound(*node, state))
-    }
-
-    /// Returns an iterator over all the clauses in which `node` is included, either as the head of
-    /// the clauses or in its body
-    pub fn node_clauses(&self, node: NodeIndex) -> impl Iterator<Item = ClauseIndex> + Sized + '_ {
-        // A bit ugly... For now dedup is not available for iterators (see
-        // https://github.com/rust-lang/rust/pull/83748)
-        // The idea is that edges are inserted by clauses, and thus all incoming edges of the same clauses
-        // will be neighbors in the linked list of incoming edges. Thus mapping the edges to their
-        // clause will yield a sequence of `ClauseIndex` sorted in decreasing order
-        let mut incomings: Vec<ClauseIndex> = self
-            .incomings(node)
-            .map(move |e| self.edges[e.0].clause)
-            .collect();
-        incomings.dedup();
-        let outgoings = self.outgoings(node).map(move |e| self.edges[e.0].clause);
-        incomings.into_iter().chain(outgoings)
-    }
-
-    /// Returns an iterator over all the `EdgeIndex` of a clause
-    pub fn edges_clause(&self, clause: ClauseIndex) -> EdgesClause {
-        let first = self.clauses[clause.0].first.0;
-        let limit = first + self.clauses[clause.0].size;
-        EdgesClause { limit, next: first }
-    }
-
-    // --- End iterator methods --- ///
-
-    // --- Node related methods --- ///
-
-    /// Add a node to the graph. At the creation of the graph, the nodes do not have any value. If
-    /// the node represent a probabilistic literal (`probabilistic = true`), then it has a weight
-    /// of `weight`. This method returns the index of the node.
-    pub fn add_node(
-        &mut self,
-        probabilistic: bool,
-        weight: Option<f64>,
-        distribution: Option<DistributionIndex>,
-        state: &mut StateManager,
-    ) -> NodeIndex {
-        let id = self.nodes.len();
-        self.nodes.push(NodeData {
-            value: false,
-            domain_size: state.manage_int(2),
-            probabilistic,
-            weight,
-            children: None,
-            parents: None,
-            active_incoming: state.manage_int(0),
-            active_outgoing: state.manage_int(0),
-            distribution,
-        });
-        NodeIndex(id)
-    }
-
     /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
-    /// nodes such that
+    /// variable such that
     ///     - The sum of their weights sum up to 1.0
-    ///     - Only one of these node can be true at a given time
+    ///     - Exatctly one of these node is true in a solution
     ///     - None of the node in the distribution is part of another distribution
     ///
     /// Each probabilstic node should be part of one distribution.
@@ -344,283 +207,380 @@ impl Graph {
         &mut self,
         weights: &[f64],
         state: &mut StateManager,
-    ) -> Vec<NodeIndex> {
+    ) -> Vec<VariableIndex> {
         self.number_probabilistic += weights.len();
         let distribution = DistributionIndex(self.distributions.len());
-        let nodes: Vec<NodeIndex> = weights
+        let variables: Vec<VariableIndex> = weights
             .iter()
-            .map(|w| self.add_node(true, Some(*w), Some(distribution), state))
+            .map(|w| self.add_variable(true, Some(*w), Some(distribution), state))
             .collect();
         self.distributions.push(Distribution {
-            first: nodes[0],
-            size: nodes.len(),
-            active_edges: state.manage_int(0),
-            nodes_false: state.manage_int(0),
-            bound: state.manage_boolean(false),
+            first: variables[0],
+            size: variables.len(),
+            number_clause_active: state.manage_usize(0),
+            number_false: state.manage_usize(0),
         });
-        nodes
+        variables 
+    }
+    
+    /// Adds a variable to the graph, which is used later by the clauses.
+    /// Returns the index of the variables in the `variables` vector.
+    pub fn add_variable(
+        &mut self,
+        probabilistic: bool,
+        weight: Option<f64>,
+        distribution: Option<DistributionIndex>,
+        state: &mut StateManager,
+    ) -> VariableIndex {
+        let id = self.variables.len();
+        self.variables.push(Variable {
+            probabilistic,
+            weight,
+            distribution,
+            clauses_head: vec![],
+            clauses_body: vec![],
+            value: false,
+            bound: state.manage_bool(false),
+            number_active_clause: state.manage_usize(0),
+        });
+        VariableIndex(id)
     }
 
-    /// Gets the number of nodes set to false in a distribution
-    pub fn get_distribution_false_nodes(
-        &self,
-        distribution: DistributionIndex,
-        state: &StateManager,
-    ) -> isize {
-        state.get_int(self.distributions[distribution.0].nodes_false)
-    }
-
-    /// Gets the number of unassigned nodes in the distribution
-    pub fn get_distribution_unassigned_nodes(
-        &self,
-        distribution: DistributionIndex,
-        state: &StateManager,
-    ) -> usize {
-        self.distribution_iter(distribution)
-            .filter(|n| !self.is_node_bound(*n, state))
-            .count()
-    }
-
-    /// Gets the number of nodes in a distribution
-    pub fn get_distribution_size(&self, distribution: DistributionIndex) -> usize {
-        self.distributions[distribution.0].size
-    }
-
-    /// Returns the number of probabilistic nodes in the graph
-    pub fn get_number_probabilistic(&self) -> usize {
-        self.number_probabilistic
-    }
-
-    /// Sets `node` to `value`. This assumes that `node` is unassigned
-    /// `node` is probabilistic and `value` is true, then the probability of the node is added to
-    /// the current objective
-    pub fn set_node(&mut self, node: NodeIndex, value: bool, state: &mut StateManager) {
-        // TODO: Maybe would be useful to launch an error
-        debug_assert!(state.get_int(self.nodes[node.0].domain_size) == 2);
-        // If the node is probabilistic, add its value to the objective
-        let n = &self.nodes[node.0];
-        if n.probabilistic {
-            // If the node is set to true, then its weight is added to the objective. If not, then
-            // the counter of node set to false for the distribution of `node` is incremented
-            let distribution = self.get_distribution(node).unwrap();
-            if !value {
-                state.increment(self.distributions[distribution.0].nodes_false);
-            } else {
-                state.set_bool(self.distributions[distribution.0].bound, true);
+    /// Add a clause to the graph. A clause is a expression of the form
+    ///     n1 && n2 && ... && nn => head
+    ///
+    /// where head, n1, ..., nn are variable of the graph. ´head` is the head of the clause and `body`
+    /// = vec![n1, ..., nn].
+    pub fn add_clause(
+        &mut self,
+        head: VariableIndex,
+        body: Vec<VariableIndex>,
+        state: &mut StateManager,
+        body_t: bool,
+        is_head_f: bool,
+    ) -> ClauseIndex {
+        let cid = ClauseIndex(self.clauses.len());
+        let number_probabilistic = body.iter().copied().filter(|v| self.is_variable_probabilistic(*v)).count();
+        let number_deterministic = body.len() - number_probabilistic;
+        let t_reachable = body_t || number_probabilistic == body.len();
+        let f_reachable = is_head_f;
+        self.clauses.push(Clause {
+            head,
+            body: body.clone(),
+            constrained: state.manage_bool(true),
+            number_probabilistic: state.manage_usize(number_probabilistic),
+            number_deterministic: state.manage_usize(number_deterministic),
+            children: None,
+            parents: None,
+            bot_reachable: state.manage_bool(f_reachable),
+            t_reachable: state.manage_bool(t_reachable),
+            number_active_parents: state.manage_usize(0),
+            number_active_children: state.manage_usize(0)
+        });
+        state.increment_usize(self.variables[head.0].number_active_clause);
+        for n in body {
+            if self.is_variable_probabilistic(n) {
+                let distribution = self.variables[n.0].distribution.unwrap();
+                state.increment_usize(self.distributions[distribution.0].number_clause_active);
             }
+            state.increment_usize(self.variables[n.0].number_active_clause);
+            for clause in self.variables[n.0].clauses_head.clone() {
+                self.add_edge(clause, cid, state);
+            }
+            self.variables[n.0].clauses_body.push(cid);
         }
-        // Assigning the value to the node
-        state.decrement(self.nodes[node.0].domain_size);
-        self.nodes[node.0].value = value;
+        for clause in self.variables[head.0].clauses_body.clone() {
+            self.add_edge(cid, clause, state);
+        }
+        self.variables[head.0].clauses_head.push(cid);
+        state.set_usize(self.clauses[cid.0].number_probabilistic, number_probabilistic);
+        state.set_usize(self.clauses[cid.0].number_deterministic, number_deterministic);
+        cid
     }
-
-    /// Returns true if `node` is bound to a value, false otherwise
-    pub fn is_node_bound(&self, node: NodeIndex, state: &StateManager) -> bool {
-        state.get_int(self.nodes[node.0].domain_size) == 1
-    }
-
-    /// Returns true if there is a node set to true in the distribution
-    pub fn is_distribution_bound(
-        &self,
-        distribution: DistributionIndex,
-        state: &StateManager,
-    ) -> bool {
-        state.get_bool(self.distributions[distribution.0].bound)
-    }
-
-    /// Gets the value assigned to a node
-    pub fn get_node_value(&self, node: NodeIndex) -> bool {
-        self.nodes[node.0].value
-    }
-
-    /// Returns the weight of the node
-    pub fn get_node_weight(&self, node: NodeIndex) -> Option<f64> {
-        self.nodes[node.0].weight
-    }
-
-    /// Returns true if the node is deterministic and false otherwise
-    pub fn is_node_deterministic(&self, node: NodeIndex) -> bool {
-        !self.nodes[node.0].probabilistic
-    }
-
-    /// Returns true if the node is probabilistic and false otherwise
-    pub fn is_node_probabilistic(&self, node: NodeIndex) -> bool {
-        !self.is_node_deterministic(node)
-    }
-
-    /// Returns the number of active incoming edges of `node`
-    pub fn node_number_incoming(&self, node: NodeIndex, state: &StateManager) -> isize {
-        state.get_int(self.nodes[node.0].active_incoming)
-    }
-
-    /// Returns the number of active outgoing edges of `node`
-    pub fn node_number_outgoing(&self, node: NodeIndex, state: &StateManager) -> isize {
-        state.get_int(self.nodes[node.0].active_outgoing)
-    }
-
-    // --- End node related methods --- //
-
-    // --- Edge related methods --- //
 
     /// Add an edge between the node identified by `src` to the node identified by `dst`. This
     /// method returns the index of the edge.
     fn add_edge(
         &mut self,
-        src: NodeIndex,
-        dst: NodeIndex,
-        clause: ClauseIndex,
+        src: ClauseIndex,
+        dst: ClauseIndex,
         state: &mut StateManager,
     ) -> EdgeIndex {
-        let source_outgoing = self.nodes[src.0].children;
-        let dest_incoming = self.nodes[dst.0].parents;
-        let edge = EdgeData {
+        state.increment_usize(self.clauses[src.0].number_active_children);
+        state.increment_usize(self.clauses[dst.0].number_active_parents);
+        let source_outgoing = self.clauses[src.0].children;
+        let dest_incoming = self.clauses[dst.0].parents;
+        let edge = Edge {
             src,
             dst,
             next_incoming: dest_incoming,
             next_outgoing: source_outgoing,
-            clause,
-            active: state.manage_boolean(true),
+            active: state.manage_bool(true),
         };
         let index = EdgeIndex(self.edges.len());
-        self.nodes[src.0].children = Some(index);
-        state.increment(self.nodes[src.0].active_outgoing);
-        self.nodes[dst.0].parents = Some(index);
-        state.increment(self.nodes[dst.0].active_incoming);
+        self.clauses[src.0].children = Some(index);
+        self.clauses[dst.0].parents = Some(index);
         self.edges.push(edge);
-        if self.is_node_probabilistic(src) {
-            let src_distribution = self.get_distribution(src).unwrap();
-            state.increment(self.distributions[src_distribution.0].active_edges);
-        }
-        if self.is_node_probabilistic(dst) {
-            let dst_distribution = self.get_distribution(dst).unwrap();
-            state.increment(self.distributions[dst_distribution.0].active_edges);
-        }
         index
     }
-
-    /// Deactivate `edge` and decrements the numbre of active incoming edges of `edge.dst` as well as
-    /// the number of outgoing edges of `edge.src`
-    pub fn deactivate_edge(&mut self, edge: EdgeIndex, state: &mut StateManager) {
-        let edge = self.edges[edge.0];
-        state.set_bool(edge.active, false);
-        state.decrement(self.nodes[edge.src.0].active_outgoing);
-        state.decrement(self.nodes[edge.dst.0].active_incoming);
-        state.decrement(self.clauses[edge.clause.0].active_edges);
-        // If the source or the destination are probabilistic, decrement the counter of active
-        // edges in their distribution
-        if self.is_node_probabilistic(edge.src) {
-            let distribution = self.get_distribution(edge.src).unwrap();
-            state.decrement(self.distributions[distribution.0].active_edges);
-        }
-        if self.is_node_probabilistic(edge.dst) {
-            let distribution = self.get_distribution(edge.dst).unwrap();
-            state.decrement(self.distributions[distribution.0].active_edges);
+    
+    // --- GRAPH MODIFICATIONS --- //
+    
+    pub fn set_reachability(&mut self, state: &mut StateManager) {
+        for clause in self.clause_iter() {
+            if self.is_clause_t_reachable(clause, state) {
+                self.set_clause_t_reachable(clause, state);
+            }
+            if self.is_clause_f_reachable(clause, state) {
+                self.set_clause_bot_reachable(clause, state);
+            }
         }
     }
 
-    pub fn get_distribution_active_edges(
-        &self,
-        distribution: DistributionIndex,
-        state: &mut StateManager,
-    ) -> isize {
-        state.get_int(self.distributions[distribution.0].active_edges)
+    /// Sets the clause to be t-reachable. A clause is t-reachable if one of the two
+    /// following conditions is met:
+    ///     1. It only has probabilistic nodes in its implicant
+    ///     2. One of its parent is t-reachable
+    /// the method recursively assign all the non t-reachable children to be t-reachable
+    pub fn set_clause_t_reachable(&self, clause: ClauseIndex, state: &mut StateManager) {
+        state.set_bool(self.clauses[clause.0].t_reachable, true);
+        for edge in self.children_clause_iter(clause) {
+            if self.is_edge_active(edge, state) {
+                let child = self.get_edge_destination(edge);
+                if !state.get_bool(self.clauses[child.0].t_reachable) {
+                    self.set_clause_t_reachable(child, state);
+                }
+            }
+        }
+    }
+    
+    /// Sets the clause to be bot-reachable. A clause is bot-reachable if one of the two
+    /// following conditions is met
+    ///     1. Its head is set to false
+    ///     2. One of its descendant is bot-reachable
+    /// The method recursively assign all the non bot-reachable parent to be bot-reachable
+    pub fn set_clause_bot_reachable(&self, clause: ClauseIndex, state: &mut StateManager) {
+        state.set_bool(self.clauses[clause.0].bot_reachable, true);
+        for edge in self.parents_clause_iter(clause) {
+            if self.is_edge_active(edge, state) {
+                let parent = self.get_edge_source(edge);
+                if !state.get_bool(self.clauses[parent.0].bot_reachable) {
+                    self.set_clause_bot_reachable(parent, state);
+                }
+            }
+        }
+    }
+    
+    /// Sets a variable to true or false.
+    ///     - If true, it is "removed" from the implicant of all the clauses in which it appears.
+    ///     It also deactivate all the clauses that have the variable as head
+    ///     - If false, it deactivate all the clauses in which it appears in the implicant. It also
+    ///     make all the clauses in which it is the head bot-reachable
+    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, state: &mut StateManager) {
+        state.set_bool(self.variables[variable.0].bound, true);
+        self.variables[variable.0].value = value;
+        if !value && self.is_variable_probabilistic(variable) {
+            let d = self.get_variable_distribution(variable).unwrap();
+            state.increment_usize(self.distributions[d.0].number_false);
+        }
     }
 
-    /// Return true if the edge is still active
+    pub fn decrement_distribution_clause_counter(&self, distribution: DistributionIndex, state: &mut StateManager) -> usize {
+        state.decrement_usize(self.distributions[distribution.0].number_clause_active)
+    }
+    
+    /// Decrements the number of unassigned probabilistic variables in the body of a clause and returns the remaining
+    /// number of unassigned variable in the body
+    pub fn clause_decrement_number_probabilistic(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
+        let remaining = state.get_usize(self.clauses[clause.0].number_deterministic);
+        remaining + state.decrement_usize(self.clauses[clause.0].number_probabilistic)
+    }
+
+    /// Decrements the number of unassigned deterministic variables in the body of a clause and returns the remaining
+    /// number of unassigned variable in the body
+    pub fn clause_decrement_number_deterministic(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
+        let remaining = state.get_usize(self.clauses[clause.0].number_probabilistic);
+        remaining + state.decrement_usize(self.clauses[clause.0].number_deterministic)
+    }
+    
+    pub fn clause_decrement_active_parents(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
+        state.decrement_usize(self.clauses[clause.0].number_active_parents)
+    }
+
+    pub fn clause_decrement_active_children(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
+        state.decrement_usize(self.clauses[clause.0].number_active_children)
+    }
+    
+    // --- QUERIES --- //
+
+    /// Returns true if the clause is bound. This happens if the size of the clause is 0
+    pub fn is_clause_constrained(&self, clause: ClauseIndex, state: &StateManager) -> bool {
+        state.get_bool(self.clauses[clause.0].constrained)
+    }
+    
+    /// Returns true if the variable is bound
+    pub fn is_variable_bound(&self, variable: VariableIndex, state: &StateManager) -> bool {
+        state.get_bool(self.variables[variable.0].bound)
+    } 
+    
+    /// Returns true if the edge is active
     pub fn is_edge_active(&self, edge: EdgeIndex, state: &StateManager) -> bool {
         state.get_bool(self.edges[edge.0].active)
     }
+    
+    /// Returns true if the variable if probabilistic
+    pub fn is_variable_probabilistic(&self, variable: VariableIndex) -> bool {
+        self.variables[variable.0].probabilistic
+    }
+    
+    /// Returns the number of unassigned probabilistic variable in the clause body
+    pub fn clause_number_probabilistic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        state.get_usize(self.clauses[clause.0].number_probabilistic)
+    }
 
-    /// Returns the source of the edge
-    pub fn get_edge_source(&self, edge: EdgeIndex) -> NodeIndex {
+    /// Returns the number of unassigned deterministic variable in the clause body
+    pub fn clause_number_deterministic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        state.get_usize(self.clauses[clause.0].number_deterministic)
+    }
+    
+    /// Returns true if the clause still have probabilistic variable in its implicant
+    pub fn clause_has_probabilistic(&self, clause: ClauseIndex, state: &StateManager) -> bool {
+        self.clause_number_probabilistic(clause, state) != 0
+    }
+    
+    /// Returns true iff the clause is t-reachable
+    pub fn is_clause_t_reachable(&self, clause: ClauseIndex, state: &StateManager) -> bool {
+        state.get_bool(self.clauses[clause.0].t_reachable)
+    }
+    
+    /// Returns true iff the clause if f-reachable
+    pub fn is_clause_f_reachable(&self, clause: ClauseIndex, state: &StateManager) -> bool {
+        state.get_bool(self.clauses[clause.0].bot_reachable)
+    }
+    
+    /// Returns the number of unassigned variable in the body of a clause
+    pub fn clause_number_unassigned(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        state.get_usize(self.clauses[clause.0].number_deterministic) + state.get_usize(self.clauses[clause.0].number_probabilistic)
+    }
+
+    /// Deactivate a clause
+    pub fn set_clause_unconstrained(&self, clause: ClauseIndex, state: &mut StateManager) {
+        state.set_bool(self.clauses[clause.0].constrained, false);
+    }
+    
+    /// Returns true if there are only one variable unassigned in the distribution, and every other is F
+    pub fn distribution_one_left(&self, distribution: DistributionIndex, state: &StateManager) -> bool {
+        self.distributions[distribution.0].size - state.get_usize(self.distributions[distribution.0].number_false) == 1
+    }
+    
+    // --- GETTERS --- //
+    
+    /// Returns the number of clause in the graph
+    pub fn number_clauses(&self) -> usize {
+        self.clauses.len()
+    }
+
+    /// Returns the number of variable in the graph
+    pub fn number_variables(&self) -> usize {
+        self.variables.len()
+    }
+
+    /// Returns the source of an edge
+    pub fn get_edge_source(&self, edge: EdgeIndex) -> ClauseIndex {
         self.edges[edge.0].src
     }
 
     /// Returns the destination of the edge
-    pub fn get_edge_destination(&self, edge: EdgeIndex) -> NodeIndex {
+    pub fn get_edge_destination(&self, edge: EdgeIndex) -> ClauseIndex {
         self.edges[edge.0].dst
     }
+    
+    /// Returns the distribution of a probabilistic variable
+    pub fn get_variable_distribution(&self, variable: VariableIndex) -> Option<DistributionIndex> {
+        self.variables[variable.0].distribution
+    }
 
-    // --- End edge related methods --- //
-
-    // --- Clause related methods --- //
-
-    /// Add a clause to the graph. A clause is a expression of the form
-    ///     n1 && n2 && ... && nn => head
-    ///
-    /// where head, n1, ..., nn are nodes of the graph. ´head` is the head of the clause and `body`
-    /// = vec![n1, ..., nn].
-    /// This function adds n edges to the graph, one for each node in the body (as source) towards
-    /// the head of the clause
-    pub fn add_clause(
-        &mut self,
-        head: NodeIndex,
-        body: &[NodeIndex],
-        state: &mut StateManager,
-    ) -> ClauseIndex {
-        let cid = ClauseIndex(self.clauses.len());
-        self.clauses.push(Clause {
-            first: EdgeIndex(self.edges.len()),
-            size: body.len(),
-            head,
-            active_edges: state.manage_int(body.len() as isize),
-            active: state.manage_boolean(true),
-        });
-        for node in body {
-            self.add_edge(*node, head, cid, state);
+    /// Returns the value of the vairable
+    pub fn get_variable_value(&self, variable: VariableIndex, state: &StateManager) -> Option<bool> {
+        if !self.is_variable_bound(variable, state) {
+            None
+        } else {
+            Some(self.variables[variable.0].value)
         }
-        cid
     }
-
-    /// Returns the number of active edges in the clause
-    pub fn clause_number_active_edges(&self, clause: ClauseIndex, state: &StateManager) -> isize {
-        state.get_int(self.clauses[clause.0].active_edges)
+    
+    /// Returns the weight of the variable
+    pub fn get_variable_weight(&self, variable: VariableIndex) -> Option<f64> {
+        self.variables[variable.0].weight
     }
-
-    /// Deactivate a clause
-    pub fn deactivate_clause(&self, clause: ClauseIndex, state: &mut StateManager) {
-        state.set_bool(self.clauses[clause.0].active, false);
-    }
-
-    /// Returns true if the clause is active, false otherwise
-    pub fn is_clause_active(&self, clause: ClauseIndex, state: &StateManager) -> bool {
-        state.get_bool(self.clauses[clause.0].active)
-    }
-
+    
     /// Returns the head of the clause
-    pub fn get_clause_head(&self, clause: ClauseIndex) -> NodeIndex {
+    pub fn get_clause_head(&self, clause: ClauseIndex) -> VariableIndex {
         self.clauses[clause.0].head
     }
-
-    // Returns the first active edge in the clause, if any
-    pub fn get_first_active_edge(
-        &self,
-        clause: ClauseIndex,
-        state: &StateManager,
-    ) -> Option<EdgeIndex> {
-        self.edges_clause(clause)
-            .find(|edge| self.is_edge_active(*edge, state))
+    
+    /// Returns an active distribution in the clause body
+    pub fn get_clause_active_distribution(&self, clause: ClauseIndex, state: &StateManager) -> Option<DistributionIndex> {
+        self.clause_body_iter(clause).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_bound(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
     }
 
-    /// Returns the edge in the clause whose source is `implicant`, if any
-    pub fn get_edge_with_implicant(
-        &self,
-        clause: ClauseIndex,
-        implicant: NodeIndex,
-    ) -> Option<EdgeIndex> {
-        self.edges_clause(clause)
-            .find(|edge| self.get_edge_source(*edge) == implicant)
+    // --- ITERATORS --- //
+    
+    /// Returns an iterator on the parents of a clause
+    pub fn parents_clause_iter(&self, clause: ClauseIndex) -> Parents<'_> {
+        let first = self.clauses[clause.0].parents;
+        Parents {
+            graph: self,
+            next: first,
+        }
     }
+    
+    /// Returns an iterator on the children of a clause
+    pub fn children_clause_iter(&self, clause: ClauseIndex) -> Children<'_> {
+        let first = self.clauses[clause.0].children;
+        Children {
+            graph: self,
+            next: first,
+        }
+    }
+    
+    /// Returns an iterator on the clauses of the graph
+    pub fn clause_iter(&self) -> impl Iterator<Item = ClauseIndex> {
+        (0..self.clauses.len()).map(ClauseIndex)
+    }
+    
+    /// Returns an iterator over the clauses in which the variable is in the index
+    pub fn variable_clause_body_iter(&self, variable: VariableIndex) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.variables[variable.0].clauses_body.iter().copied()
+    }
+    
+    /// Returns an iterator over the clauses in which the variable is the head
+    pub fn variable_clause_head_iter(&self, variable: VariableIndex) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.variables[variable.0].clauses_head.iter().copied()
+    }
+
+    /// Returns an iterator over the variable in a distribution
+    pub fn distribution_variable_iter(&self, distribution: DistributionIndex) -> impl Iterator<Item = VariableIndex> {
+        let first = self.distributions[distribution.0].first.0;
+        let last = first + self.distributions[distribution.0].size;
+        (first..last).map(VariableIndex)
+    }
+
+    /// Returns an iterator on the body of a clause
+    pub fn clause_body_iter(&self, clause: ClauseIndex) -> impl Iterator<Item = VariableIndex> + '_ {
+        self.clauses[clause.0].body.iter().copied()
+    }
+    
 }
 
 // --- ITERATORS --- //
 
-pub struct Outgoings<'g> {
+pub struct Children<'g> {
     graph: &'g Graph,
     next: Option<EdgeIndex>,
 }
 
-impl<'g> Iterator for Outgoings<'g> {
+impl<'g> Iterator for Children<'g> {
     type Item = EdgeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -635,12 +595,12 @@ impl<'g> Iterator for Outgoings<'g> {
     }
 }
 
-pub struct Incomings<'g> {
+pub struct Parents<'g> {
     graph: &'g Graph,
     next: Option<EdgeIndex>,
 }
 
-impl<'g> Iterator for Incomings<'g> {
+impl<'g> Iterator for Parents<'g> {
     type Item = EdgeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -655,560 +615,265 @@ impl<'g> Iterator for Incomings<'g> {
     }
 }
 
-pub struct DistributionIterator {
-    limit: usize,
-    next: usize,
-}
-
-impl Iterator for DistributionIterator {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next == self.limit {
-            None
-        } else {
-            self.next += 1;
-            Some(NodeIndex(self.next - 1))
-        }
-    }
-}
-
-impl IntoIterator for Distribution {
-    type Item = NodeIndex;
-    type IntoIter = DistributionIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        DistributionIterator {
-            limit: self.first.0 + self.size,
-            next: self.first.0,
-        }
-    }
-}
-
-pub struct Nodes {
-    limit: usize,
-    next: usize,
-}
-
-impl Iterator for Nodes {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next == self.limit {
-            None
-        } else {
-            self.next += 1;
-            Some(NodeIndex(self.next - 1))
-        }
-    }
-}
-
-pub struct EdgesClause {
-    limit: usize,
-    next: usize,
-}
-
-impl Iterator for EdgesClause {
-    type Item = EdgeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next == self.limit {
-            None
-        } else {
-            self.next += 1;
-            Some(EdgeIndex(self.next - 1))
-        }
-    }
-}
-
-// --- END ITERATORS --- //
-
 #[cfg(test)]
-mod test_node_data {
-    use crate::core::graph::{DistributionIndex, NodeData};
-    use crate::core::trail::*;
+mod test_graph_creation {
+    
+    use crate::core::graph::*;
+    use search_trail::StateManager;
 
     #[test]
-    fn new_can_create_probabilistic_node() {
+    pub fn variables_creation() {
+        let mut g = Graph::default();
         let mut state = StateManager::default();
-        let node = NodeData {
-            value: true,
-            domain_size: state.manage_int(2),
-            probabilistic: true,
-            weight: Some(0.4),
-            children: None,
-            parents: None,
-            active_outgoing: state.manage_int(0),
-            active_incoming: state.manage_int(0),
-            distribution: Some(DistributionIndex(0)),
-        };
-        assert_eq!(true, node.probabilistic);
-        assert!(node.weight.is_some());
-        assert_eq!(0.4, node.weight.unwrap());
+        let x = (0..3).map(|x| g.add_variable(true, Some(1.0 / (x + 1) as f64), Some(DistributionIndex(x)), &mut state)).collect::<Vec<VariableIndex>>();
+        for i in 0..3 {
+            assert_eq!(VariableIndex(i), x[i]);
+            let v = &g.variables[x[i].0];
+            let vec_clause: Vec<ClauseIndex> = vec![];
+            assert!(v.probabilistic);
+            assert_eq!(Some(1.0 / (i + 1) as f64), v.weight);
+            assert_eq!(Some(DistributionIndex(i)), v.distribution);
+            assert_eq!(vec_clause, v.clauses_head);
+            assert_eq!(vec_clause, v.clauses_body);
+            assert!(!state.get_bool(v.bound));
+        }
+
+        let x = (0..3).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        for i in 0..3 {
+            assert_eq!(VariableIndex(i+3), x[i]);
+            let v = &g.variables[x[i].0];
+            let vec_clauses: Vec<ClauseIndex> = vec![];
+            assert!(!v.probabilistic);
+            assert_eq!(None, v.weight);
+            assert_eq!(None, v.distribution);
+            assert_eq!(vec_clauses, v.clauses_head);
+            assert_eq!(vec_clauses, v.clauses_body);
+            assert!(!state.get_bool(v.bound));
+        }
     }
-
+    
     #[test]
-    fn new_can_create_deterministic_node() {
+    pub fn distribution_creation() {
+        let mut g = Graph::default();
         let mut state = StateManager::default();
-        let node = NodeData {
-            value: true,
-            domain_size: state.manage_int(2),
-            probabilistic: false,
-            weight: None,
-            children: None,
-            parents: None,
-            active_outgoing: state.manage_int(0),
-            active_incoming: state.manage_int(0),
-            distribution: None,
-        };
-        assert_eq!(false, node.probabilistic);
-        assert_eq!(None, node.weight);
+        let v = g.add_distribution(&vec![0.3, 0.7], &mut state);
+        assert_eq!(2, g.variables.len());
+        assert_eq!(2, v.len());
+        assert_eq!(VariableIndex(0), v[0]);
+        assert_eq!(VariableIndex(1), v[1]);
+        assert_eq!(0.3, g.get_variable_weight(v[0]).unwrap());
+        assert_eq!(0.7, g.get_variable_weight(v[1]).unwrap());
+        assert_eq!(DistributionIndex(0), g.get_variable_distribution(v[0]).unwrap());
+        assert_eq!(DistributionIndex(0), g.get_variable_distribution(v[1]).unwrap());
+        let d = g.distributions[0];
+        assert_eq!(VariableIndex(0), d.first);
+        assert_eq!(2, d.size);
+        let v = g.add_distribution(&vec![0.6, 0.4], &mut state);
+        assert_eq!(4, g.variables.len());
+        assert_eq!(2, v.len());
+        assert_eq!(VariableIndex(2), v[0]);
+        assert_eq!(VariableIndex(3), v[1]);
+        assert_eq!(0.6, g.get_variable_weight(v[0]).unwrap());
+        assert_eq!(0.4, g.get_variable_weight(v[1]).unwrap());
+        assert_eq!(DistributionIndex(1), g.get_variable_distribution(v[0]).unwrap());
+        assert_eq!(DistributionIndex(1), g.get_variable_distribution(v[1]).unwrap());
+        let d = g.distributions[1];
+        assert_eq!(VariableIndex(2), d.first);
+        assert_eq!(2, d.size);
     }
-}
-
-#[cfg(test)]
-mod test_edge_data {
-    use crate::core::graph::{ClauseIndex, EdgeData, EdgeIndex, NodeIndex};
-    use crate::core::trail::*;
-
+    
     #[test]
-    fn new_can_create_first() {
-        let src = NodeIndex(11);
-        let dst = NodeIndex(13);
+    pub fn clauses_creation() {
+        let mut g = Graph::default();
         let mut state = StateManager::default();
-        let edge = EdgeData {
-            src,
-            dst,
-            next_incoming: None,
-            next_outgoing: None,
-            clause: ClauseIndex(0),
-            active: state.manage_boolean(true),
-        };
-        assert_eq!(src, edge.src);
-        assert_eq!(dst, edge.dst);
+        let _ds = (0..3).map(|_| g.add_distribution(&vec![0.4], &mut state)).collect::<Vec<Vec<VariableIndex>>>();
+        let p = (0..3).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..3).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        let c1 = g.add_clause(d[0], vec![p[0], p[1]], &mut state, false, false);
+        g.set_reachability(&mut state);
+        let clause = &g.clauses[c1.0];
+        assert_eq!(d[0], clause.head);
+        assert_eq!(vec![p[0], p[1]], clause.body);
+        assert!(state.get_bool(clause.constrained));
+        assert_eq!(2, state.get_usize(clause.number_probabilistic));
+        assert_eq!(None, clause.children);
+        assert_eq!(None, clause.parents);
+        assert!(!state.get_bool(clause.bot_reachable));
+        assert!(state.get_bool(clause.t_reachable));
+        
+        let c2 = g.add_clause(d[1], vec![d[0], p[2]], &mut state, false, false);
+        g.set_reachability(&mut state);
+        let clause = &g.clauses[c2.0];
+        assert_eq!(d[1], clause.head);
+        assert_eq!(vec![d[0], p[2]], clause.body);
+        assert!(state.get_bool(clause.constrained));
+        assert_eq!(1, state.get_usize(clause.number_probabilistic));
+        assert_eq!(None, clause.children);
+        assert_eq!(Some(EdgeIndex(0)), clause.parents);
+        assert!(!state.get_bool(clause.bot_reachable));
+        assert!(state.get_bool(clause.t_reachable));
+        
+        let edge = g.edges[0];
+        assert_eq!(ClauseIndex(0), edge.src);
+        assert_eq!(ClauseIndex(1), edge.dst);
         assert_eq!(None, edge.next_incoming);
         assert_eq!(None, edge.next_outgoing);
-    }
-
-    #[test]
-    fn new_can_create_not_first() {
-        let src = NodeIndex(42);
-        let dst = NodeIndex(64);
-        let next_incoming = Some(EdgeIndex(3));
-        let next_outgoing = Some(EdgeIndex(102));
-        let mut state = StateManager::default();
-        let edge = EdgeData {
-            src,
-            dst,
-            next_incoming: Some(EdgeIndex(3)),
-            next_outgoing: Some(EdgeIndex(102)),
-            clause: ClauseIndex(0),
-            active: state.manage_boolean(true),
-        };
-        assert_eq!(next_incoming, edge.next_incoming);
-        assert_eq!(next_outgoing, edge.next_outgoing);
+        assert!(state.get_bool(edge.active));
+        
+        let c3 = g.add_clause(d[0], vec![d[1]], &mut state, false, false);
+        g.set_reachability(&mut state);
+        let clause = &g.clauses[c3.0];
+        assert_eq!(d[0], clause.head);
+        assert_eq!(vec![d[1]], clause.body);
+        assert!(state.get_bool(clause.constrained));
+        assert_eq!(0, state.get_usize(clause.number_probabilistic));
+        assert_eq!(Some(EdgeIndex(2)), clause.children);
+        assert_eq!(Some(EdgeIndex(1)), clause.parents);
+        assert!(!state.get_bool(clause.bot_reachable));
+        assert!(state.get_bool(clause.t_reachable));
     }
 }
 
 #[cfg(test)]
-mod test_graph {
+mod test_graph_reachability {
+    
     use crate::core::graph::*;
+    use search_trail::StateManager;
 
     #[test]
-    fn new_create_empty_graph() {
-        let g = Graph::new();
-        assert_eq!(0, g.nodes.len());
-        assert_eq!(0, g.edges.len());
-    }
+    fn set_clause_t_reachable_whole_graph() {
+        let mut g = Graph::default();
+        let mut  state = StateManager::default();
+        for _ in 0..3 {
+            g.add_distribution(&vec![0.3, 0.7], &mut state);
+        }
+        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
+        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
+        g.add_clause(d[3], vec![d[1], p[2]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
+        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
+        
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(!state.get_bool(clause.t_reachable));
+        }
+        
+        g.set_clause_t_reachable(ClauseIndex(0), &mut state);
 
-    #[test]
-    fn add_nodes_increment_index() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        for i in 0..10 {
-            let idx = g.add_node(false, None, None, &mut state);
-            assert_eq!(NodeIndex(i), idx);
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(state.get_bool(clause.t_reachable));
         }
     }
-
+    
     #[test]
-    fn add_edges_increment_index() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        g.add_node(false, None, None, &mut state);
-        g.add_node(false, None, None, &mut state);
-        for i in 0..10 {
-            let idx = g.add_edge(NodeIndex(0), NodeIndex(1), ClauseIndex(0), &mut state);
-            assert_eq!(EdgeIndex(i), idx);
+    fn set_clause_t_reachable_partial_graph() {
+        let mut g = Graph::default();
+        let mut  state = StateManager::default();
+        for _ in 0..3 {
+            g.add_distribution(&vec![0.3, 0.7], &mut state);
         }
-    }
+        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
+        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
+        g.add_clause(d[3], vec![d[0], p[2]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
+        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
 
-    #[test]
-    fn add_multiple_incoming_edges_to_node() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(false, None, None, &mut state);
-        let n3 = g.add_node(false, None, None, &mut state);
-        let e1 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
-        let e2 = g.add_edge(n2, n3, ClauseIndex(0), &mut state);
-
-        let n1_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n1).collect();
-        let n1_incoming_edges: Vec<EdgeIndex> = g.incomings(n1).collect();
-
-        assert_eq!(vec![e1], n1_outgoing_edges);
-        assert_eq!(0, n1_incoming_edges.len());
-
-        let n2_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n2).collect();
-        let n2_incoming_edges: Vec<EdgeIndex> = g.incomings(n2).collect();
-
-        assert_eq!(vec![e2], n2_outgoing_edges);
-        assert_eq!(0, n2_incoming_edges.len());
-
-        let n3_outgoing_edges: Vec<EdgeIndex> = g.outgoings(n3).collect();
-        let n3_incoming_edges: Vec<EdgeIndex> = g.incomings(n3).collect();
-
-        assert_eq!(0, n3_outgoing_edges.len());
-        assert_eq!(vec![e2, e1], n3_incoming_edges);
-    }
-
-    #[test]
-    fn add_multiple_outgoing_edges_to_nodes() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_distribution(&vec![0.2], &mut state)[0];
-        let n3 = g.add_node(false, None, None, &mut state);
-        let n4 = g.add_distribution(&vec![0.3], &mut state)[0];
-
-        let e1 = g.add_edge(n1, n2, ClauseIndex(0), &mut state);
-        let e2 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
-        let e3 = g.add_edge(n1, n4, ClauseIndex(0), &mut state);
-
-        let outgoings: Vec<EdgeIndex> = g.outgoings(n1).collect();
-
-        assert_eq!(vec![e3, e2, e1], outgoings);
-    }
-
-    #[test]
-    fn setting_nodes_values() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        assert!(!g.is_node_bound(n1, &state));
-
-        state.save_state();
-
-        g.set_node(n1, true, &mut state);
-        assert!(g.is_node_bound(n1, &state));
-        assert!(g.nodes[n1.0].value);
-
-        state.restore_state();
-        assert!(!g.is_node_bound(n1, &state));
-    }
-
-    #[test]
-    fn graph_add_distribution() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        assert_eq!(0, g.distributions.len());
-        let weights = vec![0.2, 0.4, 0.1, 0.3];
-        let nodes = g.add_distribution(&weights, &mut state);
-        assert_eq!(
-            vec![NodeIndex(0), NodeIndex(1), NodeIndex(2), NodeIndex(3)],
-            nodes
-        );
-        assert_eq!(1, g.distributions.len());
-        let distribution = g.distributions[0];
-        assert_eq!(NodeIndex(0), distribution.first);
-        assert_eq!(4, distribution.size);
-        assert_eq!(0, state.get_int(distribution.active_edges));
-        assert_eq!(0, state.get_int(distribution.nodes_false));
-    }
-
-    #[test]
-    fn graph_add_multiple_distributions() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let w1 = vec![0.1, 0.3, 0.6];
-        let w2 = vec![0.5, 0.4, 0.05, 0.05];
-        let w3 = vec![0.9, 0.1];
-
-        let n1 = g.add_distribution(&w1, &mut state);
-        assert_eq!(vec![NodeIndex(0), NodeIndex(1), NodeIndex(2)], n1);
-        assert_eq!(1, g.distributions.len());
-        let distribution = g.distributions[0];
-        assert_eq!(n1[0], distribution.first);
-        assert_eq!(3, distribution.size);
-        assert_eq!(0, state.get_int(distribution.active_edges));
-        assert_eq!(0, state.get_int(distribution.nodes_false));
-
-        g.add_node(false, None, None, &mut state);
-        let n2 = g.add_distribution(&w2, &mut state);
-        assert_eq!(
-            vec![NodeIndex(4), NodeIndex(5), NodeIndex(6), NodeIndex(7)],
-            n2
-        );
-        assert_eq!(2, g.distributions.len());
-        let distribution = g.distributions[1];
-        assert_eq!(n2[0], distribution.first);
-        assert_eq!(4, distribution.size);
-        assert_eq!(0, state.get_int(distribution.active_edges));
-        assert_eq!(0, state.get_int(distribution.nodes_false));
-
-        g.add_node(false, None, None, &mut state);
-        g.add_node(false, None, None, &mut state);
-
-        let n3 = g.add_distribution(&w3, &mut state);
-        assert_eq!(vec![NodeIndex(10), NodeIndex(11)], n3);
-        assert_eq!(3, g.distributions.len());
-        let distribution = g.distributions[2];
-        assert_eq!(n3[0], distribution.first);
-        assert_eq!(2, distribution.size);
-        assert_eq!(0, state.get_int(distribution.active_edges));
-        assert_eq!(0, state.get_int(distribution.nodes_false));
-    }
-
-    #[test]
-    fn graph_add_edges_increases_edge_counts() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(false, None, None, &mut state);
-        let n3 = g.add_node(false, None, None, &mut state);
-        let n4 = g.add_node(false, None, None, &mut state);
-
-        g.clauses.push(Clause {
-            first: EdgeIndex(0),
-            size: 4,
-            head: NodeIndex(0),
-            active_edges: state.manage_int(4),
-            active: state.manage_boolean(true),
-        });
-
-        assert_eq!(0, g.node_number_incoming(n1, &state));
-        assert_eq!(0, g.node_number_outgoing(n1, &state));
-        assert_eq!(0, g.node_number_incoming(n2, &state));
-        assert_eq!(0, g.node_number_outgoing(n2, &state));
-        assert_eq!(0, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(0, g.node_number_incoming(n4, &state));
-        assert_eq!(0, g.node_number_outgoing(n4, &state));
-
-        let e1 = g.add_edge(n1, n2, ClauseIndex(0), &mut state);
-        assert_eq!(0, g.node_number_incoming(n1, &state));
-        assert_eq!(1, g.node_number_outgoing(n1, &state));
-        assert_eq!(1, g.node_number_incoming(n2, &state));
-        assert_eq!(0, g.node_number_outgoing(n2, &state));
-        assert_eq!(0, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(0, g.node_number_incoming(n4, &state));
-        assert_eq!(0, g.node_number_outgoing(n4, &state));
-
-        let e2 = g.add_edge(n1, n3, ClauseIndex(0), &mut state);
-        assert_eq!(0, g.node_number_incoming(n1, &state));
-        assert_eq!(2, g.node_number_outgoing(n1, &state));
-        assert_eq!(1, g.node_number_incoming(n2, &state));
-        assert_eq!(0, g.node_number_outgoing(n2, &state));
-        assert_eq!(1, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(0, g.node_number_incoming(n4, &state));
-        assert_eq!(0, g.node_number_outgoing(n4, &state));
-
-        let e3 = g.add_edge(n4, n1, ClauseIndex(0), &mut state);
-        assert_eq!(1, g.node_number_incoming(n1, &state));
-        assert_eq!(2, g.node_number_outgoing(n1, &state));
-        assert_eq!(1, g.node_number_incoming(n2, &state));
-        assert_eq!(0, g.node_number_outgoing(n2, &state));
-        assert_eq!(1, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(0, g.node_number_incoming(n4, &state));
-        assert_eq!(1, g.node_number_outgoing(n4, &state));
-
-        let e4 = g.add_edge(n2, n4, ClauseIndex(0), &mut state);
-        assert_eq!(1, g.node_number_incoming(n1, &state));
-        assert_eq!(2, g.node_number_outgoing(n1, &state));
-        assert_eq!(1, g.node_number_incoming(n2, &state));
-        assert_eq!(1, g.node_number_outgoing(n2, &state));
-        assert_eq!(1, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(1, g.node_number_incoming(n4, &state));
-        assert_eq!(1, g.node_number_outgoing(n4, &state));
-
-        g.deactivate_edge(e1, &mut state);
-        assert_eq!(1, g.node_number_incoming(n1, &state));
-        assert_eq!(1, g.node_number_outgoing(n1, &state));
-        assert_eq!(0, g.node_number_incoming(n2, &state));
-        assert_eq!(1, g.node_number_outgoing(n2, &state));
-        assert_eq!(1, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(1, g.node_number_incoming(n4, &state));
-        assert_eq!(1, g.node_number_outgoing(n4, &state));
-
-        g.deactivate_edge(e2, &mut state);
-        assert_eq!(1, g.node_number_incoming(n1, &state));
-        assert_eq!(0, g.node_number_outgoing(n1, &state));
-        assert_eq!(0, g.node_number_incoming(n2, &state));
-        assert_eq!(1, g.node_number_outgoing(n2, &state));
-        assert_eq!(0, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(1, g.node_number_incoming(n4, &state));
-        assert_eq!(1, g.node_number_outgoing(n4, &state));
-
-        g.deactivate_edge(e3, &mut state);
-        assert_eq!(0, g.node_number_incoming(n1, &state));
-        assert_eq!(0, g.node_number_outgoing(n1, &state));
-        assert_eq!(0, g.node_number_incoming(n2, &state));
-        assert_eq!(1, g.node_number_outgoing(n2, &state));
-        assert_eq!(0, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(1, g.node_number_incoming(n4, &state));
-        assert_eq!(0, g.node_number_outgoing(n4, &state));
-
-        g.deactivate_edge(e4, &mut state);
-        assert_eq!(0, g.node_number_incoming(n1, &state));
-        assert_eq!(0, g.node_number_outgoing(n1, &state));
-        assert_eq!(0, g.node_number_incoming(n2, &state));
-        assert_eq!(0, g.node_number_outgoing(n2, &state));
-        assert_eq!(0, g.node_number_incoming(n3, &state));
-        assert_eq!(0, g.node_number_outgoing(n3, &state));
-        assert_eq!(0, g.node_number_incoming(n4, &state));
-        assert_eq!(0, g.node_number_outgoing(n4, &state));
-    }
-
-    #[test]
-    fn add_clause_correctly_add_edges() {
-        let mut state = StateManager::default();
-        let mut g: Graph = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(false, None, None, &mut state);
-        let n3 = g.add_node(false, None, None, &mut state);
-        let n4 = g.add_node(false, None, None, &mut state);
-
-        // Clause n2 && n3 => n1
-        let c1 = g.add_clause(n1, &vec![n2, n3], &mut state);
-        assert_eq!(ClauseIndex(0), c1);
-        let first = g.clauses[c1.0].first.0;
-        let s = g.clauses[c1.0].size;
-        let sources = vec![n2, n3];
-        for i in first..(first + s) {
-            let edge = &g.edges[i];
-            assert_eq!(sources[i - first], edge.src);
-            assert_eq!(n1, edge.dst);
-            assert_eq!(c1, edge.clause);
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(!state.get_bool(clause.t_reachable));
         }
+        
+        g.set_clause_t_reachable(ClauseIndex(0), &mut state);
 
-        // Clause n3 && n4 => n2
-        let c2 = g.add_clause(n2, &vec![n3, n4], &mut state);
-        assert_eq!(ClauseIndex(1), c2);
-        let first = g.clauses[c2.0].first.0;
-        let s = g.clauses[c2.0].size;
-        let sources = vec![n3, n4];
-        for i in first..(first + s) {
-            let edge = &g.edges[i];
-            assert_eq!(sources[i - first], edge.src);
-            assert_eq!(n2, edge.dst);
-            assert_eq!(c2, edge.clause);
-        }
-    }
-
-    #[test]
-    fn clauses_are_correctly_collected() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n1 = g.add_node(false, None, None, &mut state);
-        let n2 = g.add_node(false, None, None, &mut state);
-        let n3 = g.add_node(false, None, None, &mut state);
-        let n4 = g.add_node(false, None, None, &mut state);
-
-        let empty: Vec<ClauseIndex> = vec![];
-        // n1 && n2 => n3
-        let c1 = g.add_clause(n3, &vec![n1, n2], &mut state);
-        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
-        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
-        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
-        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
-        assert_eq!(vec![c1], n1_clauses);
-        assert_eq!(vec![c1], n2_clauses);
-        assert_eq!(vec![c1], n3_clauses);
-        assert_eq!(empty, n4_clauses);
-
-        // n2 && n4 => n1
-        let c2 = g.add_clause(n1, &vec![n2, n4], &mut state);
-        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
-        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
-        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
-        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
-        assert_eq!(vec![c2, c1], n1_clauses);
-        assert_eq!(vec![c2, c1], n2_clauses);
-        assert_eq!(vec![c1], n3_clauses);
-        assert_eq!(vec![c2], n4_clauses);
-
-        // n3 && n1 => n2
-        let c3 = g.add_clause(n2, &vec![n3, n1], &mut state);
-        let n1_clauses: Vec<ClauseIndex> = g.node_clauses(n1).collect();
-        let n2_clauses: Vec<ClauseIndex> = g.node_clauses(n2).collect();
-        let n3_clauses: Vec<ClauseIndex> = g.node_clauses(n3).collect();
-        let n4_clauses: Vec<ClauseIndex> = g.node_clauses(n4).collect();
-        assert_eq!(vec![c2, c3, c1], n1_clauses);
-        assert_eq!(vec![c3, c2, c1], n2_clauses);
-        assert_eq!(vec![c1, c3], n3_clauses);
-        assert_eq!(vec![c2], n4_clauses);
-    }
-}
-
-#[cfg(test)]
-mod test_graph_iterators {
-
-    use crate::core::graph::*;
-
-    #[test]
-    fn nodes_iterator() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let nodes: Vec<NodeIndex> = (0..10)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect();
-        let iterated: Vec<NodeIndex> = g.nodes_iter().collect();
-        assert_eq!(nodes, iterated);
-    }
-
-    #[test]
-    fn distributions_iterator() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let distributions: Vec<Vec<NodeIndex>> = (0..5)
-            .map(|_| g.add_distribution(&vec![0.3, 0.5, 0.2], &mut state))
-            .collect();
-        for d in 0..5 {
-            let iterated: Vec<NodeIndex> = g.distribution_iter(DistributionIndex(d)).collect();
-            assert_eq!(distributions[d], iterated);
-            for n in 0..3 {
-                let iterated_from_nodes: Vec<NodeIndex> =
-                    g.nodes_distribution_iter(NodeIndex(d * 3 + n)).collect();
-                assert_eq!(distributions[d], iterated_from_nodes);
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            if i != 2 && i != 4 {
+                assert!(state.get_bool(clause.t_reachable));
+            } else {
+                assert!(!state.get_bool(clause.t_reachable));
             }
         }
     }
+    
+    #[test]
+    fn clause_t_reachable_start_top() {
+        let mut g = Graph::default();
+        let mut  state = StateManager::default();
+        for _ in 0..3 {
+            g.add_distribution(&vec![0.3, 0.7], &mut state);
+        }
+        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        g.add_clause(d[1], vec![p[0]], &mut state, false, false);
+        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
+        g.add_clause(d[3], vec![d[2], p[2]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
+        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
+        g.set_reachability(&mut state);
+
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(state.get_bool(clause.t_reachable));
+        }
+    }
 
     #[test]
-    fn clause_iterator() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let n: Vec<NodeIndex> = (0..5)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect();
-        g.add_clause(n[0], &vec![n[1], n[2]], &mut state);
-        g.add_clause(n[1], &vec![n[3]], &mut state);
-        g.add_clause(n[3], &vec![n[4]], &mut state);
+    fn clause_t_reachable_start_bot() {
+        let mut g = Graph::default();
+        let mut  state = StateManager::default();
+        for _ in 0..3 {
+            g.add_distribution(&vec![0.3, 0.7], &mut state);
+        }
+        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
+        g.add_clause(d[3], vec![d[2], p[2]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
+        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
+        g.add_clause(d[1], vec![p[0]], &mut state, false, false);
+        g.set_reachability(&mut state);
 
-        let clauses: Vec<Vec<ClauseIndex>> = (0..5)
-            .map(|i| g.node_clauses(NodeIndex(i)).collect())
-            .collect();
-        assert_eq!(vec![ClauseIndex(0)], clauses[0]);
-        assert_eq!(vec![ClauseIndex(1), ClauseIndex(0)], clauses[1]);
-        assert_eq!(vec![ClauseIndex(0)], clauses[2]);
-        assert_eq!(vec![ClauseIndex(2), ClauseIndex(1)], clauses[3]);
-        assert_eq!(vec![ClauseIndex(2)], clauses[4]);
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(state.get_bool(clause.t_reachable));
+        }
+    }
+    
+    #[test]
+    fn clause_bot_reachable() {
+        let mut g = Graph::default();
+        let mut  state = StateManager::default();
+        for _ in 0..3 {
+            g.add_distribution(&vec![0.3, 0.7], &mut state);
+        }
+        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
+        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
+        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
+        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
+        g.add_clause(d[3], vec![d[0], p[2]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
+        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
+        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
+
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(!state.get_bool(clause.bot_reachable));
+        }
+        
+        g.set_clause_bot_reachable(ClauseIndex(5), &mut state);
+
+        for i in 0..6 {
+            let clause = &g.clauses[i];
+            assert!(state.get_bool(clause.bot_reachable));
+        }
     }
 }
