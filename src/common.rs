@@ -13,10 +13,6 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-use peak_alloc::PeakAlloc;
-
-#[global_allocator]
-pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 macro_rules! f128 {
     ($v:expr) => {

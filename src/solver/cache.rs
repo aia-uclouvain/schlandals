@@ -19,7 +19,6 @@ use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::{Graph, VariableIndex, ClauseIndex};
 use rug::Float;
-
 pub struct SubProblem {
     start: usize,
     end: usize,
@@ -35,6 +34,7 @@ pub struct Cache {
     bits: Vec<u64>,
     /// Index to insert the next subproblem
     current: usize,
+    init_size: usize,
     /// Maximum index in the memory arena
     limit: usize,
     hash_idx: FxHashMap<u64, Vec<SubProblem>>,
@@ -45,13 +45,15 @@ impl Cache {
     pub fn new(max_cache_size: u64, g: &Graph) -> Self {
         // Since the cache size is given in MB, we can store max_cache_size / 4
         // words of 64 bits.
-        let bits: Vec<u64> = vec![0;10000];
+        let init_size = 1_000_000_000 / (WORD_SIZE/8);
+        let limit = ((max_cache_size*1_000_000) / (WORD_SIZE/8) as u64) as usize;
+        let bits: Vec<u64> = vec![0;init_size];
         let clause_offset = (g.number_clauses() as f64 / WORD_SIZE as f64).ceil() as usize;
-        let limit = (max_cache_size as f64 / WORD_SIZE as f64).ceil() as usize;
         Self {
             clause_offset,
             bits,
             current: 0,
+            init_size,
             limit,
             hash_idx: FxHashMap::default(),
         }
@@ -87,7 +89,7 @@ impl Cache {
     fn resize(&mut self) -> usize {
         let cur_size = self.bits.len();
         if 2*cur_size >= self.limit {
-            self.bits = vec![0;10000];
+            self.bits = vec![0;self.init_size];
             0
         } else {
             self.bits.resize(2*cur_size, 0);
