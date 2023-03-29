@@ -158,6 +158,11 @@ impl FTReachablePropagator {
                 let distribution = g.get_variable_distribution(variable).unwrap();
                 if value {
                     propagation_prob *= g.get_variable_weight(variable).unwrap();
+                    if propagation_prob == 0.0 {
+                        self.propagation_stack.clear();
+                        self.unconstrained_clauses.clear();
+                        return PropagationResult::Ok(propagation_prob);
+                    }
                     for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {
                         match g.get_variable_value(v, state) {
                             None => self.add_to_propagation_stack(v, false),

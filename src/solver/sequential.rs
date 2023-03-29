@@ -130,9 +130,11 @@ where
                     Err(_) => {
                     }
                     Ok(v) => {
-                        let mut child_sol = self._solve(component);
-                        child_sol *= v;
-                        node_sol += &child_sol;
+                        if v != 0.0 {
+                            let mut child_sol = self._solve(component);
+                            child_sol *= v;
+                            node_sol += &child_sol;
+                        }
                     }
                 };
                 self.state.restore_state();
