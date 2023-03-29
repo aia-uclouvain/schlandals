@@ -24,6 +24,7 @@ jobs:
     - name: Run cargo-tarpaulin
       uses: actions-rs/tarpaulin@v0.1
       with:
+        version: '0.15.0'
         args: --ignore-tests --engine llvm --exclude-files lib.rs main.rs mod.rs
     - name: Upload coverage reports to Codecov with GitHub Action
       uses: codecov/codecov-action@v3
