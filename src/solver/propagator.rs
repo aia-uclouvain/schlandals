@@ -159,8 +159,15 @@ impl FTReachablePropagator {
                 if value {
                     propagation_prob *= g.get_variable_weight(variable).unwrap();
                     for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {
-                        // TODO: opti, check if variable is bound before adding to propagation stack
-                        self.add_to_propagation_stack(v, false);
+                        match g.get_variable_value(v, state) {
+                            None => self.add_to_propagation_stack(v, false),
+                            Some(v) => {
+                                if v {
+                                    return PropagationResult::Err(Unsat);
+                                }
+                            }
+                        };
+                        
                     }
                 } else if g.distribution_one_left(distribution, state) {
                     if let Some(v) = g.distribution_variable_iter(distribution).find(|v| !g.is_variable_bound(*v, state)) {
@@ -172,96 +179,6 @@ impl FTReachablePropagator {
         propagation_prob *= self.deactivate_clauses(g, state)?;
         PropagationResult::Ok(propagation_prob)
     }
-
-    /*
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
-        while !self.propagation_stack.is_empty() {
-            g.set_variable(variable, value, state);
-            let is_p = g.is_variable_probabilistic(variable);
-            // For probabilistic variables add the probability to the propagation prob.
-            // If the probability goes down to 0 then it can never be higher than that, return
-            // Actually do the propagations.
-            // If value is T then
-            //      - Remove the variable from the body of every active clause in which it appears
-            //      - Deactivate all the clauses in which it is the head
-            // If value is F then
-            //      - Deactive all the clauses in which it is in the body
-            //      - For all clause in which it is the head, check if the body is of length 1.
-            //        If so, set the remaining var to F
-            if value {
-                for clause in g.variable_clause_body_iter(variable) {
-                    g.clause_remove_variable_hash(clause, variable, state);
-                    let head = g.get_clause_head(clause);
-                    let head_false = g.is_variable_bound(head, state) && !g.get_variable_value(head);
-                    let head_true = g.is_variable_bound(variable, state) && g.get_variable_value(head);
-                    let body_remaining = if is_p {
-                        let distribution = g.get_variable_distribution(variable).unwrap();
-                        if g.decrement_distribution_clause_counter(distribution, state) == 0 {
-                            propagation_prob *= self.get_simplified_distribution_prob(g, distribution, state);
-                            if propagation_prob == 0.0 {
-                                return PropagationResult::Ok(propagation_prob);
-                            }
-                        }
-                        g.clause_decrement_number_probabilistic(clause, state)
-                    } else {
-                        g.clause_decrement_number_deterministic(clause, state)
-                    };
-                    if body_remaining == 0 && head_true {
-                        g.deactivate_clause(clause, state);
-                    } else if body_remaining == 1 && head_false {
-                        let v = g.clause_body_iter(clause).filter(|v| !g.is_variable_bound(*v, state)).next().unwrap();
-                        self.propagation_stack.push((v, false));
-                        g.deactivate_clause(clause, state);
-                    } else if body_remaining == 0 {
-                        self.propagation_stack.push((head, true));
-                        g.deactivate_clause(clause, state);
-                    }
-                }
-                
-                for clause in g.variable_clause_head_iter(variable).collect::<Vec<ClauseIndex>>() {
-                    propagation_prob *= self.deactivate_clause(g, clause, state)?;
-                }
-            } else {
-                for clause in g.variable_clause_head_iter(variable) {
-                    if !g.is_clause_f_reachable(clause, state) {
-                        g.set_clause_bot_reachable(clause, state);
-                    }
-                    if g.clause_number_unassigned(clause, state) == 1 {
-                        let v = g.clause_body_iter(clause).filter(|v| !g.is_variable_bound(*v, state)).next().unwrap();
-                        self.propagation_stack.push((v, false));
-                    }
-                }
-                for clause in g.variable_clause_body_iter(variable).collect::<Vec<ClauseIndex>>() {
-                    propagation_prob *= self.deactivate_clause(g, clause, state)?;
-                }
-            }
-            if is_p {
-                let distribution = g.get_variable_distribution(variable).unwrap();
-                if value {
-                    propagation_prob *= g.get_variable_weight(variable).unwrap();
-                    if propagation_prob == 0.0 {
-                        return PropagationResult::Ok(propagation_prob);
-                    }
-                    for other in g.distribution_variable_iter(distribution).filter(|v| *v != variable) {
-                        if !g.is_variable_bound(other, state) {
-                            self.add_to_propagation_stack(other, false);
-                        } else if g.get_variable_value(other) {
-                            return PropagationResult::Err(Unsat);
-                        }
-                    }
-                } else {
-                    if g.distribution_one_left(distribution, state) {
-                        match g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).next() {
-                            Some(v) => self.add_to_propagation_stack(v, true),
-                            None => (),
-                        }
-                    }
-                }
-            }
-        }
-        PropagationResult::Ok(propagation_prob)
-    }
-    */
 }
 
 /*
