@@ -27,7 +27,7 @@ pub type PropagationResult = Result<Float, Unsat>;
 #[derive(Default)]
 pub struct FTReachablePropagator {
     propagation_stack: Vec<(VariableIndex, bool)>,
-    unconstrained_clauses: Vec<ClauseIndex>,
+    pub unconstrained_clauses: Vec<ClauseIndex>,
 }
 
 impl FTReachablePropagator {
@@ -41,33 +41,30 @@ impl FTReachablePropagator {
         self.propagate(g, state)
     }
     
-    fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Graph, state: &mut StateManager) {
+    pub fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Graph, state: &mut StateManager) {
         if g.is_clause_constrained(clause, state) {
             g.set_clause_unconstrained(clause, state);
+            debug_assert!(!self.unconstrained_clauses.contains(&clause));
             self.unconstrained_clauses.push(clause);
         }
     }
     
-    pub fn propagate_unreachable_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
-        for clause in g.clause_iter() {
-            if !g.is_clause_f_reachable(clause, state) || !g.is_clause_t_reachable(clause, state) {
-                self.add_unconstrained_clause(clause, g, state);
-            }
-        }
-        self.propagate(g, state)
-    }
-    
     fn get_simplified_distribution_prob(&self, g: &Graph, distribution: DistributionIndex, state: &StateManager) -> Float {
-        let mut p = f128!(0.0);
-        for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
-            p += w;
+        if g.distribution_number_false(distribution, state) == 0 {
+            f128!(1.0)
+        } else {
+            let mut p = f128!(0.0);
+            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+                p += w;
+            }
+            p
         }
-        p
     }
     
-    fn deactivate_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+    pub fn propagate_unconstrained_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
         let mut p = f128!(1.0);
         while let Some(clause) = self.unconstrained_clauses.pop() {
+            debug_assert!(!self.unconstrained_clauses.contains(&clause));
             for variable in g.clause_body_iter(clause) {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
@@ -76,37 +73,24 @@ impl FTReachablePropagator {
                     }
                 }
             }
-            // The clause is no more f-reachable, need to update the parents if necessary
-            // Since the iterator on the edges borrow the graph, we must collect it into a vec.
-            // In practice this update of t and f reachability should not happen at every node of the search, so the cost is
-            // limited
-            for edge in g.parents_clause_iter(clause) {
-                let parent = g.get_edge_source(edge);
-                let head = g.get_clause_head(parent);
-                let head_value = g.get_variable_value(head, state);
-                let head_false = head_value.is_some() && !head_value.unwrap();
-                if !head_false && g.is_clause_constrained(parent, state) && g.clause_decrement_active_children(parent, state) == 0 {
-                    self.add_unconstrained_clause(parent, g, state);
-                }
-            }
-            // Same for t-reachability
-            for edge in g.children_clause_iter(clause) {
-                let child = g.get_edge_destination(edge);
-                if g.is_clause_constrained(child, state) && g.clause_decrement_active_parents(child, state) == 0 && g.clause_number_deterministic(child, state) != 0 {
-                    self.add_unconstrained_clause(child, g, state);
-                }
-            }
         }
         PropagationResult::Ok(p)
     }
+    
+    fn clear(&mut self) {
+        self.propagation_stack.clear();
+        self.unconstrained_clauses.clear();
+    }
 
     pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+        debug_assert!(self.unconstrained_clauses.is_empty());
         let mut propagation_prob = f128!(1.0);
         while let Some((variable, value)) = self.propagation_stack.pop() {
             if let Some(v) = g.get_variable_value(variable, state) {
                 if v == value {
                     continue;
                 }
+                self.clear();
                 return PropagationResult::Err(Unsat);
             }
             g.set_variable(variable, value, state);
@@ -130,6 +114,7 @@ impl FTReachablePropagator {
                                 None => self.add_to_propagation_stack(head, true),
                                 Some(v) => {
                                     debug_assert!(!v);
+                                    self.clear();
                                     return PropagationResult::Err(Unsat);
                                 }
                             }
@@ -168,6 +153,7 @@ impl FTReachablePropagator {
                             None => self.add_to_propagation_stack(v, false),
                             Some(v) => {
                                 if v {
+                                    self.clear();
                                     return PropagationResult::Err(Unsat);
                                 }
                             }
@@ -181,7 +167,7 @@ impl FTReachablePropagator {
                 }
             }
         }
-        propagation_prob *= self.deactivate_clauses(g, state)?;
+        propagation_prob *= self.propagate_unconstrained_clauses(g, state)?;
         PropagationResult::Ok(propagation_prob)
     }
 }

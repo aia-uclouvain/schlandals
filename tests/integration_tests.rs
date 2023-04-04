@@ -26,7 +26,6 @@ macro_rules! integration_tests {
                 let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
                 let sol = solver.solve().unwrap();
                 let expected = Float::with_val(113, $value);
-                println!("Expected {:}, actual {:?}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);
             }
         )*

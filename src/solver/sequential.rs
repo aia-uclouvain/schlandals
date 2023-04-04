@@ -22,7 +22,7 @@ use crate::core::graph::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::FTReachablePropagator;
 use crate::solver::statistics::Statistics;
-use crate::solver::cache::{Cache};
+use crate::solver::cache::Cache;
 
 use rug::{Float};
 
@@ -157,8 +157,14 @@ where
         // First we detect the sub-components in the graph
         if self
             .component_extractor
-            .detect_components(&self.graph, &mut self.state, component)
+            .detect_components(&self.graph, &mut self.state, component, &mut self.propagator)
         {
+            match self.propagator.propagate_unconstrained_clauses(&mut self.graph, &mut self.state) {
+                Ok(v) => solution *= v,
+                Err(_) => {
+                    panic!("Propagating unconstrained clauses raised UNSAT, should not happen");
+                }
+            };
             self.statistics.and_node();
             self.statistics
                 .decomposition(self.component_extractor.number_components(&self.state));
@@ -168,6 +174,13 @@ where
                     break;
                 }
             }
+        } else {
+            match self.propagator.propagate_unconstrained_clauses(&mut self.graph, &mut self.state) {
+                Ok(v) => solution *= v,
+                Err(_) => {
+                    panic!("Propagating unconstrained clauses raised UNSAT, should not happen");
+                }
+            };
         }
         self.state.restore_state();
         solution
@@ -180,7 +193,7 @@ where
     /// nodes assigned to true. The solution of the root node is the sum of the weights of such
     /// assigments.
     pub fn solve(&mut self) -> ProblemSolution {
-        match self.propagator.propagate_unreachable_clauses(&mut self.graph, &mut self.state) {
+        match self.propagator.propagate(&mut self.graph, &mut self.state) {
             Err(_) => ProblemSolution::Err(Unsat),
             Ok(p) => {
                 let mut solution = self._solve(ComponentIndex(0));

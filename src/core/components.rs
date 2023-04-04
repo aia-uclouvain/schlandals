@@ -31,9 +31,10 @@
 //! returns a single component with every non-assigned node in the graph). This extractor should
 //! only be used for debugging purposes.
 
-use super::graph::{Graph, ClauseIndex};
-use search_trail::{StateManager, ReversibleUsize, UsizeManager};
+use super::graph::{ClauseIndex, Graph};
+use crate::{solver::propagator::FTReachablePropagator};
 use nalgebra::DMatrix;
+use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -162,28 +163,46 @@ impl ComponentExtractor {
                 self.positions[moved_node.0] = current_pos;
             }
             *comp_size += 1;
-            
+
             if g.clause_has_probabilistic(node, state) {
                 for variable in g.clause_body_iter(node) {
-                    if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
+                    if g.is_variable_probabilistic(variable)
+                        && !g.is_variable_bound(variable, state)
+                    {
                         let d = g.get_variable_distribution(variable).unwrap();
                         for v in g.distribution_variable_iter(d) {
                             if !g.is_variable_bound(v, state) {
                                 for c in g.variable_clause_body_iter(v) {
-                                    self.explore_component(g, c, comp_start, comp_size, state, laplacians, laplacian_start);
+                                    self.explore_component(
+                                        g,
+                                        c,
+                                        comp_start,
+                                        comp_size,
+                                        state,
+                                        laplacians,
+                                        laplacian_start,
+                                    );
                                 }
                             }
                         }
                     }
                 }
             }
-
+            
             // Recursively explore the nodes in the connected components
             for parent_edge in g.parents_clause_iter(node) {
                 if g.is_edge_active(parent_edge, state) {
                     let parent = g.get_edge_source(parent_edge);
-                    self.explore_component(g, parent, comp_start, comp_size, state, laplacians, laplacian_start);
-                    if g.is_clause_constrained(node, state) && g.is_clause_constrained(parent, state) {
+                    if g.is_clause_constrained(parent, state) {
+                        self.explore_component(
+                            g,
+                            parent,
+                            comp_start,
+                            comp_size,
+                            state,
+                            laplacians,
+                            laplacian_start,
+                        );
                         let src_pos = self.positions[parent.0];
                         let dst_pos = self.positions[node.0];
                         laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
@@ -197,8 +216,16 @@ impl ComponentExtractor {
             for child_edge in g.children_clause_iter(node) {
                 if g.is_edge_active(child_edge, state) {
                     let child = g.get_edge_destination(child_edge);
-                    self.explore_component(g, child, comp_start, comp_size, state, laplacians, laplacian_start);
-                    if g.is_clause_constrained(node, state) && g.is_clause_constrained(child, state) {
+                    if g.is_clause_constrained(child, state) {
+                        self.explore_component(
+                            g,
+                            child,
+                            comp_start,
+                            comp_size,
+                            state,
+                            laplacians,
+                            laplacian_start,
+                        );
                         let src_pos = self.positions[node.0];
                         let dst_pos = self.positions[child.0];
                         laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
@@ -210,6 +237,49 @@ impl ComponentExtractor {
             }
         }
     }
+    
+    fn set_t_reachability(&self, g: &Graph, state: &StateManager, t_reachable: &mut Vec<bool>, pos: usize, super_comp_start: usize, super_comp_end: usize) {
+        if super_comp_start <= pos && pos < super_comp_end && !t_reachable[pos - super_comp_start] {
+            let clause = self.nodes[pos];
+            t_reachable[pos - super_comp_start] = true;
+            for child_edge in g.children_clause_iter(clause) {
+                let child = g.get_edge_destination(child_edge);
+                if g.is_clause_constrained(child, state) {
+                    let new_pos = self.positions[child.0];
+                    self.set_t_reachability(g, state, t_reachable, new_pos, super_comp_start, super_comp_end);
+                }
+            }
+        }
+    }
+
+    fn set_f_reachability(&self, g: &Graph, state: &StateManager, f_reachable: &mut Vec<bool>, pos: usize, super_comp_start: usize, super_comp_end: usize) {
+        if super_comp_start <= pos && pos < super_comp_end && !f_reachable[pos - super_comp_start] {
+            f_reachable[pos - super_comp_start] = true;
+            let clause = self.nodes[pos];
+            for parent_edge in g.parents_clause_iter(clause) {
+                let parent = g.get_edge_source(parent_edge);
+                if g.is_clause_constrained(parent, state) {
+                    let next_pos = self.positions[parent.0];
+                    self.set_f_reachability(g, state, f_reachable, next_pos, super_comp_start, super_comp_end);
+                }
+            }
+        }
+    }
+    
+    fn set_reachability(&self, g: &Graph, state: &StateManager, t_reachable: &mut Vec<bool>, f_reachable: &mut Vec<bool>, super_comp_start: usize, super_comp_end: usize) {
+        for i in 0..t_reachable.len() {
+            let clause = self.nodes[super_comp_start + i];
+            if g.clause_number_deterministic(clause, state) == 0 {
+                self.set_t_reachability(g, state, t_reachable, super_comp_start + i, super_comp_start, super_comp_end);
+            }
+            if let Some(b) = g.get_variable_value(g.get_clause_head(clause), state) {
+                if !b {
+                    self.set_f_reachability(g, state, f_reachable, super_comp_start + i, super_comp_start, super_comp_end);
+                }
+            }
+        }
+    }
+
 
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
@@ -219,7 +289,9 @@ impl ComponentExtractor {
         g: &Graph,
         state: &mut StateManager,
         component: ComponentIndex,
+        propagator: &mut FTReachablePropagator,
     ) -> bool {
+        debug_assert!(propagator.unconstrained_clauses.is_empty());
         let c = self.components[component.0];
         for node in (c.start..(c.start + c.size)).map(ClauseIndex) {
             self.fiedler_score[node.0] = 0.0;
@@ -236,6 +308,15 @@ impl ComponentExtractor {
         let mut laplacians: Vec<Vec<f64>> = (0..super_comp.size)
             .map(|_| (0..super_comp.size).map(|_| 0.0).collect())
             .collect();
+        let mut is_t_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
+        let mut is_f_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
+        self.set_reachability(g, state,  &mut is_t_reachable, &mut is_f_reachable, super_comp.start, super_comp.start + super_comp.size);
+        for i in 0..super_comp.size {
+            let clause = self.nodes[super_comp.start + i];
+            if !is_t_reachable[i] || !is_f_reachable[i] {
+                propagator.add_unconstrained_clause(clause, g, state);
+            }
+        }
         // We iterate over all the nodes in the component
         while start < end {
             let node = self.nodes[start];
@@ -251,10 +332,7 @@ impl ComponentExtractor {
                     &mut laplacians,
                     super_comp.start,
                 );
-                self.components.push(Component {
-                    start,
-                    size,
-                });
+                self.components.push(Component { start, size });
                 start += size;
             } else {
                 start += 1;
@@ -271,7 +349,8 @@ impl ComponentExtractor {
                 let size = comp.size;
                 // Extracts the laplacian matrix corresponding to this component
                 let sub_lp = DMatrix::from_fn(size, size, |r, c| {
-                    laplacians[(comp.start - super_comp.start) + r][(comp.start - super_comp.start) + c]
+                    laplacians[(comp.start - super_comp.start) + r]
+                        [(comp.start - super_comp.start) + c]
                 });
                 let decomp = sub_lp.hermitian_part().symmetric_eigen();
                 // Finds the fiedler vectors. This is the eigenvector associated with the second
@@ -311,7 +390,10 @@ impl ComponentExtractor {
     }
     
     /// Returns an iterator on the nodes of the given component
-    pub fn component_iter(&self, component: ComponentIndex) -> impl Iterator<Item = ClauseIndex> + '_ {
+    pub fn component_iter(
+        &self,
+        component: ComponentIndex,
+    ) -> impl Iterator<Item = ClauseIndex> + '_ {
         let start = self.components[component.0].start;
         let end = start + self.components[component.0].size;
         self.nodes[start..end].iter().copied()
@@ -342,17 +424,15 @@ impl NoComponentExtractor {
     pub fn new(g: &Graph) -> Self {
         let mut components: Vec<Vec<ClauseIndex>> = vec![];
         let nodes = g.clause_iter().collect();
-        components.push(nodes);
-        Self {
-            components,
-        }
+    components.push(nodes);
+        Self { components }
     }
 
     fn detect_components(
         &mut self,
         g: &Graph,
         state: &mut StateManager,
-        _component: ComponentIndex,
+    _component: ComponentIndex,
     ) {
         let mut nodes: Vec<ClauseIndex> = vec![];
         for n in g.clause_iter() {
@@ -383,8 +463,7 @@ impl NoComponentExtractor {
     }
 }
 
-
-/* 
+/*
 #[cfg(test)]
 mod test_dfs_component {
     use super::{ComponentExtractor, ComponentIndex};

@@ -119,14 +119,6 @@ pub struct Clause {
     pub children: Option<EdgeIndex>,
     /// Link to the first parent in the graph of clauses
     pub parents: Option<EdgeIndex>,
-    /// Is the clause reachable from a _|_
-    pub bot_reachable: ReversibleBool,
-    /// Is the clause reachable from a T
-    pub t_reachable: ReversibleBool,
-    /// Number of active parents
-    pub number_active_parents: ReversibleUsize,
-    /// Number of active children
-    pub number_active_children: ReversibleUsize,
 }
 
 /// Data structure that actually holds the data of an edge in the graph
@@ -256,14 +248,10 @@ impl Graph {
         head: VariableIndex,
         body: Vec<VariableIndex>,
         state: &mut StateManager,
-        body_t: bool,
-        is_head_f: bool,
     ) -> ClauseIndex {
         let cid = ClauseIndex(self.clauses.len());
         let number_probabilistic = body.iter().copied().filter(|v| self.is_variable_probabilistic(*v)).count();
         let number_deterministic = body.len() - number_probabilistic;
-        let t_reachable = body_t || number_probabilistic == body.len();
-        let f_reachable = is_head_f;
         self.clauses.push(Clause {
             head,
             body: body.clone(),
@@ -272,10 +260,6 @@ impl Graph {
             number_deterministic: state.manage_usize(number_deterministic),
             children: None,
             parents: None,
-            bot_reachable: state.manage_bool(f_reachable),
-            t_reachable: state.manage_bool(t_reachable),
-            number_active_parents: state.manage_usize(0),
-            number_active_children: state.manage_usize(0)
         });
         state.increment_usize(self.variables[head.0].number_active_clause);
         for n in body {
@@ -306,8 +290,6 @@ impl Graph {
         dst: ClauseIndex,
         state: &mut StateManager,
     ) -> EdgeIndex {
-        state.increment_usize(self.clauses[src.0].number_active_children);
-        state.increment_usize(self.clauses[dst.0].number_active_parents);
         let source_outgoing = self.clauses[src.0].children;
         let dest_incoming = self.clauses[dst.0].parents;
         let edge = Edge {
@@ -325,51 +307,6 @@ impl Graph {
     }
     
     // --- GRAPH MODIFICATIONS --- //
-    
-    pub fn set_reachability(&mut self, state: &mut StateManager) {
-        for clause in self.clause_iter() {
-            if self.is_clause_t_reachable(clause, state) {
-                self.set_clause_t_reachable(clause, state);
-            }
-            if self.is_clause_f_reachable(clause, state) {
-                self.set_clause_bot_reachable(clause, state);
-            }
-        }
-    }
-
-    /// Sets the clause to be t-reachable. A clause is t-reachable if one of the two
-    /// following conditions is met:
-    ///     1. It only has probabilistic nodes in its implicant
-    ///     2. One of its parent is t-reachable
-    /// the method recursively assign all the non t-reachable children to be t-reachable
-    pub fn set_clause_t_reachable(&self, clause: ClauseIndex, state: &mut StateManager) {
-        state.set_bool(self.clauses[clause.0].t_reachable, true);
-        for edge in self.children_clause_iter(clause) {
-            if self.is_edge_active(edge, state) {
-                let child = self.get_edge_destination(edge);
-                if !state.get_bool(self.clauses[child.0].t_reachable) {
-                    self.set_clause_t_reachable(child, state);
-                }
-            }
-        }
-    }
-    
-    /// Sets the clause to be bot-reachable. A clause is bot-reachable if one of the two
-    /// following conditions is met
-    ///     1. Its head is set to false
-    ///     2. One of its descendant is bot-reachable
-    /// The method recursively assign all the non bot-reachable parent to be bot-reachable
-    pub fn set_clause_bot_reachable(&self, clause: ClauseIndex, state: &mut StateManager) {
-        state.set_bool(self.clauses[clause.0].bot_reachable, true);
-        for edge in self.parents_clause_iter(clause) {
-            if self.is_edge_active(edge, state) {
-                let parent = self.get_edge_source(edge);
-                if !state.get_bool(self.clauses[parent.0].bot_reachable) {
-                    self.set_clause_bot_reachable(parent, state);
-                }
-            }
-        }
-    }
     
     /// Sets a variable to true or false.
     ///     - If true, it is "removed" from the implicant of all the clauses in which it appears.
@@ -401,14 +338,6 @@ impl Graph {
     pub fn clause_decrement_number_deterministic(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
         let remaining = state.get_usize(self.clauses[clause.0].number_probabilistic);
         remaining + state.decrement_usize(self.clauses[clause.0].number_deterministic)
-    }
-    
-    pub fn clause_decrement_active_parents(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.clauses[clause.0].number_active_parents)
-    }
-
-    pub fn clause_decrement_active_children(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.clauses[clause.0].number_active_children)
     }
     
     // --- QUERIES --- //
@@ -448,16 +377,6 @@ impl Graph {
         self.clause_number_probabilistic(clause, state) != 0
     }
     
-    /// Returns true iff the clause is t-reachable
-    pub fn is_clause_t_reachable(&self, clause: ClauseIndex, state: &StateManager) -> bool {
-        state.get_bool(self.clauses[clause.0].t_reachable)
-    }
-    
-    /// Returns true iff the clause if f-reachable
-    pub fn is_clause_f_reachable(&self, clause: ClauseIndex, state: &StateManager) -> bool {
-        state.get_bool(self.clauses[clause.0].bot_reachable)
-    }
-    
     /// Returns the number of unassigned variable in the body of a clause
     pub fn clause_number_unassigned(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         state.get_usize(self.clauses[clause.0].number_deterministic) + state.get_usize(self.clauses[clause.0].number_probabilistic)
@@ -471,6 +390,11 @@ impl Graph {
     /// Returns true if there are only one variable unassigned in the distribution, and every other is F
     pub fn distribution_one_left(&self, distribution: DistributionIndex, state: &StateManager) -> bool {
         self.distributions[distribution.0].size - state.get_usize(self.distributions[distribution.0].number_false) == 1
+    }
+    
+    /// Returns the number of false in the distribution
+    pub fn distribution_number_false(&self, distribution: DistributionIndex, state: &StateManager) -> usize {
+        state.get_usize(self.distributions[distribution.0].number_false)
     }
     
     // --- GETTERS --- //
@@ -689,8 +613,7 @@ mod test_graph_creation {
         let _ds = (0..3).map(|_| g.add_distribution(&vec![0.4], &mut state)).collect::<Vec<Vec<VariableIndex>>>();
         let p = (0..3).map(VariableIndex).collect::<Vec<VariableIndex>>();
         let d = (0..3).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        let c1 = g.add_clause(d[0], vec![p[0], p[1]], &mut state, false, false);
-        g.set_reachability(&mut state);
+        let c1 = g.add_clause(d[0], vec![p[0], p[1]], &mut state);
         let clause = &g.clauses[c1.0];
         assert_eq!(d[0], clause.head);
         assert_eq!(vec![p[0], p[1]], clause.body);
@@ -698,11 +621,8 @@ mod test_graph_creation {
         assert_eq!(2, state.get_usize(clause.number_probabilistic));
         assert_eq!(None, clause.children);
         assert_eq!(None, clause.parents);
-        assert!(!state.get_bool(clause.bot_reachable));
-        assert!(state.get_bool(clause.t_reachable));
         
-        let c2 = g.add_clause(d[1], vec![d[0], p[2]], &mut state, false, false);
-        g.set_reachability(&mut state);
+        let c2 = g.add_clause(d[1], vec![d[0], p[2]], &mut state);
         let clause = &g.clauses[c2.0];
         assert_eq!(d[1], clause.head);
         assert_eq!(vec![d[0], p[2]], clause.body);
@@ -710,8 +630,6 @@ mod test_graph_creation {
         assert_eq!(1, state.get_usize(clause.number_probabilistic));
         assert_eq!(None, clause.children);
         assert_eq!(Some(EdgeIndex(0)), clause.parents);
-        assert!(!state.get_bool(clause.bot_reachable));
-        assert!(state.get_bool(clause.t_reachable));
         
         let edge = g.edges[0];
         assert_eq!(ClauseIndex(0), edge.src);
@@ -720,8 +638,7 @@ mod test_graph_creation {
         assert_eq!(None, edge.next_outgoing);
         assert!(state.get_bool(edge.active));
         
-        let c3 = g.add_clause(d[0], vec![d[1]], &mut state, false, false);
-        g.set_reachability(&mut state);
+        let c3 = g.add_clause(d[0], vec![d[1]], &mut state);
         let clause = &g.clauses[c3.0];
         assert_eq!(d[0], clause.head);
         assert_eq!(vec![d[1]], clause.body);
@@ -729,151 +646,5 @@ mod test_graph_creation {
         assert_eq!(0, state.get_usize(clause.number_probabilistic));
         assert_eq!(Some(EdgeIndex(2)), clause.children);
         assert_eq!(Some(EdgeIndex(1)), clause.parents);
-        assert!(!state.get_bool(clause.bot_reachable));
-        assert!(state.get_bool(clause.t_reachable));
-    }
-}
-
-#[cfg(test)]
-mod test_graph_reachability {
-    
-    use crate::core::graph::*;
-    use search_trail::StateManager;
-
-    #[test]
-    fn set_clause_t_reachable_whole_graph() {
-        let mut g = Graph::default();
-        let mut  state = StateManager::default();
-        for _ in 0..3 {
-            g.add_distribution(&vec![0.3, 0.7], &mut state);
-        }
-        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
-        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
-        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
-        g.add_clause(d[3], vec![d[1], p[2]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
-        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
-        
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(!state.get_bool(clause.t_reachable));
-        }
-        
-        g.set_clause_t_reachable(ClauseIndex(0), &mut state);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(state.get_bool(clause.t_reachable));
-        }
-    }
-    
-    #[test]
-    fn set_clause_t_reachable_partial_graph() {
-        let mut g = Graph::default();
-        let mut  state = StateManager::default();
-        for _ in 0..3 {
-            g.add_distribution(&vec![0.3, 0.7], &mut state);
-        }
-        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
-        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
-        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
-        g.add_clause(d[3], vec![d[0], p[2]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
-        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(!state.get_bool(clause.t_reachable));
-        }
-        
-        g.set_clause_t_reachable(ClauseIndex(0), &mut state);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            if i != 2 && i != 4 {
-                assert!(state.get_bool(clause.t_reachable));
-            } else {
-                assert!(!state.get_bool(clause.t_reachable));
-            }
-        }
-    }
-    
-    #[test]
-    fn clause_t_reachable_start_top() {
-        let mut g = Graph::default();
-        let mut  state = StateManager::default();
-        for _ in 0..3 {
-            g.add_distribution(&vec![0.3, 0.7], &mut state);
-        }
-        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
-        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        g.add_clause(d[1], vec![p[0]], &mut state, false, false);
-        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
-        g.add_clause(d[3], vec![d[2], p[2]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
-        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
-        g.set_reachability(&mut state);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(state.get_bool(clause.t_reachable));
-        }
-    }
-
-    #[test]
-    fn clause_t_reachable_start_bot() {
-        let mut g = Graph::default();
-        let mut  state = StateManager::default();
-        for _ in 0..3 {
-            g.add_distribution(&vec![0.3, 0.7], &mut state);
-        }
-        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
-        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
-        g.add_clause(d[3], vec![d[2], p[2]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
-        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
-        g.add_clause(d[1], vec![p[0]], &mut state, false, false);
-        g.set_reachability(&mut state);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(state.get_bool(clause.t_reachable));
-        }
-    }
-    
-    #[test]
-    fn clause_bot_reachable() {
-        let mut g = Graph::default();
-        let mut  state = StateManager::default();
-        for _ in 0..3 {
-            g.add_distribution(&vec![0.3, 0.7], &mut state);
-        }
-        let p = (0..6).map(VariableIndex).collect::<Vec<VariableIndex>>();
-        let d = (0..6).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
-        g.add_clause(d[1], vec![d[0], p[0]], &mut state, false, false);
-        g.add_clause(d[2], vec![d[1], p[1]], &mut state, false, false);
-        g.add_clause(d[3], vec![d[0], p[2]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[2], p[3]], &mut state, false, false);
-        g.add_clause(d[4], vec![d[3], p[4]], &mut state, false, false);
-        g.add_clause(d[5], vec![d[4], p[5]], &mut state, false, false);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(!state.get_bool(clause.bot_reachable));
-        }
-        
-        g.set_clause_bot_reachable(ClauseIndex(5), &mut state);
-
-        for i in 0..6 {
-            let clause = &g.clauses[i];
-            assert!(state.get_bool(clause.bot_reachable));
-        }
     }
 }

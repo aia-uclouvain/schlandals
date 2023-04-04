@@ -38,7 +38,7 @@ impl BranchingDecision for Fiedler {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut best_score = f64::MAX;
         for clause in component_extractor.component_iter(component) {
-            if g.clause_has_probabilistic(clause, state) {
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {
                 let score = component_extractor.fiedler_value(clause).abs();
                 if score < best_score {
                     best_score = score;
@@ -70,7 +70,7 @@ impl BranchingDecision for Vsids {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut best_score = 0;
         for clause in component_extractor.component_iter(component) {
-            if g.clause_has_probabilistic(clause, state) {                
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
                 let score = g.clause_number_unassigned(clause, state);
                 if score > best_score {
                     best_score = score;

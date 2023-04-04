@@ -105,8 +105,6 @@ pub fn graph_from_ppidimacs(
             if positive_literals.len() > 1 {
                 panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
             }
-            let mut head_false = false;
-            let mut body_true = false;
             let head = if positive_literals.is_empty() {
                 // There is no head in this clause, so it is just a clause of the form
                 //      n1 && n2 && ... && nn =>
@@ -114,7 +112,6 @@ pub fn graph_from_ppidimacs(
                 //  constrain the problem)
                 let n = g.add_variable(false, None, None, state);
                 propagator.add_to_propagation_stack(n, false);
-                head_false = true;
                 n
             } else {
                 VariableIndex(positive_literals[0])
@@ -122,7 +119,6 @@ pub fn graph_from_ppidimacs(
             let body = if negative_literals.is_empty() {
                 let n = g.add_variable(false, None, None, state);
                 propagator.add_to_propagation_stack(n, true);
-                body_true = true;
                 vec![n]
             } else {
                 negative_literals
@@ -131,11 +127,10 @@ pub fn graph_from_ppidimacs(
                     .map(|x| VariableIndex(x as usize))
                     .collect::<Vec<VariableIndex>>()
             };
-            g.add_clause(head, body, state, body_true, head_false);
+            g.add_clause(head, body, state);
         }
         line_count += 1;
     }
-    g.set_reachability(state);
     g
 }
 /*
