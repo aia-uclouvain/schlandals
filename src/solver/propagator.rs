@@ -144,8 +144,7 @@ impl FTReachablePropagator {
                 if value {
                     propagation_prob *= g.get_variable_weight(variable).unwrap();
                     if propagation_prob == 0.0 {
-                        self.propagation_stack.clear();
-                        self.unconstrained_clauses.clear();
+                        self.clear();
                         return PropagationResult::Ok(propagation_prob);
                     }
                     for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {

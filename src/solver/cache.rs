@@ -33,7 +33,7 @@ pub struct Cache {
     /// Actual words representing the problems
     bits: Vec<u64>,
     /// Index to insert the next subproblem
-    current: usize,
+    pub current: usize,
     init_size: usize,
     /// Maximum index in the memory arena
     limit: usize,
@@ -43,9 +43,9 @@ pub struct Cache {
 impl Cache {
     /// Creates a new cache with max_cache_size capacity, in MB
     pub fn new(max_cache_size: u64, g: &Graph) -> Self {
-        // Since the cache size is given in MB, we can store max_cache_size / 4
-        // words of 64 bits.
+        // init size of 1Gb
         let init_size = 1_000_000_000 / (WORD_SIZE/8);
+        // Convert max_cache_size in bytes
         let limit = ((max_cache_size*1_000_000) / (WORD_SIZE/8) as u64) as usize;
         let bits: Vec<u64> = vec![0;init_size];
         let clause_offset = (g.number_clauses() as f64 / WORD_SIZE as f64).ceil() as usize;
@@ -88,9 +88,13 @@ impl Cache {
     
     fn resize(&mut self) -> usize {
         let cur_size = self.bits.len();
-        if 2*cur_size >= self.limit {
-            self.bits = vec![0;self.init_size];
+        if cur_size >= self.limit {
+            self.bits.clear();
+            self.bits.resize(self.init_size, 0);
             0
+        } else if 2*cur_size >= self.limit {
+            self.bits.resize(self.limit, 0);
+            cur_size
         } else {
             self.bits.resize(2*cur_size, 0);
             cur_size
