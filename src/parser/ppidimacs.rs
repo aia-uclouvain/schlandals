@@ -78,7 +78,14 @@ pub fn graph_from_ppidimacs(
                 .skip(1)
                 .map(|token| token.parse::<f64>().unwrap())
                 .collect::<Vec<f64>>();
-            g.add_distribution(&split, state);
+            let nodes = g.add_distribution(&split, state);
+            for i in 0..split.len() {
+                if split[i] == 0.0 {
+                    propagator.add_to_propagation_stack(nodes[i], false);
+                } else if split[i] == 1.0 {
+                    propagator.add_to_propagation_stack(nodes[i], true);
+                }
+            }
         } else {
             // First line for the clauses
             if number_nodes.is_none() {
