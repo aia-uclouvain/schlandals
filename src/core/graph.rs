@@ -40,6 +40,7 @@
 //! implementation does not have problems like dangling indexes.
 
 use search_trail::*;
+use rustc_hash::FxHashMap;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `Variable`, `Edge` and `Clause` in the `Graph`
@@ -119,6 +120,8 @@ pub struct Clause {
     pub children: Option<EdgeIndex>,
     /// Link to the first parent in the graph of clauses
     pub parents: Option<EdgeIndex>,
+    map_var_body_idx: FxHashMap<VariableIndex, usize>,
+    body_size: ReversibleUsize,
 }
 
 /// Data structure that actually holds the data of an edge in the graph
@@ -252,6 +255,11 @@ impl Graph {
         let cid = ClauseIndex(self.clauses.len());
         let number_probabilistic = body.iter().copied().filter(|v| self.is_variable_probabilistic(*v)).count();
         let number_deterministic = body.len() - number_probabilistic;
+        let body_size = body.len();
+        let mut map_var_body_idx: FxHashMap<VariableIndex, usize> = FxHashMap::default();
+        for i in 0..body_size {
+            map_var_body_idx.insert(body[i], i);
+        }
         self.clauses.push(Clause {
             head,
             body: body.clone(),
@@ -260,6 +268,8 @@ impl Graph {
             number_deterministic: state.manage_usize(number_deterministic),
             children: None,
             parents: None,
+            map_var_body_idx,
+            body_size: state.manage_usize(body_size),
         });
         state.increment_usize(self.variables[head.0].number_active_clause);
         for n in body {
@@ -308,6 +318,16 @@ impl Graph {
     
     // --- GRAPH MODIFICATIONS --- //
     
+    fn remove_variable_from_body(&mut self, variable: VariableIndex, clause: ClauseIndex, state: &mut StateManager) {
+        let current_index = *self.clauses[clause.0].map_var_body_idx.get(&variable).unwrap();
+        let new_index = state.get_usize(self.clauses[clause.0].body_size) - 1;
+        let swapped_var = self.clauses[clause.0].body[new_index];
+        self.clauses[clause.0].body.swap(current_index, new_index);
+        self.clauses[clause.0].map_var_body_idx.insert(swapped_var, current_index);
+        self.clauses[clause.0].map_var_body_idx.insert(variable, new_index);
+        state.decrement_usize(self.clauses[clause.0].body_size);
+    }
+    
     /// Sets a variable to true or false.
     ///     - If true, it is "removed" from the implicant of all the clauses in which it appears.
     ///     It also deactivate all the clauses that have the variable as head
@@ -316,6 +336,14 @@ impl Graph {
     pub fn set_variable(&mut self, variable: VariableIndex, value: bool, state: &mut StateManager) {
         state.set_bool(self.variables[variable.0].bound, true);
         self.variables[variable.0].value = value;
+        if value {
+            for i in 0..self.variables[variable.0].clauses_body.len() {
+                let clause = self.variables[variable.0].clauses_body[i];
+                if self.is_clause_constrained(clause, state) {
+                    self.remove_variable_from_body(variable, clause, state);
+                }
+            }
+        }
         if !value && self.is_variable_probabilistic(variable) {
             let d = self.get_variable_distribution(variable).unwrap();
             state.increment_usize(self.distributions[d.0].number_false);
@@ -445,7 +473,7 @@ impl Graph {
     
     /// Returns an active distribution in the clause body
     pub fn get_clause_active_distribution(&self, clause: ClauseIndex, state: &StateManager) -> Option<DistributionIndex> {
-        self.clause_body_iter(clause).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_bound(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
+        self.clause_body_iter(clause, state).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_bound(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
     }
 
     // --- ITERATORS --- //
@@ -491,8 +519,9 @@ impl Graph {
     }
 
     /// Returns an iterator on the body of a clause
-    pub fn clause_body_iter(&self, clause: ClauseIndex) -> impl Iterator<Item = VariableIndex> + '_ {
-        self.clauses[clause.0].body.iter().copied()
+    pub fn clause_body_iter(&self, clause: ClauseIndex, state: &StateManager) -> impl Iterator<Item = VariableIndex> + '_ {
+        let size = state.get_usize(self.clauses[clause.0].body_size);
+        self.clauses[clause.0].body[0..size].iter().copied()
     }
     
 }

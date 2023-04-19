@@ -165,7 +165,7 @@ impl ComponentExtractor {
             *comp_size += 1;
 
             if g.clause_has_probabilistic(node, state) {
-                for variable in g.clause_body_iter(node) {
+                for variable in g.clause_body_iter(node, state) {
                     if g.is_variable_probabilistic(variable)
                         && !g.is_variable_bound(variable, state)
                     {

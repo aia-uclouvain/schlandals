@@ -65,7 +65,7 @@ impl FTReachablePropagator {
         let mut p = f128!(1.0);
         while let Some(clause) = self.unconstrained_clauses.pop() {
             debug_assert!(!self.unconstrained_clauses.contains(&clause));
-            for variable in g.clause_body_iter(clause) {
+            for variable in g.clause_body_iter(clause, state) {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
                     if g.decrement_distribution_clause_counter(distribution, state) == 0 {
@@ -119,7 +119,7 @@ impl FTReachablePropagator {
                                 }
                             }
                         } else if body_remaining == 1 && head_false {
-                            let v = g.clause_body_iter(clause).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                            let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_bound(*v, state)).unwrap();
                             self.add_to_propagation_stack(v, false);
                         }
                     } else {
@@ -133,7 +133,7 @@ impl FTReachablePropagator {
                     if value {
                         self.add_unconstrained_clause(clause, g, state);
                     } else if g.clause_number_unassigned(clause, state) == 1 {
-                        let v = g.clause_body_iter(clause).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                        let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_bound(*v, state)).unwrap();
                         self.propagation_stack.push((v, false));
                     }
                 }

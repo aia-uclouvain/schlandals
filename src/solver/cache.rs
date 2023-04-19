@@ -131,7 +131,7 @@ impl Cache {
                     hash ^= self.bits[self.current + self.clause_offset + (count_var / WORD_SIZE) - 1];
                 }
             }
-            for var in graph.clause_body_iter(clause) {
+            for var in graph.clause_body_iter(clause, state) {
                 if !seen_vars.contains(&var) {
                     seen_vars.insert(var);
                     if !graph.is_variable_bound(var, state) {
