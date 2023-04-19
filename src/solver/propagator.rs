@@ -65,6 +65,8 @@ impl FTReachablePropagator {
         let mut p = f128!(1.0);
         while let Some(clause) = self.unconstrained_clauses.pop() {
             debug_assert!(!self.unconstrained_clauses.contains(&clause));
+            g.remove_clause_from_children(clause, state);
+            g.remove_clause_from_parent(clause, state);
             for variable in g.clause_body_iter(clause, state) {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();

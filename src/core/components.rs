@@ -190,50 +190,40 @@ impl ComponentExtractor {
             }
             
             // Recursively explore the nodes in the connected components
-            for parent_edge in g.parents_clause_iter(node) {
-                if g.is_edge_active(parent_edge, state) {
-                    let parent = g.get_edge_source(parent_edge);
-                    if g.is_clause_constrained(parent, state) {
-                        self.explore_component(
-                            g,
-                            parent,
-                            comp_start,
-                            comp_size,
-                            state,
-                            laplacians,
-                            laplacian_start,
-                        );
-                        let src_pos = self.positions[parent.0];
-                        let dst_pos = self.positions[node.0];
-                        laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
-                        laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
-                        laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
-                        laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
-                    }
-                }
+            for parent in g.parents_clause_iter(node, state) {
+                self.explore_component(
+                    g,
+                    parent,
+                    comp_start,
+                    comp_size,
+                    state,
+                    laplacians,
+                    laplacian_start,
+                );
+                let src_pos = self.positions[parent.0];
+                let dst_pos = self.positions[node.0];
+                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
+                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
+                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
+                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
             }
             
-            for child_edge in g.children_clause_iter(node) {
-                if g.is_edge_active(child_edge, state) {
-                    let child = g.get_edge_destination(child_edge);
-                    if g.is_clause_constrained(child, state) {
-                        self.explore_component(
-                            g,
-                            child,
-                            comp_start,
-                            comp_size,
-                            state,
-                            laplacians,
-                            laplacian_start,
-                        );
-                        let src_pos = self.positions[node.0];
-                        let dst_pos = self.positions[child.0];
-                        laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
-                        laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
-                        laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
-                        laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
-                    }
-                }
+            for child in g.children_clause_iter(node, state) {
+                self.explore_component(
+                    g,
+                    child,
+                    comp_start,
+                    comp_size,
+                    state,
+                    laplacians,
+                    laplacian_start,
+                );
+                let src_pos = self.positions[node.0];
+                let dst_pos = self.positions[child.0];
+                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
+                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
+                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
+                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
             }
         }
     }
@@ -242,12 +232,9 @@ impl ComponentExtractor {
         if super_comp_start <= pos && pos < super_comp_end && !t_reachable[pos - super_comp_start] {
             let clause = self.nodes[pos];
             t_reachable[pos - super_comp_start] = true;
-            for child_edge in g.children_clause_iter(clause) {
-                let child = g.get_edge_destination(child_edge);
-                if g.is_clause_constrained(child, state) {
-                    let new_pos = self.positions[child.0];
-                    self.set_t_reachability(g, state, t_reachable, new_pos, super_comp_start, super_comp_end);
-                }
+            for child in g.children_clause_iter(clause, state) {
+                let new_pos = self.positions[child.0];
+                self.set_t_reachability(g, state, t_reachable, new_pos, super_comp_start, super_comp_end);
             }
         }
     }
@@ -256,12 +243,9 @@ impl ComponentExtractor {
         if super_comp_start <= pos && pos < super_comp_end && !f_reachable[pos - super_comp_start] {
             f_reachable[pos - super_comp_start] = true;
             let clause = self.nodes[pos];
-            for parent_edge in g.parents_clause_iter(clause) {
-                let parent = g.get_edge_source(parent_edge);
-                if g.is_clause_constrained(parent, state) {
-                    let next_pos = self.positions[parent.0];
-                    self.set_f_reachability(g, state, f_reachable, next_pos, super_comp_start, super_comp_end);
-                }
+            for parent in g.parents_clause_iter(clause, state) {
+                let next_pos = self.positions[parent.0];
+                self.set_f_reachability(g, state, f_reachable, next_pos, super_comp_start, super_comp_end);
             }
         }
     }
@@ -286,7 +270,7 @@ impl ComponentExtractor {
     /// Returns true iff at least one component has been detected and it contains one distribution
     pub fn detect_components(
         &mut self,
-        g: &Graph,
+        g: &mut Graph,
         state: &mut StateManager,
         component: ComponentIndex,
         propagator: &mut FTReachablePropagator,

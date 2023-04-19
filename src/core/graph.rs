@@ -50,12 +50,8 @@ use rustc_hash::FxHashMap;
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct VariableIndex(pub usize);
 
-/// Abstraction used as a typesafe way of retrieving a `Edge` in the `Graph` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct EdgeIndex(pub usize);
-
 /// Abstraction used as a typesafe way of retrieving a `Clause` in the `Graph` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ClauseIndex(pub usize);
 
 /// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Graph` structure
@@ -117,26 +113,15 @@ pub struct Clause {
     /// Numbers of deterministic variable active in the clause body
     pub number_deterministic: ReversibleUsize,
     /// Link to the first children in the graph of clauses
-    pub children: Option<EdgeIndex>,
+    pub children: Vec<ClauseIndex>,
     /// Link to the first parent in the graph of clauses
-    pub parents: Option<EdgeIndex>,
+    pub parents: Vec<ClauseIndex>,
     map_var_body_idx: FxHashMap<VariableIndex, usize>,
     body_size: ReversibleUsize,
-}
-
-/// Data structure that actually holds the data of an edge in the graph
-#[derive(Debug, Copy, Clone)]
-pub struct Edge {
-    /// The index of the source node in the Graph
-    pub src: ClauseIndex,
-    /// The index of the target node in the Graph
-    pub dst: ClauseIndex,
-    /// If exists, the next incoming edge of `dst`
-    pub next_incoming: Option<EdgeIndex>,
-    /// If exists, the next outgoing edge of `src`
-    pub next_outgoing: Option<EdgeIndex>,
-    /// Is the edge active or not
-    active: ReversibleBool,
+    map_var_parent_idx: FxHashMap<ClauseIndex, usize>,
+    number_parent: ReversibleUsize,
+    map_var_child_idx: FxHashMap<ClauseIndex, usize>,
+    number_child: ReversibleUsize,
 }
 
 /// Represents a set of nodes in a same distribution. This assume that the nodes of a distribution
@@ -161,8 +146,6 @@ pub struct Distribution {
 pub struct Graph {
     /// Vector containing the nodes of the graph
     variables: Vec<Variable>,
-    /// Vector containing the edges of the graph
-    edges: Vec<Edge>,
     /// Vector containing the clauses of the graph
     clauses: Vec<Clause>,
     /// Vector containing the distributions of the graph
@@ -184,7 +167,6 @@ impl Graph {
     pub fn new() -> Self {
         Self {
             variables: vec![],
-            edges: vec![],
             clauses: vec![],
             distributions: vec![],
             number_probabilistic: 0,
@@ -260,16 +242,22 @@ impl Graph {
         for i in 0..body_size {
             map_var_body_idx.insert(body[i], i);
         }
+        let map_var_parent_idx: FxHashMap<ClauseIndex, usize> = FxHashMap::default();
+        let map_var_child_idx: FxHashMap<ClauseIndex, usize> = FxHashMap::default();
         self.clauses.push(Clause {
             head,
             body: body.clone(),
             constrained: state.manage_bool(true),
             number_probabilistic: state.manage_usize(number_probabilistic),
             number_deterministic: state.manage_usize(number_deterministic),
-            children: None,
-            parents: None,
+            children: vec![],
+            parents: vec![],
             map_var_body_idx,
             body_size: state.manage_usize(body_size),
+            map_var_parent_idx,
+            number_parent: state.manage_usize(0),
+            map_var_child_idx,
+            number_child: state.manage_usize(0),
         });
         state.increment_usize(self.variables[head.0].number_active_clause);
         for n in body {
@@ -299,24 +287,39 @@ impl Graph {
         src: ClauseIndex,
         dst: ClauseIndex,
         state: &mut StateManager,
-    ) -> EdgeIndex {
-        let source_outgoing = self.clauses[src.0].children;
-        let dest_incoming = self.clauses[dst.0].parents;
-        let edge = Edge {
-            src,
-            dst,
-            next_incoming: dest_incoming,
-            next_outgoing: source_outgoing,
-            active: state.manage_bool(true),
-        };
-        let index = EdgeIndex(self.edges.len());
-        self.clauses[src.0].children = Some(index);
-        self.clauses[dst.0].parents = Some(index);
-        self.edges.push(edge);
-        index
+    ) {
+        let source_nb_child = state.get_usize(self.clauses[src.0].number_child);
+        self.clauses[src.0].map_var_child_idx.insert(dst, source_nb_child);
+        self.clauses[src.0].children.push(dst);
+        state.increment_usize(self.clauses[src.0].number_child);
+
+        let target_nb_parent = state.get_usize(self.clauses[dst.0].number_parent);
+        self.clauses[dst.0].map_var_parent_idx.insert(src, target_nb_parent);
+        self.clauses[dst.0].parents.push(src);
+        state.increment_usize(self.clauses[dst.0].number_parent);
     }
     
     // --- GRAPH MODIFICATIONS --- //
+    
+    fn remove_child(&mut self, clause: ClauseIndex, child: ClauseIndex, state: &mut StateManager) {
+        let current_index = *self.clauses[clause.0].map_var_child_idx.get(&child).unwrap();
+        let new_index = state.get_usize(self.clauses[clause.0].number_child) - 1;
+        let swapped_child = self.clauses[clause.0].children[new_index];
+        self.clauses[clause.0].children.swap(current_index, new_index);
+        self.clauses[clause.0].map_var_child_idx.insert(swapped_child, current_index);
+        self.clauses[clause.0].map_var_child_idx.insert(child, new_index);
+        state.decrement_usize(self.clauses[clause.0].number_child);
+    }
+
+    fn remove_parent(&mut self, clause: ClauseIndex, parent: ClauseIndex, state: &mut StateManager) {
+        let current_index = *self.clauses[clause.0].map_var_parent_idx.get(&parent).unwrap();
+        let new_index = state.get_usize(self.clauses[clause.0].number_parent) - 1;
+        let swapped_parent = self.clauses[clause.0].parents[new_index];
+        self.clauses[clause.0].parents.swap(current_index, new_index);
+        self.clauses[clause.0].map_var_parent_idx.insert(swapped_parent, current_index);
+        self.clauses[clause.0].map_var_parent_idx.insert(parent, new_index);
+        state.decrement_usize(self.clauses[clause.0].number_parent);
+    }
     
     fn remove_variable_from_body(&mut self, variable: VariableIndex, clause: ClauseIndex, state: &mut StateManager) {
         let current_index = *self.clauses[clause.0].map_var_body_idx.get(&variable).unwrap();
@@ -380,11 +383,6 @@ impl Graph {
         state.get_bool(self.variables[variable.0].bound)
     } 
     
-    /// Returns true if the edge is active
-    pub fn is_edge_active(&self, edge: EdgeIndex, state: &StateManager) -> bool {
-        state.get_bool(self.edges[edge.0].active)
-    }
-    
     /// Returns true if the variable if probabilistic
     pub fn is_variable_probabilistic(&self, variable: VariableIndex) -> bool {
         self.variables[variable.0].probabilistic
@@ -408,6 +406,18 @@ impl Graph {
     /// Returns the number of unassigned variable in the body of a clause
     pub fn clause_number_unassigned(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         state.get_usize(self.clauses[clause.0].number_deterministic) + state.get_usize(self.clauses[clause.0].number_probabilistic)
+    }
+    
+    pub fn remove_clause_from_parent(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        for parent in self.parents_clause_iter(clause, state).collect::<Vec<ClauseIndex>>() {
+            self.remove_child(parent, clause, state);
+        }
+    }
+    
+    pub fn remove_clause_from_children(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        for child in self.children_clause_iter(clause, state).collect::<Vec<ClauseIndex>>() {
+            self.remove_parent(child, clause, state);
+        }
     }
 
     /// Deactivate a clause
@@ -437,16 +447,6 @@ impl Graph {
         self.variables.len()
     }
 
-    /// Returns the source of an edge
-    pub fn get_edge_source(&self, edge: EdgeIndex) -> ClauseIndex {
-        self.edges[edge.0].src
-    }
-
-    /// Returns the destination of the edge
-    pub fn get_edge_destination(&self, edge: EdgeIndex) -> ClauseIndex {
-        self.edges[edge.0].dst
-    }
-    
     /// Returns the distribution of a probabilistic variable
     pub fn get_variable_distribution(&self, variable: VariableIndex) -> Option<DistributionIndex> {
         self.variables[variable.0].distribution
@@ -479,21 +479,15 @@ impl Graph {
     // --- ITERATORS --- //
     
     /// Returns an iterator on the parents of a clause
-    pub fn parents_clause_iter(&self, clause: ClauseIndex) -> Parents<'_> {
-        let first = self.clauses[clause.0].parents;
-        Parents {
-            graph: self,
-            next: first,
-        }
+    pub fn parents_clause_iter(&self, clause: ClauseIndex, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
+        let size = state.get_usize(self.clauses[clause.0].number_parent);
+        self.clauses[clause.0].parents[0..size].iter().copied()
     }
     
     /// Returns an iterator on the children of a clause
-    pub fn children_clause_iter(&self, clause: ClauseIndex) -> Children<'_> {
-        let first = self.clauses[clause.0].children;
-        Children {
-            graph: self,
-            next: first,
-        }
+    pub fn children_clause_iter(&self, clause: ClauseIndex, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
+        let size = state.get_usize(self.clauses[clause.0].number_child);
+        self.clauses[clause.0].children[0..size].iter().copied()
     }
     
     /// Returns an iterator on the clauses of the graph
@@ -524,48 +518,6 @@ impl Graph {
         self.clauses[clause.0].body[0..size].iter().copied()
     }
     
-}
-
-// --- ITERATORS --- //
-
-pub struct Children<'g> {
-    graph: &'g Graph,
-    next: Option<EdgeIndex>,
-}
-
-impl<'g> Iterator for Children<'g> {
-    type Item = EdgeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next {
-            None => None,
-            Some(eidx) => {
-                let edge = &self.graph.edges[eidx.0];
-                self.next = edge.next_outgoing;
-                Some(eidx)
-            }
-        }
-    }
-}
-
-pub struct Parents<'g> {
-    graph: &'g Graph,
-    next: Option<EdgeIndex>,
-}
-
-impl<'g> Iterator for Parents<'g> {
-    type Item = EdgeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next {
-            None => None,
-            Some(eidx) => {
-                let edge = &self.graph.edges[eidx.0];
-                self.next = edge.next_incoming;
-                Some(eidx)
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -648,8 +600,6 @@ mod test_graph_creation {
         assert_eq!(vec![p[0], p[1]], clause.body);
         assert!(state.get_bool(clause.constrained));
         assert_eq!(2, state.get_usize(clause.number_probabilistic));
-        assert_eq!(None, clause.children);
-        assert_eq!(None, clause.parents);
         
         let c2 = g.add_clause(d[1], vec![d[0], p[2]], &mut state);
         let clause = &g.clauses[c2.0];
@@ -657,15 +607,6 @@ mod test_graph_creation {
         assert_eq!(vec![d[0], p[2]], clause.body);
         assert!(state.get_bool(clause.constrained));
         assert_eq!(1, state.get_usize(clause.number_probabilistic));
-        assert_eq!(None, clause.children);
-        assert_eq!(Some(EdgeIndex(0)), clause.parents);
-        
-        let edge = g.edges[0];
-        assert_eq!(ClauseIndex(0), edge.src);
-        assert_eq!(ClauseIndex(1), edge.dst);
-        assert_eq!(None, edge.next_incoming);
-        assert_eq!(None, edge.next_outgoing);
-        assert!(state.get_bool(edge.active));
         
         let c3 = g.add_clause(d[0], vec![d[1]], &mut state);
         let clause = &g.clauses[c3.0];
@@ -673,7 +614,5 @@ mod test_graph_creation {
         assert_eq!(vec![d[1]], clause.body);
         assert!(state.get_bool(clause.constrained));
         assert_eq!(0, state.get_usize(clause.number_probabilistic));
-        assert_eq!(Some(EdgeIndex(2)), clause.children);
-        assert_eq!(Some(EdgeIndex(1)), clause.parents);
     }
 }

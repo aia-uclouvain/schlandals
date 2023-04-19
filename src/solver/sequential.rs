@@ -157,7 +157,7 @@ where
         // First we detect the sub-components in the graph
         if self
             .component_extractor
-            .detect_components(&self.graph, &mut self.state, component, &mut self.propagator)
+            .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
         {
             match self.propagator.propagate_unconstrained_clauses(&mut self.graph, &mut self.state) {
                 Ok(v) => solution *= v,
