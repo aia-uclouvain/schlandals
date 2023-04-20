@@ -33,7 +33,6 @@
 
 use super::graph::{ClauseIndex, Graph};
 use crate::{solver::propagator::FTReachablePropagator};
-use nalgebra::DMatrix;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
@@ -98,8 +97,6 @@ pub struct ComponentExtractor {
     base: ReversibleUsize,
     /// The first index which is not a component of the current node in the search tree
     limit: ReversibleUsize,
-    /// Fiedler score for Fiedler-based heuristics
-    fiedler_score: Vec<f64>,
 }
 
 impl ComponentExtractor {
@@ -110,14 +107,12 @@ impl ComponentExtractor {
             start: 0,
             size: g.number_clauses(),
         }];
-        let fiedler_score: Vec<f64> = (0..g.number_clauses()).map(|_| 0.0).collect();
         Self {
             nodes,
             positions,
             components,
             base: state.manage_usize(0),
             limit: state.manage_usize(1),
-            fiedler_score,
         }
     }
 
@@ -147,8 +142,6 @@ impl ComponentExtractor {
         comp_start: usize,
         comp_size: &mut usize,
         state: &mut StateManager,
-        laplacians: &mut Vec<Vec<f64>>,
-        laplacian_start: usize,
     ) {
         if self.is_node_visitable(g, node, comp_start, comp_size, state) {
             // The node is swap with the node at position comp_sart + comp_size
@@ -179,8 +172,6 @@ impl ComponentExtractor {
                                         comp_start,
                                         comp_size,
                                         state,
-                                        laplacians,
-                                        laplacian_start,
                                     );
                                 }
                             }
@@ -197,15 +188,7 @@ impl ComponentExtractor {
                     comp_start,
                     comp_size,
                     state,
-                    laplacians,
-                    laplacian_start,
                 );
-                let src_pos = self.positions[parent.0];
-                let dst_pos = self.positions[node.0];
-                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
-                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
-                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
-                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
             }
             
             for child in g.children_clause_iter(node, state) {
@@ -215,15 +198,7 @@ impl ComponentExtractor {
                     comp_start,
                     comp_size,
                     state,
-                    laplacians,
-                    laplacian_start,
                 );
-                let src_pos = self.positions[node.0];
-                let dst_pos = self.positions[child.0];
-                laplacians[src_pos - laplacian_start][dst_pos - laplacian_start] = -1.0;
-                laplacians[dst_pos - laplacian_start][src_pos - laplacian_start] = -1.0;
-                laplacians[src_pos - laplacian_start][src_pos - laplacian_start] += 0.5;
-                laplacians[dst_pos - laplacian_start][dst_pos - laplacian_start] += 0.5;
             }
         }
     }
@@ -276,10 +251,6 @@ impl ComponentExtractor {
         propagator: &mut FTReachablePropagator,
     ) -> bool {
         debug_assert!(propagator.unconstrained_clauses.is_empty());
-        let c = self.components[component.0];
-        for node in (c.start..(c.start + c.size)).map(ClauseIndex) {
-            self.fiedler_score[node.0] = 0.0;
-        }
         let end = state.get_usize(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
@@ -289,9 +260,6 @@ impl ComponentExtractor {
         let mut start = super_comp.start;
         let end = start + super_comp.size;
         // laplacian matrix for fiedler vector computation
-        let mut laplacians: Vec<Vec<f64>> = (0..super_comp.size)
-            .map(|_| (0..super_comp.size).map(|_| 0.0).collect())
-            .collect();
         let mut is_t_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
         let mut is_f_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
         self.set_reachability(g, state,  &mut is_t_reachable, &mut is_f_reachable, super_comp.start, super_comp.start + super_comp.size);
@@ -313,8 +281,6 @@ impl ComponentExtractor {
                     start,
                     &mut size,
                     state,
-                    &mut laplacians,
-                    super_comp.start,
                 );
                 self.components.push(Component { start, size });
                 start += size;
@@ -323,46 +289,6 @@ impl ComponentExtractor {
             }
         }
         state.set_usize(self.limit, self.components.len());
-        // If there is only one sub-component extracted, we keep the same values for the fiedler
-        // heuristic. Since the computation of the fiedler vector is expensive, we try to delay it
-        // as much as possible. If the component was not breaked, we assume that the nodes that were
-        // on the "inside" of the graph should have lower value in order to break the graph.
-        if self.number_components(state) > 1 || component == ComponentIndex(0) {
-            for cid in self.components_iter(state) {
-                let comp = self.components[cid.0];
-                let size = comp.size;
-                // Extracts the laplacian matrix corresponding to this component
-                let sub_lp = DMatrix::from_fn(size, size, |r, c| {
-                    laplacians[(comp.start - super_comp.start) + r]
-                        [(comp.start - super_comp.start) + c]
-                });
-                let decomp = sub_lp.hermitian_part().symmetric_eigen();
-                // Finds the fiedler vectors. This is the eigenvector associated with the second
-                // smallest eigenvalue. We first find this eigen value and then assign the fiedler
-                // score to the nodes in the component
-                let mut smallest_eigenvalue = f64::INFINITY;
-                let mut second_smallest_eigenvalue = f64::INFINITY;
-                let mut smallest_index = 0;
-                let mut fiedler_index = 0;
-                let eigenvalues = decomp.eigenvalues;
-                for i in 0..size {
-                    let eigenvalue = eigenvalues[i];
-                    if eigenvalue < smallest_eigenvalue {
-                        second_smallest_eigenvalue = smallest_eigenvalue;
-                        fiedler_index = smallest_index;
-                        smallest_eigenvalue = eigenvalue;
-                        smallest_index = i;
-                    } else if eigenvalue < second_smallest_eigenvalue {
-                        second_smallest_eigenvalue = eigenvalue;
-                        fiedler_index = i;
-                    }
-                }
-                for i in 0..size {
-                    self.fiedler_score[self.nodes[comp.start + i].0] =
-                        decomp.eigenvectors.row(i)[fiedler_index];
-                }
-            }
-        }
         self.number_components(state) > 0
     }
 
@@ -383,11 +309,6 @@ impl ComponentExtractor {
         self.nodes[start..end].iter().copied()
     }
     
-    /// Returns the fiedler value of a given clause
-    pub fn fiedler_value(&self, node: ClauseIndex) -> f64 {
-        self.fiedler_score[node.0]
-    }
-
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {
         state.get_usize(self.limit) - state.get_usize(self.base)

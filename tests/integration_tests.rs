@@ -22,10 +22,11 @@ macro_rules! integration_tests {
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = Fiedler::default();
+                let mut branching_heuristic = Fiedler::new(&graph, &state);
                 let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
                 let sol = solver.solve().unwrap();
                 let expected = Float::with_val(113, $value);
+                println!("expected {:?} actual {:?}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);
             }
         )*
