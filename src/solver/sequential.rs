@@ -196,6 +196,7 @@ where
         match self.propagator.propagate(&mut self.graph, &mut self.state) {
             Err(_) => ProblemSolution::Err(Unsat),
             Ok(p) => {
+                self.branching_heuristic.init(&self.graph, &self.state);
                 let mut solution = self._solve(ComponentIndex(0));
                 solution *= p;
                 self.statistics.print();

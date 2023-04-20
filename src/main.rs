@@ -61,7 +61,7 @@ fn main() {
     let graph = graph_from_ppidimacs(&args.input, &mut state, &mut propagator);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
-        Branching::Fiedler => Box::from(Fiedler::new(&graph, &state)),
+        Branching::Fiedler => Box::<Fiedler>::default(),
         Branching::Vsids => Box::<Vsids>::default(),
     };
     let mlimit = if args.memory.is_some() {

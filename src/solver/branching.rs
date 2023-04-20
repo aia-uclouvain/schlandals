@@ -29,6 +29,8 @@ pub trait BranchingDecision {
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
     ) -> Option<DistributionIndex>;
+    
+    fn init(&mut self, g: &Graph, state: &StateManager);
 }
 
 #[derive(Default)]
@@ -36,23 +38,39 @@ pub struct Fiedler {
     fiedler_values: Vec<f64>,
 }
 
-impl Fiedler {
-    pub fn new(g: &Graph, state: &StateManager) -> Self {
-        let mut laplacian = DMatrix::from_element(g.number_clauses(), g.number_clauses(), 0.0);
+impl BranchingDecision for Fiedler {
+
+    fn init(&mut self, g: &Graph, state: &StateManager) {
+        let mut lp_idx: Vec<usize> = (0..g.number_clauses()).collect();
+        let mut cur_idx = 0;
         for clause in g.clause_iter() {
-            for parent in g.parents_clause_iter(clause, state) {
-                laplacian[(clause.0, clause.0)] += 0.5;
-                laplacian[(clause.0, parent.0)] = -1.0;
+            if g.is_clause_constrained(clause, state) {
+                lp_idx[clause.0] = cur_idx;
+                cur_idx += 1;
             }
-            for child in g.children_clause_iter(clause, state) {
-                laplacian[(clause.0, clause.0)] += 0.5;
-                laplacian[(clause.0, child.0)] = -1.0;
+        }
+        let mut laplacian = DMatrix::from_element(cur_idx, cur_idx, 0.0);
+
+        for clause in g.clause_iter() {
+            if g.is_clause_constrained(clause, state) {
+                for parent in g.parents_clause_iter(clause, state) {
+                    if g.is_clause_constrained(parent, state) {
+                        laplacian[(lp_idx[clause.0], lp_idx[clause.0])] += 0.5;
+                        laplacian[(lp_idx[clause.0], lp_idx[parent.0])] = -1.0;
+                    }
+                }
+                for child in g.children_clause_iter(clause, state) {
+                    if g.is_clause_constrained(child, state) {
+                        laplacian[(lp_idx[clause.0], lp_idx[clause.0])] += 0.5;
+                        laplacian[(lp_idx[clause.0], lp_idx[child.0])] = -1.0;
+                    }
+                }
             }
         }
         let decomp = laplacian.hermitian_part().symmetric_eigen();
         let mut smallest = (f64::INFINITY, f64::INFINITY);
         let mut indexes = (0, 0);
-        for i in 0..g.number_clauses() {
+        for i in 0..cur_idx {
             let eigenvalue = decomp.eigenvalues[i];
             if eigenvalue < smallest.0 {
                 smallest.1 = smallest.0;
@@ -64,14 +82,15 @@ impl Fiedler {
                 indexes.1 = i;
             }
         }
-        let fiedler_values = (0..g.number_clauses()).map(|i| decomp.eigenvectors.row(i)[indexes.1]).collect::<Vec<f64>>();
-        Self {
-            fiedler_values
-        }
+        self.fiedler_values = (0..g.number_clauses()).map(|i| {
+            if g.is_clause_constrained(ClauseIndex(i), state) {
+                decomp.eigenvectors.row(lp_idx[i])[indexes.1]
+            } else {
+                0.0
+            }
+        }).collect::<Vec<f64>>();
     }
-}
 
-impl BranchingDecision for Fiedler {
     fn branch_on(&mut self, g: &Graph, state: &StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex> {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut sum_fiedler = 0.0;
@@ -136,6 +155,8 @@ impl BranchingDecision for Vsids {
             None => None
         }
     }
+    
+    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
 }
 
 /*
