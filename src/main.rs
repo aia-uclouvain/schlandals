@@ -52,6 +52,12 @@ enum Branching {
     Fiedler,
     /// VSIDS
     Vsids,
+    /// Minimum In-degree of a clause in the implication-graph
+    MinInDegree,
+    /// Minimum Out-degree of a clause in the implication-graph
+    MinOutDegree,
+    /// Maximum degree of a clause in the implication-graph
+    MaxDegree
 }
 
 fn main() {
@@ -63,6 +69,9 @@ fn main() {
     let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
         Branching::Fiedler => Box::<Fiedler>::default(),
         Branching::Vsids => Box::<Vsids>::default(),
+        Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+        Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
     let mlimit = if args.memory.is_some() {
         args.memory.unwrap()

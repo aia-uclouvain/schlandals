@@ -546,6 +546,14 @@ impl Graph {
     pub fn get_clause_active_distribution(&self, clause: ClauseIndex, state: &StateManager) -> Option<DistributionIndex> {
         self.clause_body_iter(clause, state).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_bound(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
     }
+    
+    pub fn get_clause_number_parents(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        state.get_usize(self.clauses[clause.0].number_parent)
+    }
+
+    pub fn get_clause_number_children(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        state.get_usize(self.clauses[clause.0].number_child)
+    }
 
     // --- ITERATORS --- //
     

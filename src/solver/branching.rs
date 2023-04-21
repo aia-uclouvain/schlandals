@@ -159,6 +159,111 @@ impl BranchingDecision for Vsids {
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
 }
 
+#[derive(Default)]
+pub struct MinInDegree;
+
+impl BranchingDecision for MinInDegree {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut best_clause: Option<ClauseIndex> = None;
+        let mut best_score = usize::MAX;
+        for clause in component_extractor.component_iter(component) {
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
+                let score = g.get_clause_number_parents(clause, state);
+                if score < best_score {
+                    best_score = score;
+                    best_clause = Some(clause);
+                }
+            }
+        }
+        
+        match best_clause {
+            Some(clause) => {
+                g.get_clause_active_distribution(clause, state)
+            },
+            None => None
+        }
+    }
+    
+    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    
+}
+
+#[derive(Default)]
+pub struct MinOutDegree;
+
+impl BranchingDecision for MinOutDegree {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut best_clause: Option<ClauseIndex> = None;
+        let mut best_score = usize::MAX;
+        for clause in component_extractor.component_iter(component) {
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
+                let score = g.get_clause_number_children(clause, state);
+                if score < best_score {
+                    best_score = score;
+                    best_clause = Some(clause);
+                }
+            }
+        }
+        
+        match best_clause {
+            Some(clause) => {
+                g.get_clause_active_distribution(clause, state)
+            },
+            None => None
+        }
+    }
+    
+    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    
+}
+
+#[derive(Default)]
+pub struct MaxDegree;
+
+impl BranchingDecision for MaxDegree {
+    fn branch_on(
+        &mut self,
+        g: &Graph,
+        state: &StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut best_clause: Option<ClauseIndex> = None;
+        let mut best_score = 0;
+        for clause in component_extractor.component_iter(component) {
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
+                let score = g.get_clause_number_children(clause, state) + g.get_clause_number_parents(clause, state);
+                if score >= best_score {
+                    best_score = score;
+                    best_clause = Some(clause);
+                }
+            }
+        }
+        
+        match best_clause {
+            Some(clause) => {
+                g.get_clause_active_distribution(clause, state)
+            },
+            None => None
+        }
+    }
+    
+    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    
+}
+
 /*
 #[cfg(test)]
 mod test_simple_branching {
