@@ -14,6 +14,9 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::hash::Hash;
+
+use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::common::f128;
@@ -22,9 +25,9 @@ use crate::core::graph::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::FTReachablePropagator;
 use crate::solver::statistics::Statistics;
-use crate::solver::cache::Cache;
+use crate::common::PEAK_ALLOC;
 
-use rug::{Float};
+use rug::Float;
 
 /// A solution of a node in the search space. It gives its probability of the sub-graph induced in
 /// the node and the number of solutions in its subtree.
@@ -64,10 +67,44 @@ where
     /// The propagator
     propagator: FTReachablePropagator,
     /// Cache used to store results of subtrees
-    cache: Cache,
+    cache: FxHashMap<CacheEntry, Float>,
     /// Statistics collectors
     statistics: Statistics<S>,
+    mlimit: u64,
 }
+
+#[derive(Default)]
+pub struct CacheEntry {
+    hash: u64,
+    repr: Vec<u64>,
+}
+
+impl CacheEntry {
+    pub fn new(hash: u64, repr: Vec<u64>) -> Self {
+        Self {
+            hash,
+            repr
+        }
+    }
+}
+
+impl Hash for CacheEntry {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for CacheEntry {
+    fn eq(&self, other: &Self) -> bool {
+        if self.hash != other.hash {
+            false
+        } else {
+            self.repr == other.repr
+        }
+    }
+}
+
+impl Eq for CacheEntry {}
 
 impl<'b, B, const S: bool> Solver<'b, B, S>
 where
@@ -81,7 +118,7 @@ where
         propagator: FTReachablePropagator,
         mlimit: u64,
     ) -> Self {
-        let cache = Cache::new(mlimit, &graph);
+        let cache = FxHashMap::default();
         Self {
             graph,
             state,
@@ -90,6 +127,7 @@ where
             propagator,
             cache,
             statistics: Statistics::default(),
+            mlimit,
         }
     }
 
@@ -98,15 +136,16 @@ where
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> Float {
         // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
         self.statistics.cache_access();
-        let cache_entry = self.cache.get(&self.component_extractor, component, &self.graph, &self.state);
-        match cache_entry.0 {
-            Some(v) => v,
+        let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
+        match self.cache.get(&bit_repr) {
             None => {
                 self.statistics.cache_miss();
-                let v = self.choose_and_branch(component);
-                let (hash, start) = cache_entry.1;
-                self.cache.set(hash, start, v.clone());
-                v
+                let f = self.choose_and_branch(component);
+                self.cache.insert(bit_repr, f.clone());
+                f
+            },
+            Some(f) => {
+                f.clone()
             }
         }
     }
@@ -149,6 +188,9 @@ where
 
     /// Solves the problem for the sub-graph identified by component.
     pub fn _solve(&mut self, component: ComponentIndex) -> Float {
+        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
+            self.cache.clear();
+        }
         self.state.save_state();
         // Default solution with a probability/count of 1
         // Since the probability are multiplied between the sub-components, it is neutral. And if

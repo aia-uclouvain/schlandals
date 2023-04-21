@@ -47,6 +47,7 @@ pub struct Component {
     start: usize,
     /// Size of the component
     size: usize,
+    hash: u64,
 }
 
 pub struct ComponentIterator {
@@ -97,6 +98,7 @@ pub struct ComponentExtractor {
     base: ReversibleUsize,
     /// The first index which is not a component of the current node in the search tree
     limit: ReversibleUsize,
+    seen_var: Vec<bool>,
 }
 
 impl ComponentExtractor {
@@ -106,6 +108,7 @@ impl ComponentExtractor {
         let components = vec![Component {
             start: 0,
             size: g.number_clauses(),
+            hash: 0,
         }];
         Self {
             nodes,
@@ -113,6 +116,7 @@ impl ComponentExtractor {
             components,
             base: state.manage_usize(0),
             limit: state.manage_usize(1),
+            seen_var: vec![false; g.number_variables()],
         }
     }
 
@@ -141,9 +145,11 @@ impl ComponentExtractor {
         node: ClauseIndex,
         comp_start: usize,
         comp_size: &mut usize,
+        hash: &mut u64,
         state: &mut StateManager,
     ) {
         if self.is_node_visitable(g, node, comp_start, comp_size, state) {
+            *hash ^= g.get_clause_random(node);
             // The node is swap with the node at position comp_sart + comp_size
             let current_pos = self.positions[node.0];
             let new_pos = comp_start + *comp_size;
@@ -156,6 +162,19 @@ impl ComponentExtractor {
                 self.positions[moved_node.0] = current_pos;
             }
             *comp_size += 1;
+            
+            for variable in g.clause_body_iter(node, state) {
+                if !self.seen_var[variable.0] && !g.is_variable_bound(variable, state) {
+                    self.seen_var[variable.0] = true;
+                    *hash ^= g.get_variable_random(variable);
+                }
+            }
+            let head = g.get_clause_head(node);
+            if !self.seen_var[head.0] && !g.is_variable_bound(head, state) {
+                self.seen_var[head.0] = true;
+                *hash ^= g.get_variable_random(head);
+            }
+
 
             if g.clause_has_probabilistic(node, state) {
                 for variable in g.clause_body_iter(node, state) {
@@ -171,6 +190,7 @@ impl ComponentExtractor {
                                         c,
                                         comp_start,
                                         comp_size,
+                                        hash,
                                         state,
                                     );
                                 }
@@ -187,6 +207,7 @@ impl ComponentExtractor {
                     parent,
                     comp_start,
                     comp_size,
+                    hash,
                     state,
                 );
             }
@@ -197,6 +218,7 @@ impl ComponentExtractor {
                     child,
                     comp_start,
                     comp_size,
+                    hash,
                     state,
                 );
             }
@@ -255,6 +277,7 @@ impl ComponentExtractor {
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
         self.components.truncate(end);
+        self.seen_var.fill(false);
         state.set_usize(self.base, end);
         let super_comp = self.components[component.0];
         let mut start = super_comp.start;
@@ -275,14 +298,16 @@ impl ComponentExtractor {
             if g.is_clause_constrained(node, state) {
                 // If the clause is active, then we start a new component from it
                 let mut size = 0;
+                let mut hash: u64 = 0;
                 self.explore_component(
                     g,
                     node,
                     start,
                     &mut size,
+                    &mut hash,
                     state,
                 );
-                self.components.push(Component { start, size });
+                self.components.push(Component { start, size, hash});
                 start += size;
             } else {
                 start += 1;
@@ -312,6 +337,10 @@ impl ComponentExtractor {
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {
         state.get_usize(self.limit) - state.get_usize(self.base)
+    }
+    
+    pub fn get_comp_hash(&self, component: ComponentIndex) -> u64 {
+        self.components[component.0].hash
     }
 }
 

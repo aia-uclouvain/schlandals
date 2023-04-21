@@ -54,7 +54,7 @@ pub fn graph_from_ppidimacs(
     state: &mut StateManager,
     propagator: &mut FTReachablePropagator,
 ) -> Graph {
-    let mut g = Graph::new();
+    let mut g = Graph::new(state);
     let file = File::open(filepath).unwrap();
     let reader = BufReader::new(file);
     let mut number_nodes: Option<usize> = None;

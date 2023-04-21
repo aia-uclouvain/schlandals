@@ -39,8 +39,10 @@
 //! Once the graph is constructed, no edge/node should be removed from it. Thus this
 //! implementation does not have problems like dangling indexes.
 
+use crate::core::components::{ComponentIndex, ComponentExtractor};
 use search_trail::*;
 use rustc_hash::FxHashMap;
+use crate::solver::sequential::CacheEntry;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.
 // They are used to retrieve respectively `Variable`, `Edge` and `Clause` in the `Graph`
@@ -152,24 +154,30 @@ pub struct Graph {
     distributions: Vec<Distribution>,
     /// Number of probabilistic nodes in the graph
     number_probabilistic: usize,
-}
-
-impl Default for Graph {
-    fn default() -> Self {
-        Self::new()
-    }
+    min_var_unassigned: ReversibleUsize,
+    max_var_unassigned: ReversibleUsize,
+    variables_bit: Vec<ReversibleU64>,
+    clauses_bit: Vec<ReversibleU64>,
+    variables_random: Vec<u64>,
+    clauses_random: Vec<u64>,
 }
 
 impl Graph {
     
     // --- GRAPH CREATION --- //
 
-    pub fn new() -> Self {
+    pub fn new(state: &mut StateManager) -> Self {
         Self {
             variables: vec![],
             clauses: vec![],
             distributions: vec![],
             number_probabilistic: 0,
+            min_var_unassigned: state.manage_usize(0),
+            max_var_unassigned: state.manage_usize(0),
+            variables_bit: vec![],
+            clauses_bit: vec![],
+            variables_random: vec![],
+            clauses_random: vec![],
         }
     }
 
@@ -209,7 +217,15 @@ impl Graph {
         distribution: Option<DistributionIndex>,
         state: &mut StateManager,
     ) -> VariableIndex {
+        self.variables_random.push(rand::random());
+        state.set_usize(self.max_var_unassigned, self.variables.len());
+        if self.clauses.len() / 64 >= self.clauses_bit.len() {
+            self.clauses_bit.push(state.manage_u64(!0));
+        }
         let id = self.variables.len();
+        if id / 64 >= self.variables_bit.len() {
+            self.variables_bit.push(state.manage_u64(!0));
+        }
         self.variables.push(Variable {
             probabilistic,
             weight,
@@ -234,6 +250,10 @@ impl Graph {
         body: Vec<VariableIndex>,
         state: &mut StateManager,
     ) -> ClauseIndex {
+        self.clauses_random.push(rand::random());
+        if self.clauses.len() / 64 >= self.clauses_bit.len() {
+            self.clauses_bit.push(state.manage_u64(!0));
+        }
         let cid = ClauseIndex(self.clauses.len());
         let number_probabilistic = body.iter().copied().filter(|v| self.is_variable_probabilistic(*v)).count();
         let number_deterministic = body.len() - number_probabilistic;
@@ -339,6 +359,12 @@ impl Graph {
     pub fn set_variable(&mut self, variable: VariableIndex, value: bool, state: &mut StateManager) {
         state.set_bool(self.variables[variable.0].bound, true);
         self.variables[variable.0].value = value;
+        
+        let bit_vec_idx = variable.0 / 64;
+        let bit_idx = variable.0 % 64;
+        let cur_word = state.get_u64(self.variables_bit[bit_vec_idx]);
+        state.set_u64(self.variables_bit[bit_vec_idx], cur_word & !(1 << bit_idx));
+        
         if value {
             for i in 0..self.variables[variable.0].clauses_body.len() {
                 let clause = self.variables[variable.0].clauses_body[i];
@@ -350,6 +376,23 @@ impl Graph {
         if !value && self.is_variable_probabilistic(variable) {
             let d = self.get_variable_distribution(variable).unwrap();
             state.increment_usize(self.distributions[d.0].number_false);
+        }
+        
+        if variable.0 == state.get_usize(self.min_var_unassigned) {
+            let mut cur = variable.0;
+            let end = state.get_usize(self.max_var_unassigned);
+            while cur <= end && state.get_bool(self.variables[cur].bound) {
+                cur += 1;
+            }
+            state.set_usize(self.min_var_unassigned, cur);
+        }
+        if variable.0 == state.get_usize(self.max_var_unassigned) {
+            let mut cur = variable.0;
+            let end = state.get_usize(self.min_var_unassigned);
+            while cur >= end && state.get_bool(self.variables[cur].bound) {
+                cur -= 1;
+            }
+            state.set_usize(self.max_var_unassigned, cur);
         }
     }
 
@@ -372,6 +415,22 @@ impl Graph {
     }
     
     // --- QUERIES --- //
+    
+    pub fn get_bit_representation(&mut self, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> CacheEntry{
+        let vmin = state.get_usize(self.min_var_unassigned);
+        let vmax = state.get_usize(self.max_var_unassigned);
+        let chash = extractor.get_comp_hash(component);
+        let mut v: Vec<u64> = vec![vmin as u64, vmax as u64];
+        for u in self.variables_bit[(vmin/64)..((vmax/64+1))].iter() {
+            v.push(state.get_u64(*u));
+        }
+        let cls = extractor.component_iter(component).collect::<Vec<ClauseIndex>>();
+        for clause in cls {
+            v.push(state.get_u64(self.clauses_bit[clause.0 / 64]));
+
+        }
+        CacheEntry::new(chash, v)
+    }
 
     /// Returns true if the clause is bound. This happens if the size of the clause is 0
     pub fn is_clause_constrained(&self, clause: ClauseIndex, state: &StateManager) -> bool {
@@ -419,10 +478,14 @@ impl Graph {
             self.remove_parent(child, clause, state);
         }
     }
-
+    
     /// Deactivate a clause
     pub fn set_clause_unconstrained(&self, clause: ClauseIndex, state: &mut StateManager) {
         state.set_bool(self.clauses[clause.0].constrained, false);
+        
+        let id = self.clauses_bit[clause.0 / 64];
+        let w = state.get_u64(id);
+        state.set_u64(id, w & !(1 << (clause.0 % 64)));
     }
     
     /// Returns true if there are only one variable unassigned in the distribution, and every other is F
@@ -436,6 +499,14 @@ impl Graph {
     }
     
     // --- GETTERS --- //
+
+    pub fn get_clause_random(&self, clause: ClauseIndex) -> u64 {
+        self.clauses_random[clause.0]
+    }
+    
+    pub fn get_variable_random(&self, variable: VariableIndex) -> u64 {
+        self.variables_random[variable.0]
+    }
     
     /// Returns the number of clause in the graph
     pub fn number_clauses(&self) -> usize {
@@ -528,8 +599,8 @@ mod test_graph_creation {
 
     #[test]
     pub fn variables_creation() {
-        let mut g = Graph::default();
         let mut state = StateManager::default();
+        let mut g = Graph::new(&mut state);
         let x = (0..3).map(|x| g.add_variable(true, Some(1.0 / (x + 1) as f64), Some(DistributionIndex(x)), &mut state)).collect::<Vec<VariableIndex>>();
         for i in 0..3 {
             assert_eq!(VariableIndex(i), x[i]);
@@ -559,8 +630,8 @@ mod test_graph_creation {
     
     #[test]
     pub fn distribution_creation() {
-        let mut g = Graph::default();
         let mut state = StateManager::default();
+        let mut g = Graph::new(&mut state);
         let v = g.add_distribution(&vec![0.3, 0.7], &mut state);
         assert_eq!(2, g.variables.len());
         assert_eq!(2, v.len());
@@ -589,8 +660,8 @@ mod test_graph_creation {
     
     #[test]
     pub fn clauses_creation() {
-        let mut g = Graph::default();
         let mut state = StateManager::default();
+        let mut g = Graph::new(&mut state);
         let _ds = (0..3).map(|_| g.add_distribution(&vec![0.4], &mut state)).collect::<Vec<Vec<VariableIndex>>>();
         let p = (0..3).map(VariableIndex).collect::<Vec<VariableIndex>>();
         let d = (0..3).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();

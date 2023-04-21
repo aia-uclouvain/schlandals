@@ -18,7 +18,6 @@ pub mod branching;
 pub mod propagator;
 pub mod sequential;
 mod statistics;
-mod cache;
 
 use crate::solver::sequential::Solver;
 
