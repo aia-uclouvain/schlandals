@@ -172,11 +172,14 @@ impl BranchingDecision for MinInDegree {
     ) -> Option<DistributionIndex> {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut best_score = usize::MAX;
+        let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
             if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
                 let score = g.get_clause_number_parents(clause, state);
-                if score < best_score {
+                let tie = g.get_clause_removed_parents(clause, state);
+                if score < best_score || (score == best_score && tie < best_tie) {
                     best_score = score;
+                    best_tie = tie;
                     best_clause = Some(clause);
                 }
             }
@@ -207,11 +210,14 @@ impl BranchingDecision for MinOutDegree {
     ) -> Option<DistributionIndex> {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut best_score = usize::MAX;
+        let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
             if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
                 let score = g.get_clause_number_children(clause, state);
-                if score < best_score {
+                let tie = g.get_clause_removed_children(clause, state);
+                if score < best_score || (score == best_score && tie < best_tie) {
                     best_score = score;
+                    best_tie = tie;
                     best_clause = Some(clause);
                 }
             }

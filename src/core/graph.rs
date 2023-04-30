@@ -550,9 +550,17 @@ impl Graph {
     pub fn get_clause_number_parents(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         state.get_usize(self.clauses[clause.0].number_parent)
     }
+    
+    pub fn get_clause_removed_parents(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        self.clauses[clause.0].parents.len() - self.get_clause_number_parents(clause, state)
+    }
 
     pub fn get_clause_number_children(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         state.get_usize(self.clauses[clause.0].number_child)
+    }
+    
+    pub fn get_clause_removed_children(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        self.clauses[clause.0].children.len() - self.get_clause_number_children(clause, state)
     }
 
     // --- ITERATORS --- //
