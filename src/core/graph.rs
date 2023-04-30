@@ -464,7 +464,7 @@ impl Graph {
     
     /// Returns the number of unassigned variable in the body of a clause
     pub fn clause_number_unassigned(&self, clause: ClauseIndex, state: &StateManager) -> usize {
-        state.get_usize(self.clauses[clause.0].number_deterministic) + state.get_usize(self.clauses[clause.0].number_probabilistic)
+        state.get_usize(self.clauses[clause.0].body_size)
     }
     
     pub fn remove_clause_from_parent(&mut self, clause: ClauseIndex, state: &mut StateManager) {
