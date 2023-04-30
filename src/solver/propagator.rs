@@ -140,7 +140,7 @@ impl FTReachablePropagator {
                     }
                 }
             }
-            
+
             if is_p {
                 let distribution = g.get_variable_distribution(variable).unwrap();
                 if value {
@@ -151,15 +151,16 @@ impl FTReachablePropagator {
                     }
                     for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {
                         match g.get_variable_value(v, state) {
-                            None => self.add_to_propagation_stack(v, false),
-                            Some(v) => {
-                                if v {
+                            None => {
+                                self.add_to_propagation_stack(v, false)
+                            },
+                            Some(vv) => {
+                                if vv {
                                     self.clear();
                                     return PropagationResult::Err(Unsat);
                                 }
                             }
                         };
-                        
                     }
                 } else if g.distribution_one_left(distribution, state) {
                     if let Some(v) = g.distribution_variable_iter(distribution).find(|v| !g.is_variable_bound(*v, state)) {
@@ -167,6 +168,7 @@ impl FTReachablePropagator {
                     }
                 }
             }
+            
         }
         propagation_prob *= self.propagate_unconstrained_clauses(g, state)?;
         PropagationResult::Ok(propagation_prob)
