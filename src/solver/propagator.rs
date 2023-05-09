@@ -54,7 +54,7 @@ impl FTReachablePropagator {
             f128!(1.0)
         } else {
             let mut p = f128!(0.0);
-            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_bound(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
                 p += w;
             }
             p
@@ -68,9 +68,9 @@ impl FTReachablePropagator {
             g.remove_clause_from_children(clause, state);
             g.remove_clause_from_parent(clause, state);
             for variable in g.clause_body_iter(clause, state) {
-                if g.is_variable_probabilistic(variable) && !g.is_variable_bound(variable, state) {
+                if g.is_variable_probabilistic(variable) && !g.is_variable_fixed(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
-                    if g.decrement_distribution_clause_counter(distribution, state) == 0 {
+                    if g.decrement_distribution_constrained_clause_counter(distribution, state) == 0 {
                         p *= self.get_simplified_distribution_prob(g, distribution, state);
                     }
                 }
@@ -121,7 +121,7 @@ impl FTReachablePropagator {
                                 }
                             }
                         } else if body_remaining == 1 && head_false {
-                            let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                            let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
                             self.add_to_propagation_stack(v, false);
                         }
                     } else {
@@ -135,7 +135,7 @@ impl FTReachablePropagator {
                     if value {
                         self.add_unconstrained_clause(clause, g, state);
                     } else if g.clause_number_unassigned(clause, state) == 1 {
-                        let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_bound(*v, state)).unwrap();
+                        let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
                         self.propagation_stack.push((v, false));
                     }
                 }
@@ -163,7 +163,7 @@ impl FTReachablePropagator {
                         };
                     }
                 } else if g.distribution_one_left(distribution, state) {
-                    if let Some(v) = g.distribution_variable_iter(distribution).find(|v| !g.is_variable_bound(*v, state)) {
+                    if let Some(v) = g.distribution_variable_iter(distribution).find(|v| !g.is_variable_fixed(*v, state)) {
                         self.add_to_propagation_stack(v, true);
                     }
                 }

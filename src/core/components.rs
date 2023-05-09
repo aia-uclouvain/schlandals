@@ -164,13 +164,13 @@ impl ComponentExtractor {
             *comp_size += 1;
             
             for variable in g.clause_body_iter(node, state) {
-                if !self.seen_var[variable.0] && !g.is_variable_bound(variable, state) {
+                if !self.seen_var[variable.0] && !g.is_variable_fixed(variable, state) {
                     self.seen_var[variable.0] = true;
                     *hash ^= g.get_variable_random(variable);
                 }
             }
             let head = g.get_clause_head(node);
-            if !self.seen_var[head.0] && !g.is_variable_bound(head, state) {
+            if !self.seen_var[head.0] && !g.is_variable_fixed(head, state) {
                 self.seen_var[head.0] = true;
                 *hash ^= g.get_variable_random(head);
             }
@@ -179,11 +179,11 @@ impl ComponentExtractor {
             if g.clause_has_probabilistic(node, state) {
                 for variable in g.clause_body_iter(node, state) {
                     if g.is_variable_probabilistic(variable)
-                        && !g.is_variable_bound(variable, state)
+                        && !g.is_variable_fixed(variable, state)
                     {
                         let d = g.get_variable_distribution(variable).unwrap();
                         for v in g.distribution_variable_iter(d) {
-                            if !g.is_variable_bound(v, state) {
+                            if !g.is_variable_fixed(v, state) {
                                 for c in g.variable_clause_body_iter(v) {
                                     self.explore_component(
                                         g,
