@@ -412,7 +412,7 @@ impl Graph {
         let vmax = state.get_usize(self.max_var_unassigned);
         let chash = extractor.get_comp_hash(component);
         let mut v: Vec<u64> = vec![vmin as u64, vmax as u64];
-        for u in self.variables_bit[(vmin/64)..((vmax/64+1))].iter() {
+        for u in self.variables_bit[(vmin/64)..(vmax/64+1)].iter() {
             v.push(state.get_u64(*u));
         }
         let cls = extractor.component_iter(component).collect::<Vec<ClauseIndex>>();

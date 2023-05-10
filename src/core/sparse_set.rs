@@ -71,6 +71,7 @@ pub struct SparseSet<T>
     size: ReversibleUsize,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl<T> SparseSet<T> 
     where T: Hash + Eq + Copy,
 {
