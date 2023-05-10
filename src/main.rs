@@ -50,8 +50,6 @@ struct Args {
 enum Branching {
     /// Heuristic based on the fiedler value of the clause graph
     Fiedler,
-    /// VSIDS
-    Vsids,
     /// Minimum In-degree of a clause in the implication-graph
     MinInDegree,
     /// Minimum Out-degree of a clause in the implication-graph
@@ -68,7 +66,6 @@ fn main() {
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
         Branching::Fiedler => Box::<Fiedler>::default(),
-        Branching::Vsids => Box::<Vsids>::default(),
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
