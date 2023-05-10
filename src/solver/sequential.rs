@@ -14,6 +14,16 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
+//! This module provides the main structure of the solver. It is responsible for orchestring
+//! all the different parts and glue them together.
+//! The algorithm starts by doing an initial propagation of the variables indentified during the
+//! parsing of the input file, and then solve recursively the problem.
+//! It uses the branching decision to select which variable should be propagated next, call the propagator
+//! and identified the independent component.
+//! It is also responsible for updating the cache and clearing it when the memory limit is reached.
+//! Finally it save and restore the states of the reversible variables used in the solver.
+
 use std::hash::Hash;
 
 use rustc_hash::FxHashMap;
@@ -29,34 +39,20 @@ use crate::common::PEAK_ALLOC;
 
 use rug::Float;
 
-/// A solution of a node in the search space. It gives its probability of the sub-graph induced in
-/// the node and the number of solutions in its subtree.
-/// The probability of a node can be computed as follows
-///     - If there are no probabilistic node in the sub-graph of the node, then the probability is
-///     1
-///     - Otherwise take some distribution with nodes p1, ..., pn in the sub-graph. Let us denote
-///     N1, ..., Nn the nodes obtained by assigning pi to true. Then the probability of the node is
-///     P(N1) + ...  + P(Nn)
-/// If the problem is divided in multiple components (there are no nodes in multiple components)
-/// then the probabilities of the components are multiplied).
-///
-/// The counts can be computed in the same manner.
-///     - If there are no probabilistic nodes in the sub-graph, then the solution count is 1 by
-///     default
-///     - If not, using the same procedure as above, the count is the sum of the count of the
-///     children (multiplied for independent sub-components)
-
-
+/// Unit structure representing the the problem is UNSAT
 #[derive(Debug)]
 pub struct Unsat;
 
+/// Type alias used for the solution of the problem, which is either a Float or UNSAT
 type ProblemSolution = Result<Float, Unsat>;
 
+/// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
+/// and has a constant parameter that tells if statistics must be recorded or not.
 pub struct Solver<'b, B, const S: bool>
 where
     B: BranchingDecision + ?Sized,
 {
-    /// Graph representing the input formula
+    /// Implication graph of the input CNF formula
     graph: Graph,
     /// State manager that allows to retrieve previous values when backtracking in the search tree
     state: StateManager,
@@ -66,13 +62,22 @@ where
     branching_heuristic: &'b mut B,
     /// The propagator
     propagator: FTReachablePropagator,
-    /// Cache used to store results of subtrees
+    /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Float>,
     /// Statistics collectors
     statistics: Statistics<S>,
+    /// Memory limit allowed for the solver. This is a global memory limit, not a cache-size limit
     mlimit: u64,
 }
 
+/// A key of the cache. It is composed of
+///     1. A hash representing the sub-problem being solved
+///     2. The bitwise representation of the sub-problem being solved
+/// 
+/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
+/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
+/// two different sub-problems have different hash.
+/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
 #[derive(Default)]
 pub struct CacheEntry {
     hash: u64,
@@ -131,10 +136,9 @@ where
         }
     }
 
-    /// Returns the solution for the sub-graph identified by the component. If the solution is in
+    /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
     fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> Float {
-        // Need to rethink the hash strategy -> only the nodes is insufficient, need the edges
         self.statistics.cache_access();
         let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
         match self.cache.get(&bit_repr) {
@@ -152,7 +156,7 @@ where
 
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
     /// solution of the component.
-    /// The solution is the sum of the probability/count of the SAT children.
+    /// The solution is the sum of the probability of the SAT children.
     fn choose_and_branch(&mut self, component: ComponentIndex) -> Float {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
@@ -180,14 +184,14 @@ where
             }
             node_sol
         } else {
-            // All distributions have been assigned 1 value, this is 1 assignement that is SAT for the probability variables
-            // and extends to deterministic variables.
+            // The sub-formula is SAT, by definition return 1
             f128!(1.0)
         }
     }
 
     /// Solves the problem for the sub-graph identified by component.
     pub fn _solve(&mut self, component: ComponentIndex) -> Float {
+        // If the memory limit is reached, clear the cache.
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.cache.clear();
         }
@@ -201,41 +205,31 @@ where
             .component_extractor
             .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
         {
-            match self.propagator.propagate_unconstrained_clauses(&mut self.graph, &mut self.state) {
-                Ok(v) => solution *= v,
-                Err(_) => {
-                    panic!("Propagating unconstrained clauses raised UNSAT, should not happen");
-                }
-            };
             self.statistics.and_node();
             self.statistics
                 .decomposition(self.component_extractor.number_components(&self.state));
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 solution *= self.get_cached_component_or_compute(sub_component);
+                // If one sub-component has a probability of 0, then the probability of all sibling sub-components
+                // are meaningless
                 if solution == 0.0 {
                     break;
                 }
             }
-        } else {
-            match self.propagator.propagate_unconstrained_clauses(&mut self.graph, &mut self.state) {
-                Ok(v) => solution *= v,
-                Err(_) => {
-                    panic!("Propagating unconstrained clauses raised UNSAT, should not happen");
-                }
-            };
         }
         self.state.restore_state();
         solution
     }
 
     /// Solve the problems represented by the graph with the given branching heuristic.
-    /// This means that it find all the assignment to the probabilistic nodes for which there
-    /// exists an assignment to the deterministic nodes that respect the constraints in the graph.
-    /// Each assignment is weighted by the product (or sum in log-domain) of the probabilistic
-    /// nodes assigned to true. The solution of the root node is the sum of the weights of such
-    /// assigments.
+    /// It finds all the assignments to the probabilistic variables for which there
+    /// exists an assignment to the deterministic variables that respect the constraints.
+    /// Each assignment is weighted by the product of the probabilistic variables assigned to true.
     pub fn solve(&mut self) -> ProblemSolution {
+        // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
+        // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.set_number_clauses(self.graph.number_clauses());
+        // Doing an initial propagation to detect some UNSAT formula from the start
         match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
             Err(_) => ProblemSolution::Err(Unsat),
             Ok(p) => {
@@ -247,6 +241,7 @@ where
                         break;
                     }
                 }
+                // If the graph still has constrained clauses, start the search.
                 if has_constrained {
                     self.branching_heuristic.init(&self.graph, &self.state);
                     let mut solution = self._solve(ComponentIndex(0));
