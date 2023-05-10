@@ -165,7 +165,7 @@ where
             let mut node_sol = f128!(0.0);
             for variable in self.graph.distribution_variable_iter(distribution) {
                 self.state.save_state();
-                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state) {
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
                     Err(_) => {
                     }
                     Ok(v) => {
@@ -235,14 +235,27 @@ where
     /// nodes assigned to true. The solution of the root node is the sum of the weights of such
     /// assigments.
     pub fn solve(&mut self) -> ProblemSolution {
-        match self.propagator.propagate(&mut self.graph, &mut self.state) {
+        self.propagator.set_number_clauses(self.graph.number_clauses());
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
             Err(_) => ProblemSolution::Err(Unsat),
             Ok(p) => {
-                self.branching_heuristic.init(&self.graph, &self.state);
-                let mut solution = self._solve(ComponentIndex(0));
-                solution *= p;
-                self.statistics.print();
-                ProblemSolution::Ok(solution)
+                // Checks if there are still constrained clauses in the graph
+                let mut has_constrained = false;
+                for clause in self.graph.clause_iter() {
+                    if self.graph.is_clause_constrained(clause, &self.state) {
+                        has_constrained = true;
+                        break;
+                    }
+                }
+                if has_constrained {
+                    self.branching_heuristic.init(&self.graph, &self.state);
+                    let mut solution = self._solve(ComponentIndex(0));
+                    solution *= p;
+                    self.statistics.print();
+                    ProblemSolution::Ok(solution)
+                } else {
+                    ProblemSolution::Ok(p)
+                }
             }
         }
     }

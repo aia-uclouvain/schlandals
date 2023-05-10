@@ -13,9 +13,42 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+//! This module give the implentation of the propagator used during the search.
+//! It is called at the creation of the solver, to do an initial propagation, and 
+//! during the search after all branching decisions.
+//! In practice, it first does a boolean unit propagation (BUP) until a fix point is
+//! reached.
+//! In our case, the BUP works as follows (any inconsistency throws an UNSAT errors and ends
+//! the propagation immediatly):
+//!     - There is a propagation stack S
+//!     - While S is not empty, pop a tuple (variable, value) and assign value to variable
+//!     - if value = true:
+//!         - If the variable is probabilistic, for all variable v' in the distribution, add (v', false)
+//!           to the propagation stack
+//!         - Set all clauses which have the variable as their head to be unconstrained
+//!         - Remove the variable from the body of all the clauses in which it appears. If the body has no
+//!           more variable in it, add to the propagation stack (head, true) with head the head of the clause.
+//!     - if value = false:
+//!         - If the variable is probabilistic and only one variable (v') remain not fixed in the distribution,
+//!           add (v', true) to the propagation stack
+//!         - Set all the clauses which have the variable in their implicant as unconstrained
+//!         
+//! Once this is done, each clause is set as f-reachable or t-reachable. A clause is f-reachable if
+//!     1. Its head is set to F OR
+//!     2. Its head is an unfixed probabilistic variable OR
+//!     3. One of its descendant in the implication graph is f-reachable
+//! On the other hand, a clause is t-reachable if
+//!     1. Its implicant has no deterministic variable OR
+//!     2. One of its ancestor in the implication graph is t-reachable
+//! 
+//! This is done by a simple traversal of the implication graph, starting from the clauses respecting condition
+//! 1,2 for f-reachability or 1 for t-reachability. Finally every unconstrained clause is processed.
+
 use search_trail::StateManager;
 
 use crate::common::f128;
+use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, VariableIndex};
 use rug::Float;
 
@@ -28,19 +61,30 @@ pub type PropagationResult = Result<Float, Unsat>;
 pub struct FTReachablePropagator {
     propagation_stack: Vec<(VariableIndex, bool)>,
     pub unconstrained_clauses: Vec<ClauseIndex>,
+    t_reachable: Vec<bool>,
+    f_reachable: Vec<bool>,
 }
 
 impl FTReachablePropagator {
     
+    /// Sets the number of clauses for the f-reachable and t-reachable vectors
+    pub fn set_number_clauses(&mut self, n: usize) {
+        self.t_reachable.resize(n, false);
+        self.f_reachable.resize(n, false);
+    }
+    
+    /// Adds a variable to be propagated with the given value
     pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool) {
         self.propagation_stack.push((variable, value));
     }
     
-    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+    /// Propagates a variable to the given value. The component of the variable is also given to be able to use the {f-t}-reachability.
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> PropagationResult {
         self.add_to_propagation_stack(variable, value);
-        self.propagate(g, state)
+        self.propagate(g, state, component, extractor)
     }
     
+    /// Adds a clause to be processed as unconstrained
     pub fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Graph, state: &mut StateManager) {
         if g.is_clause_constrained(clause, state) {
             g.set_clause_unconstrained(clause, state);
@@ -49,6 +93,8 @@ impl FTReachablePropagator {
         }
     }
     
+    /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
+    /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn get_simplified_distribution_prob(&self, g: &Graph, distribution: DistributionIndex, state: &StateManager) -> Float {
         if g.distribution_number_false(distribution, state) == 0 {
             f128!(1.0)
@@ -61,13 +107,16 @@ impl FTReachablePropagator {
         }
     }
     
+    /// Propagates all the unconstrained clauses in the unconstrained clauses stack. It actually updates the sparse-sets of
+    /// parents/children in the graph and, if necessary, computes the unconstrained probability of the distributions.
+    /// It returns the overall unconstrained probability of the component after the whole propagation.
     pub fn propagate_unconstrained_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
         let mut p = f128!(1.0);
         while let Some(clause) = self.unconstrained_clauses.pop() {
-            debug_assert!(!self.unconstrained_clauses.contains(&clause));
             g.remove_clause_from_children(clause, state);
             g.remove_clause_from_parent(clause, state);
-            for variable in g.clause_body_iter(clause, state) {
+            debug_assert!(!self.unconstrained_clauses.contains(&clause));
+            for variable in g.clause_body_iter(clause, state).chain(std::iter::once(g.get_clause_head(clause))) {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_fixed(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
                     if g.decrement_distribution_constrained_clause_counter(distribution, state) == 0 {
@@ -79,12 +128,16 @@ impl FTReachablePropagator {
         PropagationResult::Ok(p)
     }
     
+    /// Clears the propagation stack as well as the unconstrained clauses stack. This function
+    /// is called when an UNSAT has been encountered.
     fn clear(&mut self) {
         self.propagation_stack.clear();
         self.unconstrained_clauses.clear();
     }
 
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
+    /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
+    /// the {f-t}-reachability.
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
         let mut propagation_prob = f128!(1.0);
         while let Some((variable, value)) = self.propagation_stack.pop() {
@@ -170,309 +223,62 @@ impl FTReachablePropagator {
             }
             
         }
+        self.set_reachability(g, state, component, extractor);
+        for clause in extractor.component_iter(component) {
+            if !self.t_reachable[clause.0] || !self.f_reachable[clause.0] {
+                self.add_unconstrained_clause(clause, g, state);
+            }
+        }
         propagation_prob *= self.propagate_unconstrained_clauses(g, state)?;
         PropagationResult::Ok(propagation_prob)
     }
+
+    /// Sets the clause to be t-reachable and recursively sets its children to be t-reachable. Notice
+    /// that we will never sets a clause that is not in the current components. Since the current components
+    /// contains all the constrained clauses reachable from the current clause, it contains all the children of the
+    /// clause. Since we juste unit-propagated the components, we only have to check for unconstrained clause to avoid unncessary
+    /// computations.
+    fn set_t_reachability(&mut self, g: &Graph, state: &StateManager, clause: ClauseIndex) {
+        if !self.t_reachable[clause.0] {
+            self.t_reachable[clause.0] = true;
+            for child in g.children_clause_iter(clause, state) {
+                if g.is_clause_constrained(child, state) {
+                    self.set_t_reachability(g, state, child);
+                }
+            }
+        }
+    }
+
+    /// Sets the clause to be f-reachable and recursively sets its parents to be f-reachable. Notice
+    /// that we will never sets a clause that is not in the current components. Since the current components
+    /// contains all the constrained clauses reachable from the current clause, it contains all the parents of the
+    /// clause. Since we juste unit-propagated the components, we only have to check for unconstrained clause to avoid unncessary
+    /// computations.
+    fn set_f_reachability(&mut self, g: &Graph, state: &StateManager, clause: ClauseIndex) {
+        if !self.f_reachable[clause.0] {
+            self.f_reachable[clause.0] = true;
+            for parent in g.parents_clause_iter(clause, state) {
+                if g.is_clause_constrained(parent, state) {
+                    self.set_f_reachability(g, state, parent);
+                }
+            }
+        }
+    }
+    
+    /// Sets the t-reachability and f-reachability for all clauses in the component
+    fn set_reachability(&mut self, g: &Graph, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
+        self.t_reachable.fill(false);
+        self.f_reachable.fill(false);
+        for clause in extractor.component_iter(component) {
+            let head = g.get_clause_head(clause);
+            let head_value = g.get_variable_value(head, state);
+            if (g.is_variable_probabilistic(head) && !g.is_variable_fixed(head, state)) || (head_value.is_some() && !head_value.unwrap()) {
+                self.set_f_reachability(g, state, clause);
+            }
+            if g.clause_number_deterministic(clause, state) == 0 {
+                self.set_t_reachability(g, state, clause);
+            }
+        }
+    }
+
 }
-
-/*
-#[cfg(test)]
-mod test_simple_propagator_propagation {
-
-    use crate::core::graph::{Graph, NodeIndex};
-    use crate::core::trail::StateManager;
-    use crate::solver::propagator::SimplePropagator;
-
-    #[test]
-    fn initial_propagation_simple_implications() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let d: Vec<NodeIndex> = (0..4)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect();
-        let p: Vec<NodeIndex> = (0..4)
-            .map(|_| g.add_distribution(&vec![0.1], &mut state)[0])
-            .collect();
-
-        // determinisdeativae_lause
-        // d[1] -> d[0]
-        g.add_clause(d[0], &vec![d[1]], &mut state);
-        // deterministic -> probabilistic
-        // d[2] -> p[0]
-        g.add_clause(p[0], &vec![d[2]], &mut state);
-        // probabilistic -> deterministic
-        // p[1] -> d[3]
-        g.add_clause(d[3], &vec![p[1]], &mut state);
-        // probabilistic -> probabilistic
-        // p[2] -> p[3]
-        g.add_clause(p[3], &vec![p[2]], &mut state);
-
-        g.propagate(&mut state).unwrap();
-        assert!(g.is_node_bound(d[0], &state));
-        assert!(g.is_node_bound(d[1], &state));
-        assert!(g.is_node_bound(d[2], &state));
-        assert!(g.is_node_bound(d[3], &state));
-        assert_eq!(true, g.get_node_value(d[0]));
-        assert_eq!(true, g.get_node_value(d[1]));
-        assert_eq!(false, g.get_node_value(d[2]));
-        assert_eq!(true, g.get_node_value(d[3]));
-    }
-
-    #[test]
-    fn initial_propagation_chained_implications() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let d: Vec<NodeIndex> = (0..6)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect();
-        let p: Vec<NodeIndex> = (0..3)
-            .map(|_| g.add_distribution(&vec![0.1], &mut state)[0])
-            .collect();
-
-        // d[0] -> d[1] -> d[2]
-        g.add_clause(d[1], &vec![d[0]], &mut state);
-        g.add_clause(d[2], &vec![d[1]], &mut state);
-
-        // d[3] -> p[0] -> d[4]
-        g.add_clause(p[0], &vec![d[3]], &mut state);
-        g.add_clause(d[4], &vec![p[0]], &mut state);
-
-        // p[1] -> d[5] -> p[2]
-        g.add_clause(d[5], &vec![p[1]], &mut state);
-        g.add_clause(p[2], &vec![d[5]], &mut state);
-
-        g.propagate(&mut state).unwrap();
-
-        assert!(g.is_node_bound(d[0], &state));
-        assert!(g.is_node_bound(d[1], &state));
-        assert!(g.is_node_bound(d[2], &state));
-        assert!(g.is_node_bound(d[3], &state));
-        assert!(g.is_node_bound(d[4], &state));
-        assert!(!g.is_node_bound(d[5], &state));
-        assert!(!g.is_node_bound(p[1], &state));
-        assert!(!g.is_node_bound(p[2], &state));
-
-        assert_eq!(false, g.get_node_value(d[0]));
-        assert_eq!(false, g.get_node_value(d[1]));
-        assert_eq!(false, g.get_node_value(d[2]));
-        assert_eq!(false, g.get_node_value(d[3]));
-        assert_eq!(true, g.get_node_value(d[4]));
-    }
-}
-
-#[cfg(test)]
-mod test_simple_propagator_node_propagation {
-    use crate::core::graph::{Graph, NodeIndex};
-    use crate::core::trail::{SaveAndRestore, StateManager};
-    use crate::solver::propagator::SimplePropagator;
-
-    //#[test]
-    fn simple_implications() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let d = g.add_node(false, None, None, &mut state);
-        let p1 = g.add_distribution(&vec![1.0], &mut state);
-        let p2 = g.add_distribution(&vec![1.0], &mut state);
-        let d2 = g.add_node(false, None, None, &mut state);
-        let d3 = g.add_node(false, None, None, &mut state);
-
-        // d3 -> p1
-        // p1 -> d
-        // d -> p2
-        // p2 -> d2
-        g.add_clause(p1[0], &vec![d3], &mut state);
-        g.add_clause(d, &vec![p1[0]], &mut state);
-        g.add_clause(p2[0], &vec![d], &mut state);
-        g.add_clause(d2, &vec![p2[0]], &mut state);
-
-        state.save_state();
-
-        match g.propagate_node(p1[0], true, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-
-        assert!(g.is_node_bound(d, &state));
-        assert!(g.is_node_bound(p1[0], &state));
-        assert!(g.is_node_bound(p2[0], &state));
-        assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p1[0]));
-        assert_eq!(true, g.get_node_value(p2[0]));
-
-        state.restore_state();
-        state.save_state();
-
-        match g.propagate_node(p1[0], false, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        // This assert is not valid anymore since component with only distribution are computed during the propagation
-        //assert!(g.is_node_bound(d, &state));
-        assert!(g.is_node_bound(p1[0], &state));
-        assert!(!g.is_node_bound(p2[0], &state));
-        assert_eq!(false, g.get_node_value(p1[0]));
-
-        state.restore_state();
-        state.save_state();
-
-        g.propagate_node(p2[0], true, &mut state).unwrap();
-        assert!(g.is_node_bound(d, &state));
-        assert!(!g.is_node_bound(p1[0], &state));
-        assert!(g.is_node_bound(p2[0], &state));
-        assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p2[0]));
-
-        state.restore_state();
-        state.save_state();
-
-        match g.propagate_node(p2[0], false, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        assert!(g.is_node_bound(d, &state));
-        assert!(g.is_node_bound(p1[0], &state));
-        assert!(g.is_node_bound(p2[0], &state));
-        assert_eq!(false, g.get_node_value(d));
-        assert_eq!(false, g.get_node_value(p1[0]));
-        assert_eq!(false, g.get_node_value(p2[0]));
-    }
-
-    //#[test]
-    fn test_multiple_edges_different_clauses() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let d = g.add_node(false, None, None, &mut state);
-        let d2 = g.add_node(false, None, None, &mut state);
-        let d3 = g.add_node(false, None, None, &mut state);
-        let d4 = g.add_node(false, None, None, &mut state);
-        let d5 = g.add_node(false, None, None, &mut state);
-        let dp1 = g.add_distribution(&vec![0.5, 0.5], &mut state);
-        let dp2 = g.add_distribution(&vec![0.5, 0.5], &mut state);
-        let p1 = dp1[0];
-        let p2 = dp1[1];
-        let p3 = dp2[0];
-        let p4 = dp2[1];
-
-        //
-        // d2 -> p1 -> d ----> p3 -> d4
-        // d3 -> p2 ---|  |
-        //                |--> p4 -> d5
-
-        g.add_clause(p1, &vec![d2], &mut state);
-        g.add_clause(p2, &vec![d3], &mut state);
-        g.add_clause(d4, &vec![p3], &mut state);
-        g.add_clause(d5, &vec![p4], &mut state);
-
-        g.add_clause(d, &vec![p1], &mut state);
-        g.add_clause(d, &vec![p2], &mut state);
-        g.add_clause(p3, &vec![d], &mut state);
-        g.add_clause(p4, &vec![d], &mut state);
-
-        state.save_state();
-
-        match g.propagate_node(p1, true, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        assert!(g.is_node_bound(d, &state));
-        assert!(g.is_node_bound(p1, &state));
-        assert!(!g.is_node_bound(p2, &state));
-        assert!(g.is_node_bound(p3, &state));
-        assert!(g.is_node_bound(p4, &state));
-        assert_eq!(true, g.get_node_value(d));
-        assert_eq!(true, g.get_node_value(p1));
-        assert_eq!(false, g.get_node_value(p3));
-        assert_eq!(true, g.get_node_value(p4));
-
-        state.restore_state();
-        state.save_state();
-
-        match g.propagate_node(p1, false, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        assert!(g.is_node_bound(d, &state));
-        assert_eq!(true, g.get_node_value(d));
-        assert!(g.is_node_bound(p1, &state));
-        assert!(g.is_node_bound(p2, &state));
-        assert_eq!(true, g.get_node_value(p2));
-        assert!(!g.is_node_bound(p3, &state));
-        assert!(!g.is_node_bound(p4, &state));
-        assert_eq!(false, g.get_node_value(p1));
-
-        state.restore_state();
-        state.save_state();
-
-        g.propagate_node(p3, true, &mut state).unwrap();
-        assert!(!g.is_node_bound(d, &state));
-        assert!(!g.is_node_bound(p1, &state));
-        assert!(!g.is_node_bound(p2, &state));
-        assert!(g.is_node_bound(p3, &state));
-        assert!(!g.is_node_bound(p4, &state));
-        assert_eq!(true, g.get_node_value(p3));
-
-        state.restore_state();
-        state.save_state();
-
-        match g.propagate_node(p3, false, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        assert!(g.is_node_bound(d, &state));
-        assert!(!g.is_node_bound(d2, &state));
-        assert!(!g.is_node_bound(p1, &state));
-        assert!(!g.is_node_bound(d3, &state));
-        assert!(!g.is_node_bound(p2, &state));
-        assert!(g.is_node_bound(p3, &state));
-        assert!(!g.is_node_bound(p4, &state));
-        assert_eq!(false, g.get_node_value(d));
-        assert_eq!(false, g.get_node_value(p1));
-        assert_eq!(false, g.get_node_value(p2));
-        assert_eq!(false, g.get_node_value(p3));
-    }
-
-    #[test]
-    fn test_distribution() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let nodes = g.add_distribution(&vec![0.1, 0.2, 0.7], &mut state);
-        let d = g.add_node(false, None, None, &mut state);
-        g.add_clause(d, &vec![nodes[0], nodes[2]], &mut state);
-        g.add_clause(nodes[1], &vec![d], &mut state);
-
-        match g.propagate_node(nodes[0], true, &mut state) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        assert!(g.is_node_bound(nodes[0], &state));
-        assert!(g.is_node_bound(nodes[1], &state));
-        assert!(g.is_node_bound(nodes[2], &state));
-        assert_eq!(true, g.get_node_value(nodes[0]));
-        assert_eq!(false, g.get_node_value(nodes[1]));
-        assert_eq!(false, g.get_node_value(nodes[2]));
-    }
-
-    #[test]
-    fn test_multiple_implicant_last_false() {
-        let mut state = StateManager::default();
-        let mut g = Graph::new();
-        let nodes = (0..3)
-            .map(|_| g.add_node(false, None, None, &mut state))
-            .collect::<Vec<NodeIndex>>();
-        g.add_clause(nodes[0], &nodes[1..], &mut state);
-        g.propagate_node(NodeIndex(0), false, &mut state).unwrap();
-        assert!(g.is_node_bound(NodeIndex(0), &state));
-        assert_eq!(false, g.get_node_value(NodeIndex(0)));
-        assert!(!g.is_node_bound(NodeIndex(1), &state));
-        assert!(!g.is_node_bound(NodeIndex(2), &state));
-
-        g.propagate_node(NodeIndex(1), true, &mut state).unwrap();
-        assert!(g.is_node_bound(NodeIndex(0), &state));
-        assert_eq!(false, g.get_node_value(NodeIndex(0)));
-        assert!(g.is_node_bound(NodeIndex(1), &state));
-        assert_eq!(true, g.get_node_value(NodeIndex(1)));
-        assert!(g.is_node_bound(NodeIndex(2), &state));
-        assert_eq!(false, g.get_node_value(NodeIndex(2)));
-    }
-}
-*/

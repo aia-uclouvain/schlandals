@@ -206,48 +206,6 @@ impl ComponentExtractor {
             }
         }
     }
-    
-    /// Set the clauses at position `pos` to be t-reachable. Recursively sets all its constrained children to be
-    /// t-reachable
-    fn set_t_reachability(&self, g: &Graph, state: &StateManager, t_reachable: &mut Vec<bool>, pos: usize, super_comp_start: usize, super_comp_end: usize) {
-        if super_comp_start <= pos && pos < super_comp_end && !t_reachable[pos - super_comp_start] {
-            let clause = self.clauses[pos];
-            t_reachable[pos - super_comp_start] = true;
-            for child in g.children_clause_iter(clause, state) {
-                let new_pos = self.positions[child.0];
-                self.set_t_reachability(g, state, t_reachable, new_pos, super_comp_start, super_comp_end);
-            }
-        }
-    }
-
-    /// Set the clauses at position `pos` to be f-reachable. Recursively sets all its constrained parents to be
-    /// f-reachable
-    fn set_f_reachability(&self, g: &Graph, state: &StateManager, f_reachable: &mut Vec<bool>, pos: usize, super_comp_start: usize, super_comp_end: usize) {
-        if super_comp_start <= pos && pos < super_comp_end && !f_reachable[pos - super_comp_start] {
-            f_reachable[pos - super_comp_start] = true;
-            let clause = self.clauses[pos];
-            for parent in g.parents_clause_iter(clause, state) {
-                let next_pos = self.positions[parent.0];
-                self.set_f_reachability(g, state, f_reachable, next_pos, super_comp_start, super_comp_end);
-            }
-        }
-    }
-    
-    /// Sets the global reachability of the component
-    fn set_reachability(&self, g: &Graph, state: &StateManager, t_reachable: &mut Vec<bool>, f_reachable: &mut Vec<bool>, super_comp_start: usize, super_comp_end: usize) {
-        for i in 0..t_reachable.len() {
-            let clause = self.clauses[super_comp_start + i];
-            if g.clause_number_deterministic(clause, state) == 0 {
-                self.set_t_reachability(g, state, t_reachable, super_comp_start + i, super_comp_start, super_comp_end);
-            }
-            if let Some(b) = g.get_variable_value(g.get_clause_head(clause), state) {
-                if !b {
-                    self.set_f_reachability(g, state, f_reachable, super_comp_start + i, super_comp_start, super_comp_end);
-                }
-            }
-        }
-    }
-
 
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
@@ -271,24 +229,6 @@ impl ComponentExtractor {
         let super_comp = self.components[component.0];
         let mut start = super_comp.start;
         let end = start + super_comp.size;
-        // The algorithm starts by setting the reachability of each clause. Since this code is called *after*
-        // the propagation, there might be unconstrained clauses. We want to avoid putting them into the components.
-        // Hence, we first run this reachability process to mark all unconstrained clauses as uconstrained.
-        // This could be done after the propagation, but I do not like the fact that I would have to pass the component
-        // extractor to the propagator. But this might be refactor later
-        let mut is_t_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
-        let mut is_f_reachable = (0..super_comp.size).map(|_| false).collect::<Vec<bool>>();
-        self.set_reachability(g, state,  &mut is_t_reachable, &mut is_f_reachable, super_comp.start, super_comp.start + super_comp.size);
-        for i in 0..super_comp.size {
-            let clause = self.clauses[super_comp.start + i];
-            if !is_t_reachable[i] || !is_f_reachable[i] {
-                // The main point here is that we do not even need to add an assignment to the propagation stack.
-                // We know that there exist one assignment to the deterministic variables that set this clause as
-                // unconstrained, but we are interested in the models on the probabilistic variable. So we keep
-                // the assignment implicit, this avoid unnecessary propagations.
-                propagator.add_unconstrained_clause(clause, g, state);
-            }
-        }
         // We iterate over all the clause in the current component. When we encounter a constrained clause, we start
         // a component from it
         while start < end {
@@ -470,7 +410,7 @@ mod test_component_detection {
         g.set_clause_unconstrained(ClauseIndex(1), &mut state);
         extractor.detect_components(&mut g, &mut state, ComponentIndex(1), &mut propagator);
 
-        assert_eq!(0, extractor.number_components(&state));
+        assert_eq!(2, extractor.number_components(&state));
     }
 
     #[test]
@@ -495,7 +435,7 @@ mod test_component_detection {
         g.set_clause_unconstrained(ClauseIndex(1), &mut state);
         extractor.detect_components(&mut g, &mut state, ComponentIndex(1), &mut propagator);
 
-        assert_eq!(0, extractor.number_components(&state));
+        assert_eq!(2, extractor.number_components(&state));
         
         state.restore_state();
 
