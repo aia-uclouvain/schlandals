@@ -1,5 +1,5 @@
-//Schlandalhttps://www.youtube.com/watch?v=-9lrYoX2cMks
-//Copyright (C) 2022 A. Dubray
+//Schlandal
+//Copyright (C) 2022-2023 A. Dubray
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
