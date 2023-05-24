@@ -41,7 +41,7 @@
 
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use search_trail::*;
-use crate::solver::sequential::CacheEntry;
+use crate::common::CacheEntry;
 use crate::core::sparse_set::SparseSet;
 
 // The following abstractions allow to have type safe indexing for the nodes, edes and clauses.

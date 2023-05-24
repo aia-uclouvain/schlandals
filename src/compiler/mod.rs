@@ -1,5 +1,5 @@
 //Schlandals
-//Copyright (C) 2022-2023 A. Dubray
+//Copyright (C) 2022 A. Dubray
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
@@ -14,14 +14,5 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// Re-export the modules
-mod common;
-mod core;
-mod parser;
-pub mod compiler;
-pub mod solver;
-
-pub use self::core::*;
-pub use self::parser::*;
-pub use self::solver::*;
-pub use self::compiler::*;
+pub mod aomdd;
+pub mod exact;

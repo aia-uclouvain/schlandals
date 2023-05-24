@@ -14,6 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 use peak_alloc::PeakAlloc;
+use std::hash::Hash;
 
 #[global_allocator]
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
@@ -25,3 +26,44 @@ macro_rules! f128 {
 }
 
 pub(crate) use f128;
+
+/// A key of the cache. It is composed of
+///     1. A hash representing the sub-problem being solved
+///     2. The bitwise representation of the sub-problem being solved
+/// 
+/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
+/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
+/// two different sub-problems have different hash.
+/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
+#[derive(Default)]
+pub struct CacheEntry {
+    hash: u64,
+    repr: Vec<u64>,
+}
+
+impl CacheEntry {
+    pub fn new(hash: u64, repr: Vec<u64>) -> Self {
+        Self {
+            hash,
+            repr
+        }
+    }
+}
+
+impl Hash for CacheEntry {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for CacheEntry {
+    fn eq(&self, other: &Self) -> bool {
+        if self.hash != other.hash {
+            false
+        } else {
+            self.repr == other.repr
+        }
+    }
+}
+
+impl Eq for CacheEntry {}

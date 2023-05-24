@@ -24,18 +24,15 @@
 //! It is also responsible for updating the cache and clearing it when the memory limit is reached.
 //! Finally it save and restore the states of the reversible variables used in the solver.
 
-use std::hash::Hash;
-
 use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
-use crate::common::f128;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::solver::branching::BranchingDecision;
 use crate::solver::propagator::FTReachablePropagator;
 use crate::solver::statistics::Statistics;
-use crate::common::PEAK_ALLOC;
+use crate::common::*;
 
 use rug::Float;
 
@@ -69,47 +66,6 @@ where
     /// Memory limit allowed for the solver. This is a global memory limit, not a cache-size limit
     mlimit: u64,
 }
-
-/// A key of the cache. It is composed of
-///     1. A hash representing the sub-problem being solved
-///     2. The bitwise representation of the sub-problem being solved
-/// 
-/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
-/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
-/// two different sub-problems have different hash.
-/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
-#[derive(Default)]
-pub struct CacheEntry {
-    hash: u64,
-    repr: Vec<u64>,
-}
-
-impl CacheEntry {
-    pub fn new(hash: u64, repr: Vec<u64>) -> Self {
-        Self {
-            hash,
-            repr
-        }
-    }
-}
-
-impl Hash for CacheEntry {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
-    }
-}
-
-impl PartialEq for CacheEntry {
-    fn eq(&self, other: &Self) -> bool {
-        if self.hash != other.hash {
-            false
-        } else {
-            self.repr == other.repr
-        }
-    }
-}
-
-impl Eq for CacheEntry {}
 
 impl<'b, B, const S: bool> Solver<'b, B, S>
 where
@@ -220,12 +176,8 @@ where
         self.state.restore_state();
         solution
     }
-
-    /// Solve the problems represented by the graph with the given branching heuristic.
-    /// It finds all the assignments to the probabilistic variables for which there
-    /// exists an assignment to the deterministic variables that respect the constraints.
-    /// Each assignment is weighted by the product of the probabilistic variables assigned to true.
-    pub fn solve(&mut self) -> ProblemSolution {
+    
+    fn solve_by_search(&mut self) -> ProblemSolution {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.set_number_clauses(self.graph.number_clauses());
@@ -251,6 +203,24 @@ where
                 } else {
                     ProblemSolution::Ok(p)
                 }
+            }
+        }
+
+    }
+    
+    /// Solve the problems represented by the graph with the given branching heuristic.
+    /// It finds all the assignments to the probabilistic variables for which there
+    /// exists an assignment to the deterministic variables that respect the constraints.
+    /// Each assignment is weighted by the product of the probabilistic variables assigned to true.
+    pub fn solve(&mut self) -> Option<Float> {
+        match self.solve_by_search() {
+            Ok(p) => {
+                println!("{:?}", p);
+                Some(p)
+            }
+            Err(_) => {
+                println!("Model UNSAT");
+                None
             }
         }
     }

@@ -18,9 +18,12 @@ mod common;
 mod core;
 mod parser;
 mod solver;
+mod compiler;
 
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+use std::fs::File;
+use std::io::Write;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 
@@ -29,6 +32,7 @@ use parser::ppidimacs::graph_from_ppidimacs;
 use solver::branching::*;
 use solver::propagator::FTReachablePropagator;
 use solver::{DefaultSolver, QuietSolver};
+use compiler::exact:: ExactAOMDDCompiler;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -44,6 +48,12 @@ struct Args {
     // The memory limit, in mega-bytes
     #[clap(short, long)]
     memory: Option<u64>,
+    // Should the problem be compiled into an AND/OR MDD? If true, the memory argument is not taken into account (default is ´false´)
+    #[clap(short, long, default_value_t=false)]
+    compiled: bool,
+    // In which file to save the graphviz file of the AOMDD
+    #[clap(long)]
+    fgraphviz: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -70,37 +80,49 @@ fn main() {
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
-    let mlimit = if args.memory.is_some() {
-        args.memory.unwrap()
-    } else {
-        let sys = System::new_all();
-        sys.total_memory() / 1000000
-    };
-    if args.statistics {
-        let mut solver = DefaultSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-        );
-        match solver.solve() {
-            Ok(s) => println!("{}", s),
-            Err(_) => println!("Model UNSAT"),
+    if !args.compiled {
+        let mlimit = if args.memory.is_some() {
+            args.memory.unwrap()
+        } else {
+            let sys = System::new_all();
+            sys.total_memory() / 1000000
+        };
+        if args.statistics {
+            let mut solver = DefaultSolver::new(
+                graph,
+                state,
+                component_extractor,
+                branching_heuristic.as_mut(),
+                propagator,
+                mlimit,
+            );
+            solver.solve();
+        } else {
+            let mut solver = QuietSolver::new(
+                graph,
+                state,
+                component_extractor,
+                branching_heuristic.as_mut(),
+                propagator,
+                mlimit,
+            );
+            solver.solve();
         }
     } else {
-        let mut solver = QuietSolver::new(
+        let mut compiler = ExactAOMDDCompiler::new(
             graph,
             state,
             component_extractor,
             branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
+            propagator
         );
-        match solver.solve() {
-            Ok(s) => println!("{}", s),
-            Err(_) => println!("Model UNSAT"),
+        let aomdd = compiler.compile();
+        if let Some(path) = args.fgraphviz {
+            let mut outfile = File::create(path).unwrap();
+            match outfile.write(aomdd.as_graphviz().as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the AOMDD into the file: {:?}", e),
+            };
         }
     }
 }
