@@ -13,43 +13,52 @@ use std::path::PathBuf;
 
 use paste::paste;
 
+macro_rules! test_input_with_branching {
+    ($dir:ident, $name:ident, $value:expr, $b:ty) => {
+        paste!{
+            #[test]
+            fn [<search_ $b _ $name>]() {
+                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::default();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                assert!((expected - sol).abs() < 0.000001);
+            }
+            
+            #[test]
+            fn [<compile_ $b _ $name>]() {
+                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::default();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
+                let aomdd = compiler.compile();
+                let sol = aomdd.evaluate();
+                let expected = Float::with_val(113, $value);
+                println!("expected {:?} actual {:?}", expected, sol);
+                assert!((expected - sol).abs() < 0.000001);
+            }
+        }
+        
+    }
+}
+
 macro_rules! integration_tests {
     ($dir:ident, $($name:ident: $value:expr,)*) => {
         $(
-            paste!{
-                #[test]
-                fn [<search_ $name>]() {
-                    let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
-                    let mut state = StateManager::default();
-                    let mut propagator = FTReachablePropagator::default();
-                    let path = PathBuf::from(filename);
-                    let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                    let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                    let mut branching_heuristic = Fiedler::default();
-                    let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
-                    let sol = solver.solve().unwrap();
-                    let expected = Float::with_val(113, $value);
-                    assert!((expected - sol).abs() < 0.000001);
-                }
-                
-                #[test]
-                fn [<compile_ $name>]() {
-                    let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
-                    let mut state = StateManager::default();
-                    let mut propagator = FTReachablePropagator::default();
-                    let path = PathBuf::from(filename);
-                    let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                    let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                    let mut branching_heuristic = Fiedler::default();
-                    
-                    let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
-                    let aomdd = compiler.compile();
-                    let sol = aomdd.evaluate();
-                    let expected = Float::with_val(113, $value);
-                    println!("expected {:?} actual {:?}", expected, sol);
-                    assert!((expected - sol).abs() < 0.000001);
-                }
-            }
+            test_input_with_branching!{ $dir, $name, $value, Fiedler}
+            test_input_with_branching!{$dir, $name, $value, MinInDegree}
+            test_input_with_branching!{$dir, $name, $value, MinOutDegree}
+            test_input_with_branching!{$dir, $name, $value, MaxDegree}
         )*
     }
 }
