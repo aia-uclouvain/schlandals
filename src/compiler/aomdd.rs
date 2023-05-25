@@ -216,24 +216,35 @@ impl AOMDD {
     pub fn as_graphviz(&self) -> String {
         
         let or_node_attributes = format!("shape=circle,style=filled");
-        let and_node_attributes = format!("shape=box,style=filled");
 
         let mut out = String::new();
         
         out.push_str("digraph {\ntranksep = 3;\n\n");
         for (id, node) in self.or_nodes.iter().enumerate() {
-            let label = if self.get_terminal_consistent().0 == id {
-                String::from("1")
-            } else if self.get_terminal_inconsistent().0 == id {
-                String::from("0")
-            } else {
-                format!("d{}", node.decision.0)
-            };
-            out.push_str(&self.node(id, &or_node_attributes, label));
-            out.push_str(&self.edges_of_or(OrNodeIndex(id)));
+            if id != self.get_terminal_consistent().0 && id != self.get_terminal_inconsistent().0 {
+                let label = format!("d{}", node.decision.0);
+                out.push_str(&self.node(id, &or_node_attributes, label));
+                if self.get_terminal_consistent().0 != id && self.get_terminal_inconsistent().0 != id {
+                    out.push_str(&self.meta_node(OrNodeIndex(id)));
+                }
+
+            }
         }
         
         for (id, node) in self.and_nodes.iter().enumerate() {
+            let color = if node.children.len() == 1 {
+                let child = node.children.first().unwrap();
+                if *child == self.get_terminal_consistent() {
+                    format!(",color=\"green\"")
+                } else if *child == self.get_terminal_inconsistent() {
+                    format!(",color=\"red\"")
+                } else {
+                    format!("")
+                }
+            } else {
+                format!("")
+            };
+            let and_node_attributes = format!("shape=box,style=filled{}", color);
             out.push_str(&self.node(id + self.or_nodes.len(), &and_node_attributes, format!("v{}", node.assignment.0)));
             out.push_str(&self.edges_of_and(AndNodeIndex(id)));
         }
@@ -246,6 +257,18 @@ impl AOMDD {
         format!("\t{id} [{attributes},label=\"{label}\"];\n")
     }
     
+    fn meta_node(&self, or_node: OrNodeIndex) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("\tsubgraph cluster_meta_node_{} {{\n", or_node.0));
+        let oid = or_node.0;
+        for arc in self.or_nodes[or_node.0].out_arcs.iter().copied() {
+            let aid = self.or_and_arcs[arc.0].to.0 + self.or_nodes.len();
+            out.push_str(&format!("\t\t{} -> {};\n", oid, aid));
+        }
+        out.push_str("\t}\n");
+        out
+    }
+    
     fn edge(from: usize, to: usize, cost: Option<Float>) -> String {
         let label = if let Some(f) = cost {
             format!("{:.4}", f)
@@ -254,27 +277,17 @@ impl AOMDD {
         };
         format!("\t{from} -> {to} [penwidth=1,label=\"{label}\"];\n")
     }
-    
-    fn edges_of_or(&self, node: OrNodeIndex) -> String {
-        let mut out = String::new();
-        for arc in self.or_nodes[node.0].out_arcs.iter().copied() {
-            out.push_str(&Self::edge(
-                node.0,
-                self.or_and_arcs[arc.0].to.0 + self.or_nodes.len(),
-                Some(self.or_and_arcs[arc.0].weight.clone()),
-            ));
-        }
-        out
-    }
 
     fn edges_of_and(&self, node: AndNodeIndex) -> String {
         let mut out = String::new();
         for child in self.and_nodes[node.0].children.iter().copied() {
-            out.push_str(&Self::edge(
-                node.0 + self.or_nodes.len(),
-                child.0,
-                None,
-            ))
+            if child != self.get_terminal_consistent() && child != self.get_terminal_inconsistent() {
+                out.push_str(&Self::edge(
+                    node.0 + self.or_nodes.len(),
+                    child.0,
+                    None,
+                ))
+            }
         }
         out
     }
