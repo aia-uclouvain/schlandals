@@ -23,6 +23,7 @@
 use crate::core::graph::{DistributionIndex, VariableIndex};
 use rug::Float;
 use crate::common::f128;
+use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
 
 /// The identifier of a or-node in the ´or_nodes´ vector of the AOMDD
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -54,6 +55,10 @@ pub struct AOMDD {
     root: OrNodeIndex,
     /// Weight of the initial propagation
     weight_factor: Float,
+    /// The terminal consistent node
+    terminal_consistent: OrNodeIndex,
+    /// The terminal inconsistent node
+    terminal_inconsistent: OrNodeIndex,
 }
 
 /// Structure representing an OR node in the AOMDD. This node hold the decision variable to branch on.
@@ -102,6 +107,25 @@ impl AOMDD {
             or_and_arcs: vec![],
             root: OrNodeIndex(0),
             weight_factor: f128!(1.0),
+            terminal_consistent: OrNodeIndex(0),
+            terminal_inconsistent: OrNodeIndex(1),
+        };
+        // Ensuring the root is consistent by default. I might change the node index of the consistent node
+        // in the future and forgot it was hardcoded at the creation of the data structure. If any change is
+        // made to the ´get_terminal_consistent´, this will be correctly updated
+        aomdd.set_consistent_root();        
+        aomdd
+    }
+
+    pub fn empty() -> Self {
+        let mut aomdd = Self {
+            or_nodes: vec![],
+            and_nodes: vec![],
+            or_and_arcs: vec![],
+            root: OrNodeIndex(0),
+            weight_factor: f128!(1.0),
+            terminal_consistent: OrNodeIndex(0),
+            terminal_inconsistent: OrNodeIndex(1),
         };
         // Ensuring the root is consistent by default. I might change the node index of the consistent node
         // in the future and forgot it was hardcoded at the creation of the data structure. If any change is
@@ -121,17 +145,16 @@ impl AOMDD {
     }
     
     /// Adds an AND node to the given OR node
-    pub fn add_and_node(&mut self, assignment: VariableIndex, parent: OrNodeIndex, weight: Float) -> AndNodeIndex {
+    pub fn add_and_node(&mut self, assignment: VariableIndex) -> AndNodeIndex {
         let id = AndNodeIndex(self.and_nodes.len());
         self.and_nodes.push(AndNode {
             assignment,
             children: vec![],
         });
-        self.add_or_and_arc(parent, id, weight);
         id
     }
     
-    fn add_or_and_arc(&mut self, from: OrNodeIndex, to: AndNodeIndex, weight: Float) -> OrAndArcIndex {
+    pub fn add_or_and_arc(&mut self, from: OrNodeIndex, to: AndNodeIndex, weight: Float) -> OrAndArcIndex {
         let id = OrAndArcIndex(self.or_and_arcs.len());
         self.or_and_arcs.push(OrAndArc { to, weight });
         self.or_nodes[from.0].out_arcs.push(id);
@@ -170,6 +193,16 @@ impl AOMDD {
     /// Sets the root of the AOMDDD to be the given node
     pub fn set_root(&mut self, node: OrNodeIndex) {
         self.root = node;
+    }
+    
+    /// Sets the terminal consistent node
+    pub fn set_terminal_consistent(&mut self, node: OrNodeIndex) {
+        self.terminal_consistent = node;
+    }
+
+    /// Sets the terminal inconsistent node
+    pub fn set_terminal_inconsistent(&mut self, node: OrNodeIndex) {
+        self.terminal_inconsistent = node;
     }
     
     /// Sets the weight factor of the AOMDD
@@ -290,5 +323,113 @@ impl AOMDD {
             }
         }
         out
+    }
+}
+
+/// Writes the AOMDD into a structured format so that it can be saved into a file. The
+/// format is the following
+/// 
+/// aomdd <root index> <weighting factor>
+/// or decision0
+/// or decision1
+/// ...
+/// and assignment0
+/// and assignment1
+/// ...
+/// ota or_id and_id weight
+/// ...
+/// ato  and_id or_id
+/// 
+/// Note that all ids are the ones in the nodes vectors of the AOMDD. Hence when writing the nodes (or/and lines), the vector is
+/// traverse in order so that the indexes are kept.
+/// For the terminals (in)consistent nodes, a special decision F or T is written.
+impl fmt::Display for AOMDD {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "aomdd {} {}", self.root.0, self.weight_factor)?;
+        for (or_id, node) in self.or_nodes.iter().enumerate() {
+            if self.get_terminal_consistent().0 == or_id {
+                writeln!(f, "or T")?;
+            } else if self.get_terminal_inconsistent().0 == or_id {
+                writeln!(f, "or F")?;
+            } else {
+                writeln!(f, "or {}", node.decision.0)?;
+            }
+        }
+        for node in self.and_nodes.iter() {
+            writeln!(f, "and {}", node.assignment.0)?;
+        }
+        for (or_id, node) in self.or_nodes.iter().enumerate() {
+            for arc in node.out_arcs.iter().copied() {
+                let ota_arc = &self.or_and_arcs[arc.0];
+                writeln!(f, "ota {} {} {}", or_id, ota_arc.to.0, ota_arc.weight)?;
+            }
+        }
+        for (and_id, node) in self.and_nodes.iter().enumerate() {
+            for child in node.children.iter().copied() {
+                writeln!(f, "ato {} {}", and_id, child.0)?;
+            }
+        }
+        fmt::Result::Ok(())
+    }
+}
+
+impl AOMDD {
+    
+    fn parse_nodes(filepath: &PathBuf, aomdd: &mut AOMDD) {
+        let file = File::open(filepath).unwrap();
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let l = line.unwrap();
+            let mut split = l.split_whitespace();
+            if l.starts_with("aomdd") {
+                aomdd.set_root(OrNodeIndex(split.nth(1).unwrap().parse::<usize>().unwrap()));
+                aomdd.set_weight_factor(f128!(split.nth(0).unwrap().parse::<f64>().unwrap()));
+            } else if l.starts_with("or") {
+                let decision = split.nth(1).unwrap();
+                if decision == "T" {
+                    let node = aomdd.add_or_node(DistributionIndex(0));
+                    aomdd.set_terminal_consistent(node);
+                } else if decision == "F" {
+                    let node = aomdd.add_or_node(DistributionIndex(0));
+                    aomdd.set_terminal_inconsistent(node);
+                } else {
+                    aomdd.add_or_node(DistributionIndex(decision.parse::<usize>().unwrap()));
+                }
+            } else if l.starts_with("and") {
+                let assignment = split.nth(1).unwrap().parse::<usize>().unwrap();
+                aomdd.add_and_node(VariableIndex(assignment));
+            }
+        }
+    }
+    
+    fn parse_edges(filepath: &PathBuf, aomdd: &mut AOMDD) {
+        let file = File::open(filepath).unwrap();
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let l = line.unwrap();
+            if l.starts_with("ota") {
+                let split = l.split_whitespace().collect::<Vec<&str>>();
+                let from = OrNodeIndex(split[1].parse::<usize>().unwrap());
+                let to = AndNodeIndex(split[2].parse::<usize>().unwrap());
+                let weight = f128!(split[3].parse::<f64>().unwrap());
+                aomdd.add_or_and_arc(from, to, weight);
+
+            } else if l.starts_with("ato") {
+                let split = l.split_whitespace().collect::<Vec<&str>>();
+                let from = AndNodeIndex(split[1].parse::<usize>().unwrap());
+                let to = OrNodeIndex(split[2].parse::<usize>().unwrap());
+                aomdd.add_and_child(from, to);
+            }
+        }
+        
+    }
+
+    pub fn from_file(filepath: &PathBuf) -> Self {
+        let mut aomdd = AOMDD::empty();
+        // The file is parsed in two passes, first the header and nodes are collected then the arcs
+        AOMDD::parse_nodes(filepath, &mut aomdd);
+        AOMDD::parse_edges(filepath, &mut aomdd);
+        aomdd
     }
 }

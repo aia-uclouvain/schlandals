@@ -33,6 +33,7 @@ use solver::branching::*;
 use solver::propagator::FTReachablePropagator;
 use solver::{DefaultSolver, QuietSolver};
 use compiler::exact:: ExactAOMDDCompiler;
+use compiler::aomdd::AOMDD;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -54,6 +55,9 @@ struct Args {
     // In which file to save the graphviz file of the AOMDD
     #[clap(long)]
     fgraphviz: Option<PathBuf>,
+    // Read an AOMDD in the given file and evaluates it
+    #[clap(long)]
+    faomdd: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -109,20 +113,25 @@ fn main() {
             solver.solve();
         }
     } else {
-        let mut compiler = ExactAOMDDCompiler::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator
-        );
-        let aomdd = compiler.compile();
-        if let Some(path) = args.fgraphviz {
-            let mut outfile = File::create(path).unwrap();
-            match outfile.write(aomdd.as_graphviz().as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the AOMDD into the file: {:?}", e),
-            };
+        if let Some(filepath) = args.faomdd {
+            let aomdd = AOMDD::from_file(&filepath);
+            println!("{}", aomdd.evaluate());
+        } else {
+            let mut compiler = ExactAOMDDCompiler::new(
+                graph,
+                state,
+                component_extractor,
+                branching_heuristic.as_mut(),
+                propagator
+            );
+            let aomdd = compiler.compile();
+            if let Some(path) = args.fgraphviz {
+                let mut outfile = File::create(path).unwrap();
+                match outfile.write(aomdd.as_graphviz().as_bytes()) {
+                    Ok(_) => (),
+                    Err(e) => println!("Could not write the AOMDD into the file: {:?}", e),
+                };
+            }
         }
     }
 }

@@ -7,9 +7,12 @@ use schlandals::components::*;
 use schlandals::ppidimacs::graph_from_ppidimacs;
 use schlandals::solver::QuietSolver;
 use schlandals::compiler::exact::ExactAOMDDCompiler;
+use schlandals::compiler::aomdd::AOMDD;
 use search_trail::StateManager;
 
 use std::path::PathBuf;
+use tempfile::Builder;
+use std::io::Write;
 
 use paste::paste;
 
@@ -43,6 +46,26 @@ macro_rules! test_input_with_branching {
                 let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
                 let aomdd = compiler.compile();
                 let sol = aomdd.evaluate();
+                let expected = Float::with_val(113, $value);
+                println!("expected {:?} actual {:?}", expected, sol);
+                assert!((expected - sol).abs() < 0.000001);
+            }
+
+            #[test]
+            fn [<compile_from_file_ $b _ $name>]() {
+                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::default();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
+                let aomdd = compiler.compile();
+                let mut file = Builder::new().prefix("tmp_aomdd").suffix(".aomdd").tempfile().unwrap();
+                writeln!(file, "{}", aomdd).unwrap();
+                let read_aomdd = AOMDD::from_file(&PathBuf::from(&file.path()));
+                let sol = read_aomdd.evaluate();
                 let expected = Float::with_val(113, $value);
                 println!("expected {:?} actual {:?}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);

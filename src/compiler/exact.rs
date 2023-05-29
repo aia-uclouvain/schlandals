@@ -84,15 +84,18 @@ where
             self.state.save_state();
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
                 Err(_) => {
-                    let child_and_node = aomdd.add_and_node(variable, node, f128!(0.0));
+                    let child_and_node = aomdd.add_and_node(variable);
+                    aomdd.add_or_and_arc(node, child_and_node, f128!(0.0));
                     aomdd.add_and_child(child_and_node, aomdd.get_terminal_inconsistent());
                 }
                 Ok(v) => {
                     if v != 0.0 {
-                        let child_and_node = aomdd.add_and_node(variable, node, v);
+                        let child_and_node = aomdd.add_and_node(variable);
+                        aomdd.add_or_and_arc(node, child_and_node, v);
                         self.expand_and_node(aomdd, child_and_node, component);
                     } else {
-                        let child_and_node = aomdd.add_and_node(variable, node, v);
+                        let child_and_node = aomdd.add_and_node(variable);
+                        aomdd.add_or_and_arc(node, child_and_node, v);
                         aomdd.add_and_child(child_and_node, aomdd.get_terminal_inconsistent());
                     }
                 }
