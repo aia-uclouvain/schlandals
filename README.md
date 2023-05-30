@@ -12,9 +12,7 @@ Current known probability queries that can be solved with the solver include
 
 The solver currently supports two types of solving
   - Search based solving with a DPLL-style backtracing search
-  - Compiling into (or read from a file) an AND/OR Multi-valued decision diagram (AOMDD)
-
-# Usage
+  - Compiling into (or read from a file) an AND/OR Multi-valued decision diagram (AOMDD) (still in early development)
 
 # Problem specification
 
@@ -63,3 +61,24 @@ c Clauses for cpt P(C | B)
 c The query is added by such clauses, which is translated as 11 => False
 -11
 ```
+
+# Usage
+
+To use the solver you must have the Rust toolchain installed. Once this is done you can clone this repository and build the solver with the following commands
+```
+git clone git@github.com:aia-uclouvain/schlandals.git && cd schlandals && cargo build --release
+```
+Then you can run the solver with `./target/release/schlandals [OPTIONS] --input <input file> --branching <branching heuristic>`.
+
+The available branching heuristics all selects a clause in the input file and then a distribution randomly from it. They work on the *implication graph* of the clauses (one node per clause, an edge from a clause `I => j` to another clause `K => l` if `j` is included in `K`). We currently provide the following heuristics
+  - `fiedler`: computes the fiedler vector of the implication graph and selects the clause with the value closest to the mean fiedler value of all active clauses
+  - `min-in-degree`: selects the active clause with the less number of parents. In case of ties selects the one with the fewest number of initial parents.
+  - `min-out-degree`: selects the active clause with the less number of children. In case of ties selects the one with the fewest number of initial children
+  - `max-degree`: selects the clause with the maximum degree.
+
+The available options are
+  - `compiled`: Compile the input into an AOMDD. If active, the following options are available:
+      - `faomdd`: The file from which to read the AOMDD. If present, the AOMDD is constructed from the file and evaluated.
+      - `fgraphviz`: Save the AOMDD as a graphviz DOT file for visualization
+  - `memory`: Limit on the memory usage for the search-based solver (not active when compiling into an AOMDD)
+  - `statistics`: Shows statistics of the search
