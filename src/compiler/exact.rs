@@ -30,8 +30,8 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::solver::branching::BranchingDecision;
-use crate::solver::propagator::FTReachablePropagator;
+use crate::heuristics::branching::BranchingDecision;
+use crate::propagator::FTReachablePropagator;
 use crate::common::*;
 use crate::compiler::aomdd::*;
 use rug::Float;

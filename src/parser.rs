@@ -43,7 +43,7 @@
 //!     2. The head of the implications can not be a probabilistic variable
 
 use crate::core::graph::{Graph, VariableIndex};
-use crate::solver::propagator::FTReachablePropagator;
+use crate::propagator::FTReachablePropagator;
 use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

@@ -13,4 +13,11 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-pub mod ppidimacs;
+
+pub mod sequential;
+mod statistics;
+
+use crate::search::sequential::Solver;
+
+pub type DefaultSolver<'b, B> = Solver<'b, B, true>;
+pub type QuietSolver<'b, B> = Solver<'b, B, false>;

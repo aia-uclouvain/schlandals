@@ -29,7 +29,7 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::graph::{ClauseIndex, Graph};
-use crate::{solver::propagator::FTReachablePropagator};
+use crate::propagator::FTReachablePropagator;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
 /// Abstraction used as a typesafe way of retrieving a `Component`

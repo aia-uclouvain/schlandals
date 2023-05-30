@@ -17,11 +17,15 @@
 // Re-export the modules
 mod common;
 mod core;
-mod parser;
+mod heuristics;
 pub mod compiler;
-pub mod solver;
+pub mod search;
+pub mod parser;
+pub mod propagator;
 
 pub use self::core::*;
-pub use self::parser::*;
-pub use self::solver::*;
+pub use self::search::*;
 pub use self::compiler::*;
+pub use self::heuristics::*;
+pub use self::parser::*;
+pub use self::propagator::*;

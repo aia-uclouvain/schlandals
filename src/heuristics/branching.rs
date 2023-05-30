@@ -285,7 +285,7 @@ mod test_heuristics {
     
     use crate::core::graph::{Graph, VariableIndex, DistributionIndex};
     use crate::core::components::ComponentExtractor;
-    use crate::solver::branching::*;
+    use crate::heuristics::branching::*;
     use search_trail::StateManager;
 
     // Graph used for the tests:

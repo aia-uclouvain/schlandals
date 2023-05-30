@@ -29,9 +29,9 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::solver::branching::BranchingDecision;
-use crate::solver::propagator::FTReachablePropagator;
-use crate::solver::statistics::Statistics;
+use crate::heuristics::branching::BranchingDecision;
+use crate::propagator::FTReachablePropagator;
+use crate::search::statistics::Statistics;
 use crate::common::*;
 
 use rug::Float;

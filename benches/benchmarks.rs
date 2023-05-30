@@ -2,9 +2,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use schlandals::branching::Fiedler;
 use schlandals::components::ComponentExtractor;
-use schlandals::ppidimacs::graph_from_ppidimacs;
-use schlandals::solver::QuietSolver;
-use schlandals::solver::propagator::FTReachablePropagator;
+use schlandals::parser::*;
+use schlandals::search::QuietSolver;
+use schlandals::propagator::FTReachablePropagator;
 use search_trail::StateManager;
 
 use std::path::PathBuf;

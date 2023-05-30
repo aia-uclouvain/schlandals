@@ -17,8 +17,10 @@
 mod common;
 mod core;
 mod parser;
-mod solver;
+mod search;
 mod compiler;
+mod heuristics;
+mod propagator;
 
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
@@ -28,10 +30,10 @@ use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 
 use crate::core::components::ComponentExtractor;
-use parser::ppidimacs::graph_from_ppidimacs;
-use solver::branching::*;
-use solver::propagator::FTReachablePropagator;
-use solver::{DefaultSolver, QuietSolver};
+use parser::*;
+use heuristics::branching::*;
+use propagator::FTReachablePropagator;
+use search::{DefaultSolver, QuietSolver};
 use compiler::exact:: ExactAOMDDCompiler;
 use compiler::aomdd::AOMDD;
 
