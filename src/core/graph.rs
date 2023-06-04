@@ -701,3 +701,164 @@ mod test_graph_creation {
         assert_eq!(0, state.get_usize(clause.number_probabilistic));
     }
 }
+
+#[cfg(test)]
+mod graph_update {
+    
+    use crate::core::graph::*;
+    use search_trail::StateManager;
+    
+    fn get_graph(state: &mut StateManager) -> Graph {
+        // Structure of the graph:
+        //
+        // c0 --> c2 --> c3
+        //        ^       |
+        //        |       v
+        // c1 ----------> c4
+        let mut g = Graph::new(state);
+        let nodes: Vec<VariableIndex> = (0..10).map(|_| g.add_variable(false, None, None, state)).collect();
+        let _c0 = g.add_clause(nodes[2], vec![nodes[0], nodes[1]], state);
+        let _c1 = g.add_clause(nodes[5], vec![nodes[3], nodes[4]], state);
+        let _c2 = g.add_clause(nodes[6], vec![nodes[2], nodes[5]], state);
+        let _c3 = g.add_clause(nodes[8], vec![nodes[6], nodes[7]], state);
+        let _c4 = g.add_clause(nodes[9], vec![nodes[5], nodes[8]], state);
+        g
+    }
+    
+    fn check_parents(graph: &Graph, clause: ClauseIndex, mut expected_parents: Vec<usize>, state: &StateManager) {
+        let mut actual = graph.parents_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
+        actual.sort();
+        expected_parents.sort();
+        assert_eq!(expected_parents, actual);
+    }
+    
+    fn check_children(graph: &Graph, clause: ClauseIndex, mut expected_children: Vec<usize>, state: &StateManager) {
+        let mut actual = graph.children_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
+        actual.sort();
+        expected_children.sort();
+        assert_eq!(expected_children, actual);
+    }
+    
+    #[test]
+    fn remove_clause() {
+        let mut state = StateManager::default();
+        let mut g = get_graph(&mut state);
+        check_parents(&g, ClauseIndex(0), vec![], &state);
+        check_parents(&g, ClauseIndex(1), vec![], &state);
+        check_parents(&g, ClauseIndex(2), vec![0, 1], &state);
+        check_parents(&g, ClauseIndex(3), vec![2], &state);
+        check_parents(&g, ClauseIndex(4), vec![1, 3], &state);
+        
+        check_children(&g, ClauseIndex(0), vec![2], &state);
+        check_children(&g, ClauseIndex(1), vec![2, 4], &state);
+        check_children(&g, ClauseIndex(2), vec![3], &state);
+        check_children(&g, ClauseIndex(3), vec![4], &state);
+        check_children(&g, ClauseIndex(4), vec![], &state);
+        
+        g.remove_clause_from_children(ClauseIndex(2), &mut state);
+        g.remove_clause_from_parent(ClauseIndex(2), &mut state);
+
+        check_parents(&g, ClauseIndex(0), vec![], &state);
+        check_parents(&g, ClauseIndex(1), vec![], &state);
+        check_parents(&g, ClauseIndex(2), vec![0, 1], &state);
+        check_parents(&g, ClauseIndex(3), vec![], &state);
+        check_parents(&g, ClauseIndex(4), vec![1, 3], &state);
+
+        check_children(&g, ClauseIndex(0), vec![], &state);
+        check_children(&g, ClauseIndex(1), vec![4], &state);
+        check_children(&g, ClauseIndex(2), vec![3], &state);
+        check_children(&g, ClauseIndex(3), vec![4], &state);
+        check_children(&g, ClauseIndex(4), vec![], &state);
+
+        g.remove_clause_from_children(ClauseIndex(1), &mut state);
+        g.remove_clause_from_parent(ClauseIndex(1), &mut state);
+
+        check_parents(&g, ClauseIndex(0), vec![], &state);
+        check_parents(&g, ClauseIndex(3), vec![], &state);
+        check_parents(&g, ClauseIndex(4), vec![3], &state);
+
+        check_children(&g, ClauseIndex(0), vec![], &state);
+        check_children(&g, ClauseIndex(3), vec![4], &state);
+        check_children(&g, ClauseIndex(4), vec![], &state);
+
+    }
+
+}
+
+#[cfg(test)]
+mod get_bit_representation {
+
+    use crate::core::graph::*;
+    use search_trail::StateManager;
+    
+    fn check_bit_array(expected: &Vec<u64>, actual: &Vec<ReversibleU64>, state: &StateManager) {
+        assert_eq!(expected.len(), actual.len());
+        for i in 0..expected.len() {
+            assert_eq!(expected[i], state.get_u64(actual[i]));
+        }
+    }
+    
+    #[test]
+    fn initial_representation() {
+        let mut state = StateManager::default();
+        let mut graph = Graph::new(&mut state);
+        check_bit_array(&vec![], &graph.variables_bit, &state);
+        for i in 0..300 {
+            graph.add_variable(false, None, None, &mut state);
+            if i % 64 == 0 {
+                check_bit_array(&vec![!0; (i / 64)+1], &graph.variables_bit, &state);
+            }
+        }
+        check_bit_array(&vec![!0; 5], &graph.variables_bit, &state);
+
+        check_bit_array(&vec![], &graph.clauses_bit, &state);
+        for i in 0..300 {
+            graph.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
+            if i % 64 == 0 {
+                check_bit_array(&vec![!0; (i / 64)+1], &graph.clauses_bit, &state);
+            }
+        }
+        check_bit_array(&vec![!0; 5], &graph.clauses_bit, &state);
+    }
+    
+    fn deactivate_bit(bit_array: &mut Vec<u64>, word_index: usize, bit_index: usize) {
+        bit_array[word_index] &= !(1 << bit_index);
+    }
+    
+    #[test]
+    fn update_representation() {
+        let mut state = StateManager::default();
+        let mut graph = Graph::new(&mut state);
+        for _ in 0..300 {
+            graph.add_variable(false, None, None, &mut state);
+        }
+        for i in 0..300 {
+            graph.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
+        }
+        let mut expected = vec![!0; 5];
+
+        graph.set_variable(VariableIndex(0), false, &mut state);
+        graph.set_clause_unconstrained(ClauseIndex(0), &mut state);
+        deactivate_bit(&mut expected, 0, 0);
+        check_bit_array(&expected, &graph.variables_bit, &state);
+        check_bit_array(&expected, &graph.clauses_bit, &state);
+
+        graph.set_variable(VariableIndex(130), false, &mut state);
+        graph.set_clause_unconstrained(ClauseIndex(130), &mut state);
+        deactivate_bit(&mut expected, 2, 2);
+        check_bit_array(&expected, &graph.variables_bit, &state);
+        check_bit_array(&expected, &graph.clauses_bit, &state);
+
+        graph.set_variable(VariableIndex(131), false, &mut state);
+        graph.set_clause_unconstrained(ClauseIndex(131), &mut state);
+        deactivate_bit(&mut expected, 2, 3);
+        check_bit_array(&expected, &graph.variables_bit, &state);
+        check_bit_array(&expected, &graph.clauses_bit, &state);
+
+        graph.set_variable(VariableIndex(299), false, &mut state);
+        graph.set_clause_unconstrained(ClauseIndex(299), &mut state);
+        deactivate_bit(&mut expected, 4, 43);
+        check_bit_array(&expected, &graph.variables_bit, &state);
+        check_bit_array(&expected, &graph.clauses_bit, &state);
+    }
+}
