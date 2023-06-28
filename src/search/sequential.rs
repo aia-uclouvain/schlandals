@@ -58,7 +58,7 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: FTReachablePropagator,
+    propagator: FTReachablePropagator<false>,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Float>,
     /// Statistics collectors
@@ -76,7 +76,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: FTReachablePropagator,
+        propagator: FTReachablePropagator<false>,
         mlimit: u64,
     ) -> Self {
         let cache = FxHashMap::default();
@@ -128,7 +128,8 @@ where
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
                     Err(_) => {
                     }
-                    Ok(v) => {
+                    Ok(_) => {
+                        let v = self.propagator.get_propagation_prob().clone();
                         if v != 0.0 {
                             let mut child_sol = self._solve(component);
                             child_sol *= v;
@@ -184,7 +185,8 @@ where
         // Doing an initial propagation to detect some UNSAT formula from the start
         match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
             Err(_) => ProblemSolution::Err(Unsat),
-            Ok(p) => {
+            Ok(_) => {
+                let p = self.propagator.get_propagation_prob().clone();
                 // Checks if there are still constrained clauses in the graph
                 let mut has_constrained = false;
                 for clause in self.graph.clause_iter() {

@@ -15,7 +15,7 @@ macro_rules! set_up_solvers {
             let filename = format!("benches/instances/{}.ppidimacs", $instance);
             let path = PathBuf::from(filename);
             let mut state = StateManager::default();
-            let mut propagator = FTReachablePropagator::default();
+            let mut propagator = FTReachablePropagator::<false>::new();
             let g = graph_from_ppidimacs(&path, &mut state, &mut propagator);
             let component_extractor = ComponentExtractor::new(&g, &mut state);
             let mut branching_heuristic = $b::default();

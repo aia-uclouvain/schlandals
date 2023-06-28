@@ -49,10 +49,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-pub fn graph_from_ppidimacs(
+pub fn graph_from_ppidimacs<const C: bool>(
     filepath: &PathBuf,
     state: &mut StateManager,
-    propagator: &mut FTReachablePropagator,
+    propagator: &mut FTReachablePropagator<C>,
 ) -> Graph {
     let mut g = Graph::new(state);
     let file = File::open(filepath).unwrap();

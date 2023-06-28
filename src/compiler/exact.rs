@@ -33,12 +33,11 @@ use crate::core::graph::*;
 use crate::heuristics::branching::BranchingDecision;
 use crate::propagator::FTReachablePropagator;
 use crate::common::*;
-use crate::compiler::aomdd::*;
-use rug::Float;
+use crate::compiler::circuit::*;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct ExactAOMDDCompiler<'b, B>
+pub struct ExactDACCompiler<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -51,12 +50,12 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: FTReachablePropagator,
+    propagator: FTReachablePropagator<true>,
     /// Cache used to store results of sub-problems
-    cache: FxHashMap<CacheEntry, OrNodeIndex>,
+    cache: FxHashMap<CacheEntry, Option<CircuitNodeIndex>>,
 }
 
-impl<'b, B> ExactAOMDDCompiler<'b, B>
+impl<'b, B> ExactDACCompiler<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -65,7 +64,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: FTReachablePropagator,
+        propagator: FTReachablePropagator<true>,
     ) -> Self {
         let cache = FxHashMap::default();
         Self {
@@ -78,101 +77,123 @@ where
         }
     }
 
-    fn expand_or_node(&mut self, aomdd: &mut AOMDD, node: OrNodeIndex, component: ComponentIndex) {
-        let distribution = aomdd.get_or_node_decision(node);
+    fn expand_sum_node(&mut self, spn: &mut DAC, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
+        let mut children: Vec<CircuitNodeIndex> = vec![];
         for variable in self.graph.distribution_variable_iter(distribution) {
             self.state.save_state();
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
                 Err(_) => {
-                    let child_and_node = aomdd.add_and_node(variable);
-                    aomdd.add_or_and_arc(node, child_and_node, f128!(0.0));
-                    aomdd.add_and_child(child_and_node, aomdd.get_terminal_inconsistent());
-                }
-                Ok(v) => {
-                    if v != 0.0 {
-                        let child_and_node = aomdd.add_and_node(variable);
-                        aomdd.add_or_and_arc(node, child_and_node, v);
-                        self.expand_and_node(aomdd, child_and_node, component);
-                    } else {
-                        let child_and_node = aomdd.add_and_node(variable);
-                        aomdd.add_or_and_arc(node, child_and_node, v);
-                        aomdd.add_and_child(child_and_node, aomdd.get_terminal_inconsistent());
+
+                },
+                Ok(_) => {
+                    if let Some(child) = self.expand_prod_node(spn, component) {
+                        children.push(child);
                     }
                 }
             }
             self.state.restore_state();
         }
+        if !children.is_empty() {
+            let node = spn.add_sum_node();
+            for child in children {
+                spn.add_spnode_output(child, node);
+            }
+            Some(node)
+        } else {
+            None
+        }
     }
     
-    fn expand_and_node(&mut self, aomdd: &mut AOMDD, node: AndNodeIndex, component: ComponentIndex) {
-        if self
-            .component_extractor
-            .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
-        {
+    fn expand_prod_node(&mut self, spn: &mut DAC, component: ComponentIndex) -> Option<CircuitNodeIndex> {
+        let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
+            let node = spn.add_prod_node();
+            for (distribution, variable) in self.propagator.assignments_iter() {
+                let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
+                spn.add_distribution_output(distribution, node, value_id);
+            }
+        
+            for distribution in self.propagator.unconstrained_distributions_iter() {
+                if self.graph.distribution_number_false(distribution, &self.state) != 0 {
+                    let sum_node = spn.add_sum_node();
+                    for variable in self.graph.distribution_variable_iter(distribution) {
+                        if !self.graph.is_variable_fixed(variable, &self.state) {
+                            let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
+                            spn.add_distribution_output(distribution, sum_node, value_id);
+                        }
+                    }
+                    spn.add_spnode_output(sum_node, node);
+                }
+            }
+            Some(node)
+        } else {
+            None
+        };
+        let mut sum_children: Vec<CircuitNodeIndex> = vec![];
+        if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 match self.cache.get(&bit_repr) {
                     None => {
-                        let decision = self.branching_heuristic.branch_on(
-                            &self.graph,
-                            &self.state,
-                            &self.component_extractor,
-                            sub_component,
-                        );
-                        if let Some(distribution) = decision {
-                            let or_node = aomdd.add_or_node(distribution);
-                            self.cache.insert(bit_repr, or_node);
-                            aomdd.add_and_child(node, or_node);
-                            self.expand_or_node(aomdd, or_node, sub_component);
-                        } else {
-                            self.cache.insert(bit_repr, aomdd.get_terminal_consistent());
+                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &self.state, &self.component_extractor, sub_component) {
+                            if let Some(child) = self.expand_sum_node(spn, sub_component, distribution) {
+                                sum_children.push(child);
+                                self.cache.insert(bit_repr, Some(child));
+                            } else {
+                                self.cache.insert(bit_repr, None);
+                                prod_node = None;
+                                sum_children.clear();
+                                break;
+                            }
                         }
                     },
-                    Some(f) => {
-                        aomdd.add_and_child(node, *f);
+                    Some(child) => {
+                        match child {
+                            None => {
+                                if prod_node.is_some() {
+                                    prod_node = None;
+                                    sum_children.clear();
+                                    break;
+                                }
+                            },
+                            Some(c) => {
+                                sum_children.push(*c);
+                            }
+                        };
                     }
                 }
             }
-        } else {
-            aomdd.add_and_child(node, aomdd.get_terminal_consistent());
         }
-        
+        if !sum_children.is_empty() && prod_node.is_none() {
+            prod_node = Some(spn.add_prod_node());
+        }
+        if let Some(node) = prod_node {
+            for child in sum_children {
+                spn.add_spnode_output(child, node);
+            }
+        }
+        prod_node
     }
 
-    pub fn compile(&mut self) -> AOMDD {
+    pub fn compile(&mut self) -> Option<DAC> {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.set_number_clauses(self.graph.number_clauses());
         // Doing an initial propagation to detect some UNSAT formula from the start
-        let mut aomdd = AOMDD::new();
         match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
-            Err(_) => aomdd.set_inconsistent_root(),
-            Ok(p) => {
-                aomdd.set_weight_factor(p);
-                // Checks if there are still constrained clauses in the graph
-                let mut has_constrained = false;
-                for clause in self.graph.clause_iter() {
-                    if self.graph.is_clause_constrained(clause, &self.state) {
-                        has_constrained = true;
-                        break;
+            Err(_) => None,
+            Ok(_) => {
+                self.branching_heuristic.init(&self.graph, &self.state);
+                let mut spn = DAC::new(&self.graph);
+                match self.expand_prod_node(&mut spn, ComponentIndex(0)) {
+                    None => None,
+                    Some(_) => {
+                        spn.remove_dead_ends();
+                        spn.reduce();
+                        spn.layerize();
+                        Some(spn)
                     }
-                }
-                // If the graph still has constrained clauses, start the search.
-                if has_constrained {
-                    self.branching_heuristic.init(&self.graph, &self.state);
-                    let decision = self.branching_heuristic.branch_on(&self.graph, &self.state, &self.component_extractor, ComponentIndex(0));
-                    if let Some(distribution) = decision {
-                        let root = aomdd.add_or_node(distribution);
-                        aomdd.set_root(root);
-                        self.expand_or_node(&mut aomdd, root, ComponentIndex(0));
-                    } else {
-                        aomdd.set_consistent_root();
-                    }
-                } else {
-                    aomdd.set_consistent_root();
                 }
             }
         }
-        aomdd
     }
 }

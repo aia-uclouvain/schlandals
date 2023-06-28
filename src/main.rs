@@ -32,10 +32,10 @@ use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
 use parser::*;
 use heuristics::branching::*;
-use propagator::FTReachablePropagator;
 use search::{DefaultSolver, QuietSolver};
-use compiler::exact:: ExactAOMDDCompiler;
-use compiler::aomdd::AOMDD;
+use propagator::FTReachablePropagator;
+use compiler::exact::ExactDACCompiler;
+use compiler::circuit::DAC;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -51,15 +51,18 @@ struct Args {
     // The memory limit, in mega-bytes
     #[clap(short, long)]
     memory: Option<u64>,
-    // Should the problem be compiled into an AND/OR MDD? If true, the memory argument is not taken into account (default is ´false´)
-    #[clap(short, long, default_value_t=false)]
+    // If given, the problem is compiled into a probabilistic circuit and the memory limit is not taken into account
+    #[clap(short, long, action)]
     compiled: bool,
-    // In which file to save the graphviz file of the AOMDD
+    // In which file to store/read the compiled probabilistic circuit
     #[clap(long)]
-    fgraphviz: Option<PathBuf>,
-    // Read an AOMDD in the given file and evaluates it
+    fpc: Option<PathBuf>,
+    #[clap(short, long, action)]
+    // If present, the compiler reads from the given file and evaluate the circuits
+    read_compiled: bool,
+    // Store a DOT representation of the compiled circuit
     #[clap(long)]
-    faomdd: Option<PathBuf>,
+    dotfile: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -74,10 +77,53 @@ enum Branching {
     MaxDegree
 }
 
-fn main() {
-    let args = Args::parse();
+fn run_compilation(args: &Args) {
+    if args.read_compiled {
+        let mut spn = DAC::from_file(args.fpc.as_ref().unwrap());
+        println!("{:?}", spn.evaluate());
+    } else {
+        let mut state = StateManager::default();
+        let mut propagator = FTReachablePropagator::<true>::new();
+        let graph = graph_from_ppidimacs(&args.input, &mut state, &mut propagator);
+        let component_extractor = ComponentExtractor::new(&graph, &mut state);
+        let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
+            Branching::Fiedler => Box::<Fiedler>::default(),
+            Branching::MinInDegree => Box::<MinInDegree>::default(),
+            Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+            Branching::MaxDegree => Box::<MaxDegree>::default(),
+        };
+        let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
+        match compiler.compile() {
+            None => {
+                println!("Model UNSAT, can not compile");       
+            },
+            Some(pc) => {
+                println!("Compilation successfull");
+                if args.dotfile.is_some() {
+                    let out = pc.as_graphviz();
+                    let mut outfile = File::create(args.dotfile.as_ref().unwrap()).unwrap();
+                    match outfile.write(out.as_bytes()) {
+                        Ok(_) => (),
+                        Err(e) => println!("Culd not write the PC into the file: {:?}", e),
+                    }
+                }
+                if args.fpc.is_some() {
+                    let mut outfile = File::create(args.fpc.as_ref().unwrap()).unwrap();
+                    match outfile.write(format!("{}", pc).as_bytes()) {
+                        Ok(_) => (),
+                        Err(e) => println!("Culd not write the PC into the file: {:?}", e),
+                    }
+                    
+                }
+            }
+        }
+
+    }
+}
+
+fn run_search(args: &Args) {
     let mut state = StateManager::default();
-    let mut propagator = FTReachablePropagator::default();
+    let mut propagator = FTReachablePropagator::<false>::new();
     let graph = graph_from_ppidimacs(&args.input, &mut state, &mut propagator);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match args.branching {
@@ -86,54 +132,40 @@ fn main() {
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
-    if !args.compiled {
-        let mlimit = if args.memory.is_some() {
-            args.memory.unwrap()
-        } else {
-            let sys = System::new_all();
-            sys.total_memory() / 1000000
-        };
-        if args.statistics {
-            let mut solver = DefaultSolver::new(
-                graph,
-                state,
-                component_extractor,
-                branching_heuristic.as_mut(),
-                propagator,
-                mlimit,
-            );
-            solver.solve();
-        } else {
-            let mut solver = QuietSolver::new(
-                graph,
-                state,
-                component_extractor,
-                branching_heuristic.as_mut(),
-                propagator,
-                mlimit,
-            );
-            solver.solve();
-        }
+    let mlimit = if args.memory.is_some() {
+        args.memory.unwrap()
     } else {
-        if let Some(filepath) = args.faomdd {
-            let aomdd = AOMDD::from_file(&filepath);
-            println!("{}", aomdd.evaluate());
-        } else {
-            let mut compiler = ExactAOMDDCompiler::new(
-                graph,
-                state,
-                component_extractor,
-                branching_heuristic.as_mut(),
-                propagator
-            );
-            let aomdd = compiler.compile();
-            if let Some(path) = args.fgraphviz {
-                let mut outfile = File::create(path).unwrap();
-                match outfile.write(aomdd.as_graphviz().as_bytes()) {
-                    Ok(_) => (),
-                    Err(e) => println!("Could not write the AOMDD into the file: {:?}", e),
-                };
-            }
-        }
+        let sys = System::new_all();
+        sys.total_memory() / 1000000
+    };
+    if args.statistics {
+        let mut solver = DefaultSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+        );
+        solver.solve();
+    } else {
+        let mut solver = QuietSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+        );
+        solver.solve();
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+    if args.compiled {
+        run_compilation(&args);
+    } else {
+        run_search(&args);
     }
 }

@@ -6,9 +6,9 @@ use schlandals::propagator::FTReachablePropagator;
 use schlandals::components::*;
 use schlandals::*;
 use schlandals::search::QuietSolver;
-use schlandals::compiler::exact::ExactAOMDDCompiler;
-use schlandals::compiler::aomdd::AOMDD;
 use search_trail::StateManager;
+use schlandals::compiler::exact::ExactDACCompiler;
+use schlandals::compiler::circuit::DAC;
 
 use std::path::PathBuf;
 use tempfile::Builder;
@@ -23,7 +23,7 @@ macro_rules! test_input_with_branching {
             fn [<search_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::default();
+                let mut propagator = FTReachablePropagator::<false>::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -33,21 +33,21 @@ macro_rules! test_input_with_branching {
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
-            
+
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = $b::default();
-                let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
-                let aomdd = compiler.compile();
-                let sol = aomdd.evaluate();
+                let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
+                let mut spn = compiler.compile().unwrap();
+                let sol = spn.evaluate();
                 let expected = Float::with_val(113, $value);
-                println!("expected {:?} actual {:?}", expected, sol);
+                println!("{} {}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);
             }
 
@@ -55,23 +55,21 @@ macro_rules! test_input_with_branching {
             fn [<compile_from_file_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = $b::default();
-                let mut compiler = ExactAOMDDCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
-                let aomdd = compiler.compile();
-                let mut file = Builder::new().prefix("tmp_aomdd").suffix(".aomdd").tempfile().unwrap();
-                writeln!(file, "{}", aomdd).unwrap();
-                let read_aomdd = AOMDD::from_file(&PathBuf::from(&file.path()));
-                let sol = read_aomdd.evaluate();
+                let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
+                let spn = compiler.compile().unwrap();
+                let mut file = Builder::new().prefix("tmp").suffix(".pc").tempfile().unwrap();
+                writeln!(file, "{}", spn).unwrap();
+                let mut read_spn = DAC::from_file(&PathBuf::from(&file.path()));
+                let sol = read_spn.evaluate();
                 let expected = Float::with_val(113, $value);
-                println!("expected {:?} actual {:?}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);
             }
         }
-        
     }
 }
 

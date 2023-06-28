@@ -563,6 +563,11 @@ impl Graph {
     pub fn get_clause_removed_children(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         self.clauses[clause.0].children.capacity() - self.clauses[clause.0].children.len(state)
     }
+    
+    /// Return the start of a distribution (the index of the first variable in it)
+    pub fn get_distribution_start(&self, distribution: DistributionIndex) -> VariableIndex {
+        self.distributions[distribution.0].first
+    }
 
     // --- ITERATORS --- //
     
@@ -596,6 +601,11 @@ impl Graph {
         let first = self.distributions[distribution.0].first.0;
         let last = first + self.distributions[distribution.0].size;
         (first..last).map(VariableIndex)
+    }
+    
+    /// Returns an iterator on the distributions of the problem
+    pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionIndex> {
+        (0..self.distributions.len()).map(DistributionIndex)
     }
 
     /// Returns an iterator over all the variables, not fixed yet, in the body of the clause

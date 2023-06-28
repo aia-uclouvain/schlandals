@@ -50,22 +50,36 @@ use search_trail::StateManager;
 use crate::common::f128;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, VariableIndex};
-use rug::Float;
+use rug::{Assign, Float};
 
 #[derive(Debug)]
 pub struct Unsat;
 
-pub type PropagationResult = Result<Float, Unsat>;
+pub type PropagationResult = Result<(), Unsat>;
 
-#[derive(Default)]
-pub struct FTReachablePropagator {
+pub struct FTReachablePropagator<const C: bool> {
     propagation_stack: Vec<(VariableIndex, bool)>,
     pub unconstrained_clauses: Vec<ClauseIndex>,
     t_reachable: Vec<bool>,
     f_reachable: Vec<bool>,
+    assignments: Vec<(DistributionIndex, VariableIndex)>,
+    unconstrained_distributions: Vec<DistributionIndex>,
+    propagation_prob: Float,
 }
 
-impl FTReachablePropagator {
+impl<const C: bool> FTReachablePropagator<C> {
+    
+    pub fn new() -> Self {
+        Self {
+            propagation_stack: vec![],
+            unconstrained_clauses: vec![],
+            t_reachable: vec![],
+            f_reachable: vec![],
+            assignments: vec![],
+            unconstrained_distributions: vec![],
+            propagation_prob: f128!(0.0),
+        }
+    }
     
     /// Sets the number of clauses for the f-reachable and t-reachable vectors
     pub fn set_number_clauses(&mut self, n: usize) {
@@ -93,25 +107,51 @@ impl FTReachablePropagator {
         }
     }
     
+    /// Returns the propagation probability of the last call to propagate
+    pub fn get_propagation_prob(&self) -> &Float {
+        &self.propagation_prob
+    }
+    
+    /// Returns an iterator over the assignments made during the last propagation
+    pub fn assignments_iter(&self) -> impl Iterator<Item = (DistributionIndex, VariableIndex)> + '_{
+        self.assignments.iter().copied()
+    }
+
+    /// Returns true if there are any assignments in the assignments queue
+    pub fn has_assignments(&self) -> bool {
+        !self.assignments.is_empty()
+    }
+    
+    /// Returns true if there are any unconstrained distributions in the queue
+    pub fn has_unconstrained_distribution(&self) -> bool {
+        !self.unconstrained_distributions.is_empty()
+    }
+    
+    /// Returns an iterator over the distribution made unconstrained during the last propagation
+    pub fn unconstrained_distributions_iter(&self) -> impl Iterator<Item = DistributionIndex> + '_ {
+        self.unconstrained_distributions.iter().copied()
+    }
+    
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
-    fn get_simplified_distribution_prob(&self, g: &Graph, distribution: DistributionIndex, state: &StateManager) -> Float {
-        if g.distribution_number_false(distribution, state) == 0 {
-            f128!(1.0)
+    fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &StateManager) {
+        if C {
+            self.unconstrained_distributions.push(distribution);
         } else {
-            let mut p = f128!(0.0);
-            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
-                p += w;
+            if g.distribution_number_false(distribution, state) != 0 {
+                let mut p = f128!(0.0);
+                for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+                    p += w;
+                }
+                self.propagation_prob *= &p;
             }
-            p
         }
     }
     
     /// Propagates all the unconstrained clauses in the unconstrained clauses stack. It actually updates the sparse-sets of
     /// parents/children in the graph and, if necessary, computes the unconstrained probability of the distributions.
     /// It returns the overall unconstrained probability of the component after the whole propagation.
-    pub fn propagate_unconstrained_clauses(&mut self, g: &mut Graph, state: &mut StateManager) -> PropagationResult {
-        let mut p = f128!(1.0);
+    pub fn propagate_unconstrained_clauses(&mut self, g: &mut Graph, state: &mut StateManager) {
         while let Some(clause) = self.unconstrained_clauses.pop() {
             g.remove_clause_from_children(clause, state);
             g.remove_clause_from_parent(clause, state);
@@ -120,12 +160,11 @@ impl FTReachablePropagator {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_fixed(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
                     if g.decrement_distribution_constrained_clause_counter(distribution, state) == 0 {
-                        p *= self.get_simplified_distribution_prob(g, distribution, state);
+                        self.propagate_unconstrained_distribution(g, distribution, state);
                     }
                 }
             }
         }
-        PropagationResult::Ok(p)
     }
     
     /// Clears the propagation stack as well as the unconstrained clauses stack. This function
@@ -133,13 +172,17 @@ impl FTReachablePropagator {
     fn clear(&mut self) {
         self.propagation_stack.clear();
         self.unconstrained_clauses.clear();
+        self.assignments.clear();
+        self.unconstrained_distributions.clear();
     }
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
     pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
-        let mut propagation_prob = f128!(1.0);
+        self.assignments.clear();
+        self.unconstrained_distributions.clear();
+        self.propagation_prob.assign(1.0);
         while let Some((variable, value)) = self.propagation_stack.pop() {
             if let Some(v) = g.get_variable_value(variable, state) {
                 if v == value {
@@ -197,10 +240,17 @@ impl FTReachablePropagator {
             if is_p {
                 let distribution = g.get_variable_distribution(variable).unwrap();
                 if value {
-                    propagation_prob *= g.get_variable_weight(variable).unwrap();
-                    if propagation_prob == 0.0 {
-                        self.clear();
-                        return PropagationResult::Ok(propagation_prob);
+                    if C {
+                        self.assignments.push((distribution, variable));
+                    } else {
+                        // If the solver is in search-mode, then we can return as soon as the computed probability is 0.
+                        // But in compilation mode, we can not know in advance if the compiled circuit will be used in a
+                        // learning framework in which the probabilities might change.
+                        self.propagation_prob *= g.get_variable_weight(variable).unwrap();
+                        if !C && self.propagation_prob == 0.0 {
+                            self.clear();
+                            return PropagationResult::Ok(());
+                        }
                     }
                     for v in g.distribution_variable_iter(distribution).filter(|va| *va != variable) {
                         match g.get_variable_value(v, state) {
@@ -229,8 +279,8 @@ impl FTReachablePropagator {
                 self.add_unconstrained_clause(clause, g, state);
             }
         }
-        propagation_prob *= self.propagate_unconstrained_clauses(g, state)?;
-        PropagationResult::Ok(propagation_prob)
+        self.propagate_unconstrained_clauses(g, state);
+        PropagationResult::Ok(())
     }
 
     /// Sets the clause to be t-reachable and recursively sets its children to be t-reachable. Notice

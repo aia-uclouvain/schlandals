@@ -210,12 +210,12 @@ impl ComponentExtractor {
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
     /// Returns true iff at least one component has been detected and it contains one distribution
-    pub fn detect_components(
+    pub fn detect_components<const C: bool>(
         &mut self,
         g: &mut Graph,
         state: &mut StateManager,
         component: ComponentIndex,
-        propagator: &mut FTReachablePropagator,
+        propagator: &mut FTReachablePropagator<C>,
     ) -> bool {
         debug_assert!(propagator.unconstrained_clauses.is_empty());
         let end = state.get_usize(self.limit);
@@ -397,7 +397,7 @@ mod test_component_detection {
         let mut state = StateManager::default();
         let mut g = get_graph(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
-        let mut propagator = FTReachablePropagator::default();
+        let mut propagator = FTReachablePropagator::<false>::new();
 
         g.set_clause_unconstrained(ClauseIndex(4), &mut state);
         extractor.detect_components(&mut g, &mut state, ComponentIndex(0), &mut propagator);
@@ -418,7 +418,7 @@ mod test_component_detection {
         let mut state = StateManager::default();
         let mut g = get_graph(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
-        let mut propagator = FTReachablePropagator::default();
+        let mut propagator = FTReachablePropagator::<false>::new();
         
         state.save_state();
 

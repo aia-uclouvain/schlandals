@@ -75,6 +75,10 @@ impl BranchingDecision for Fiedler {
             }
         }
         
+        if cur_idx == 0 {
+            return;
+        }
+        
         // Computation of the laplacian matrix of the implication graph. This is a square matrix L in which we have
         // - L[i,i] = the degree of clause i
         // - L[i, j] = -1 if clause i and j are connected (i != j)
