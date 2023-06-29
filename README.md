@@ -68,17 +68,19 @@ To use the solver you must have the Rust toolchain installed. Once this is done 
 ```
 git clone git@github.com:aia-uclouvain/schlandals.git && cd schlandals && cargo build --release
 ```
-Then you can run the solver with `./target/release/schlandals [OPTIONS] --input <input file> --branching <branching heuristic>`.
+The binary's CLI arguments are organized by commands. We support three commands at the time
 
-The available branching heuristics all selects a clause in the input file and then a distribution randomly from it. They work on the *implication graph* of the clauses (one node per clause, an edge from a clause `I => j` to another clause `K => l` if `j` is included in `K`). We currently provide the following heuristics
-  - `fiedler`: computes the fiedler vector of the implication graph and selects the clause with the value closest to the mean fiedler value of all active clauses
-  - `min-in-degree`: selects the active clause with the less number of parents. In case of ties selects the one with the fewest number of initial parents.
-  - `min-out-degree`: selects the active clause with the less number of children. In case of ties selects the one with the fewest number of initial children
-  - `max-degree`: selects the clause with the maximum degree.
+### Search
 
-The available options are
-  - `compiled`: Compile the input into an AOMDD. If active, the following options are available:
-      - `faomdd`: The file from which to read the AOMDD. If present, the AOMDD is constructed from the file and evaluated.
-      - `fgraphviz`: Save the AOMDD as a graphviz DOT file for visualization
-  - `memory`: Limit on the memory usage for the search-based solver (not active when compiling into an AOMDD)
-  - `statistics`: Shows statistics of the search
+`schlandals search -i <input> -b <branching heuristic> [-s -m <memory limit]` launch the search based solver.
+The `i` is a path to a valid input file, `b` is a valid branching heuristic.
+The optional `s` flag tells if stats must be recorded or not and `m` can be used to provide a memory limit.
+
+### Compilation
+
+`schlandals compile -i <input> -b <branching heuristic> [--fdac <outfile> --dotfile <dotfile>]` can be used to compile the input problem as an arithmetic circuit.
+The circuit can be stored in the file given by the `fdac` argument and a DOT visualization can be saved in the argument provided by the `dotfile` argument.
+
+### Reading a compiled file
+
+A previously compiled file can be read using `schlandals read-compiled -i <fdac file> [--dotfile <dotfile]`.
