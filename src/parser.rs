@@ -80,10 +80,7 @@ pub fn graph_from_ppidimacs<const C: bool>(
                 .collect::<Vec<f64>>();
             let nodes = g.add_distribution(&split, state);
             for i in 0..split.len() {
-                if split[i] == 0.0 {
-                    //propagator.add_to_propagation_stack(nodes[i], false);
-                }
-                if split[i] == 1.0 {
+                if !C && split[i] == 1.0 {
                     propagator.add_to_propagation_stack(nodes[i], true);
                 }
             }

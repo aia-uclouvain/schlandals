@@ -133,14 +133,14 @@ fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, 
                 let mut outfile = File::create(&f).unwrap();
                 match outfile.write(out.as_bytes()) {
                     Ok(_) => (),
-                    Err(e) => println!("Culd not write the PC into the file: {:?}", e),
+                    Err(e) => println!("Culd not write the circuit into the dot file: {:?}", e),
                 }
             }
             if let Some(f) = fdac {
                 let mut outfile = File::create(&f).unwrap();
                 match outfile.write(format!("{}", dac).as_bytes()) {
                     Ok(_) => (),
-                    Err(e) => println!("Culd not write the PC into the file: {:?}", e),
+                    Err(e) => println!("Culd not write the circuit into the fdac file: {:?}", e),
                 }
                 
             }
@@ -201,11 +201,4 @@ fn main() {
             read_compiled(input, dotfile);
         }
     }
-    /*
-    if args.compiled {
-        run_compilation(&args);
-    } else {
-        run_search(&args);
-    }
-    */
 }
