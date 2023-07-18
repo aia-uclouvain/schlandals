@@ -68,7 +68,19 @@ To use the solver you must have the Rust toolchain installed. Once this is done 
 ```
 git clone git@github.com:aia-uclouvain/schlandals.git && cd schlandals && cargo build --release
 ```
-The binary's CLI arguments are organized by commands. We support three commands at the time
+Once the command has been built, the binary is located in `<SCHLANDALS_DIR>/target/release/schlandals` (with `<SCHLANDALS_DIR>` the directory in which you cloned the repo).
+If you want to be able to run Schlandals for anywhere, you can add `<SCHLANDALS_DIR>/target/release` to your `$PATH`.
+
+The binary's CLI arguments are organized by commands. Three commands are currently supported: `search` to solve the problem by a DPLL search, `compile` to compile the input into an arithmetic circuit and `read-compiled` to evaluate a previously compiled input.
+These are explained next, after a quick note on the heuristics supported by the solver (for the `search` and `compile` sub-command)
+### Heuristics
+
+Schlandals comes with various heuristic that can be used during the search/compilation.
+The current heuristics are based on the implication graph of the input. In such graph, there is one node per clause and a link between clause C1 (I1 => h1) and C2 (I2 => h2) if the h1 is in I2.
+The available heuristics are
+  - `min-in-degree`: Select a distribution from the clause with the lowest in degree.
+  - `min-out-degree`: Select a distribution from the clause with the lowest out degree.
+  - `max-degree`: Select a distribution from the clause with the highest degree.
 
 ### Search
 
