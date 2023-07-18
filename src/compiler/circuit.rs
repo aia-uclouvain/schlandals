@@ -25,6 +25,7 @@
 //! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
 
 use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
+use rustc_hash::FxHashSet;
 
 use crate::core::graph::{DistributionIndex, Graph};
 use rug::{Assign, Float};
@@ -47,7 +48,7 @@ struct CircuitNode {
     /// Outputs of the node. Only used during the creation. These values are moved to the DAC structure before evaluation
     outputs: Vec<CircuitNodeIndex>,
     /// Inputs of the node. Only used during the creation to minimize the size of the circuit
-    inputs: Vec<CircuitNodeIndex>,
+    inputs: FxHashSet<CircuitNodeIndex>,
     /// Input distributions of the node
     input_distributions: Vec<(DistributionIndex, usize)>,
     /// Is the node a product node?
@@ -115,7 +116,7 @@ impl DAC {
         self.nodes.push(CircuitNode {
             value: f128!(1.0),
             outputs: vec![],
-            inputs: vec![],
+            inputs: FxHashSet::default(),
             input_distributions: vec![],
             is_mul: true,
             ouput_start: 0,
@@ -132,7 +133,7 @@ impl DAC {
         self.nodes.push(CircuitNode {
             value: f128!(0.0),
             outputs: vec![],
-            inputs: vec![],
+            inputs: FxHashSet::default(),
             input_distributions: vec![],
             is_mul: false,
             ouput_start: 0,
@@ -148,7 +149,7 @@ impl DAC {
     pub fn add_spnode_output(&mut self, node: CircuitNodeIndex, output: CircuitNodeIndex) {
         self.nodes[node.0].outputs.push(output);
         self.nodes[node.0].number_outputs += 1;
-        self.nodes[output.0].inputs.push(node);
+        self.nodes[output.0].inputs.insert(node);
     }
     
     /// Adds `output` to the outputs of the distribution's input node with the given value. Adds the (distribution, value)
@@ -256,7 +257,7 @@ impl DAC {
             }
             // This remove the allocated space to the outputs/inputs vector
             self.nodes[node.0].outputs.shrink_to_fit();
-            self.nodes[node.0].inputs.truncate(0);
+            self.nodes[node.0].inputs.clear();
             self.nodes[node.0].inputs.shrink_to_fit();
         }
         // Actually remove the nodes (and allocated space) from the nodes vector.
@@ -297,69 +298,76 @@ impl DAC {
     ///     2. If a sum node has as input a distribution and all its value, it can be removed. In practice it only
     ///        has input from that distribution
     pub fn reduce(&mut self) {
-        
-        // First, we remove all neutral node. Since it can lead to a possible optimization of the sum node, we do that first
-        for node in 0..self.nodes.len() {
-            if self.is_neutral(node) {
-                self.nodes[node].to_remove = true;
-                // Either it has an input from another internal node, or from a distribution node
-                if self.nodes[node].inputs.len() != 0 {
-                    let input = self.nodes[node].inputs[0];
-                    // Removing the node from the output of the input node
-                    if let Some(idx) = self.nodes[input.0].outputs.iter().position(|x| (*x).0 == node) {
-                        self.nodes[input.0].outputs.remove(idx);
-                    }
-                    for out_id in 0..self.nodes[node].outputs.len() {
-                        let output = self.nodes[node].outputs[out_id];
-                        // Adds the input of node to its parent input and remove node from the inputs
-                        self.nodes[input.0].outputs.push(output);
-                        // Updating the input of the new output from node -> input
-                        if let Some(idx) = self.nodes[output.0].inputs.iter().position(|x| (*x).0 == node) {
-                            self.nodes[output.0].inputs[idx] = input;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            // First, we remove all neutral node. Since it can lead to a possible optimization of the sum node, we do that first
+            for node in 0..self.nodes.len() {
+                if self.is_neutral(node) {
+                    changed = true;
+                    self.nodes[node].to_remove = true;
+                    // Either it has an input from another internal node, or from a distribution node
+                    if self.nodes[node].inputs.len() != 0 {
+                        let input = *self.nodes[node].inputs.iter().next().unwrap();
+                        // Removing the node from the output of the input node
+                        if let Some(idx) = self.nodes[input.0].outputs.iter().position(|x| (*x).0 == node) {
+                            self.nodes[input.0].outputs.remove(idx);
                         }
-                    }
-                    self.nodes[node].inputs.clear();
-                    self.nodes[node].outputs.clear();
-                } else {
-                    let (input, value) = self.nodes[node].input_distributions[0];
-                    // Removing the node from the output of the distribution
-                    if let Some(idx) = self.distribution_nodes[input.0].outputs.iter().position(|x| *x == (CircuitNodeIndex(node), value)) {
-                        self.distribution_nodes[input.0].outputs.remove(idx);
-                    }
-                    for out_id in 0..self.nodes[node].outputs.len() {
-                        // Adding the new output to the distribution's outputs
-                        let output = self.nodes[node].outputs[out_id];
-                        self.distribution_nodes[input.0].outputs.push((output, value));
-                        // Adding the distribution to the inputs of the new output
-                        self.nodes[output.0].input_distributions.push((input, value));
-                        // Removing the node from the input of the output 
-                        if let Some(idx) = self.nodes[output.0].inputs.iter().position(|x| (*x).0 == node) {
-                            self.nodes[output.0].inputs.remove(idx);
+                        for out_id in 0..self.nodes[node].outputs.len() {
+                            let output = self.nodes[node].outputs[out_id];
+                            // Adds the input of node to its parent input and remove node from the inputs
+                            self.nodes[input.0].outputs.push(output);
+                            // Updating the input of the new output from node -> input
+                            self.nodes[output.0].inputs.remove(&CircuitNodeIndex(node));
+                            self.nodes[output.0].inputs.insert(input);
                         }
+                        self.nodes[node].inputs.clear();
+                        self.nodes[node].outputs.clear();
+                    } else {
+                        let (input, value) = self.nodes[node].input_distributions[0];
+                        // Removing the node from the output of the distribution
+                        if let Some(idx) = self.distribution_nodes[input.0].outputs.iter().position(|x| *x == (CircuitNodeIndex(node), value)) {
+                            self.distribution_nodes[input.0].outputs.remove(idx);
+                        }
+                        for out_id in 0..self.nodes[node].outputs.len() {
+                            // Adding the new output to the distribution's outputs
+                            let output = self.nodes[node].outputs[out_id];
+                            self.distribution_nodes[input.0].outputs.push((output, value));
+                            // Adding the distribution to the inputs of the new output
+                            self.nodes[output.0].input_distributions.push((input, value));
+                            // Removing the node from the input of the output 
+                            self.nodes[output.0].inputs.remove(&CircuitNodeIndex(node));
+                        }
+                        self.nodes[node].input_distributions.clear();
+                        self.nodes[node].outputs.clear();
                     }
-                    self.nodes[node].input_distributions.clear();
-                    self.nodes[node].outputs.clear();
                 }
             }
-        }
-        
-        // Then we simplify the sum nodes
-        for node in 0..self.nodes.len() {
-            // Only consider sum node that have a distribution as input
-            if !self.nodes[node].is_mul && !self.nodes[node].input_distributions.is_empty() {
-                // Count the number of value of the first distribution, minus 1 since we assume the first element has been processed
-                let mut seen_values = self.distribution_nodes[self.nodes[node].input_distributions[0].0.0].probabilities.len() - 1;
-                let mut to_remove = true;
-                for i in 1..self.nodes[node].input_distributions.len() {
-                    // If the distribution is different from the previous, multiple distributions so we must keep it
-                    if self.nodes[node].input_distributions[i].0 != self.nodes[node].input_distributions[i-1].0 {
-                        to_remove = false;
-                        break;
+                
+            // If a distribution node send all its value to a sum node, remove the node from the output
+            let mut out_count = (0..self.nodes.len()).map(|_| 0).collect::<Vec<usize>>();
+            for node in 0..self.distribution_nodes.len() {
+                let number_value = self.distribution_nodes[node].probabilities.len();
+                for (output, _) in self.distribution_nodes[node].outputs.iter().copied() {
+                    if !self.nodes[output.0].is_mul {
+                        out_count[output.0] += 1;
                     }
-                    seen_values += 1;
                 }
-                if to_remove && seen_values == 0 {
-                    self.nodes[node].to_remove = true;
+                let mut i = 0;
+                while i < self.distribution_nodes[node].outputs.len() {
+                    let output = self.distribution_nodes[node].outputs[i].0;
+                    if out_count[output.0] == number_value {
+                        changed = true;
+                        self.distribution_nodes[node].outputs.swap_remove(i);
+                        self.nodes[output.0].to_remove = true;
+                        self.nodes[output.0].input_distributions.clear();
+                        for o in 0..self.nodes[output.0].outputs.len() {
+                            let o_output = self.nodes[output.0].outputs[o].0;
+                            self.nodes[o_output].inputs.remove(&output);
+                        }
+                    } else {
+                        i += 1;
+                    }
                 }
             }
         }
@@ -552,7 +560,7 @@ impl DAC {
                 spn.nodes.push(CircuitNode {
                     value: if l.starts_with("x") { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
-                    inputs: vec![],
+                    inputs: FxHashSet::default(),
                     input_distributions: vec![],
                     is_mul: l.starts_with("x"),
                     ouput_start: start,
