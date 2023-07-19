@@ -1,0 +1,241 @@
+p cnf 335 121
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+c p distribution  0.875 0.125
+241 -335 -1 0
+243 -333 -3 0
+244 -334 -5 0
+245 -331 -7 0
+248 -239 -9 0
+249 -248 -11 0
+250 -248 -13 0
+251 -250 -15 0
+252 -249 -17 0
+253 -252 -19 0
+253 -255 -21 0
+254 -253 -23 0
+254 -255 -25 0
+255 -251 -27 0
+292 -254 -29 0
+250 -324 -31 0
+256 -255 -33 0
+258 -257 -35 0
+256 -258 -37 0
+258 -259 -39 0
+257 -259 -41 0
+259 -260 -43 0
+261 -259 -45 0
+262 -261 -47 0
+262 -241 -49 0
+263 -262 -51 0
+264 -263 -53 0
+265 -263 -55 0
+266 -265 -57 0
+266 -267 -59 0
+267 -240 -61 0
+266 -268 -63 0
+268 -269 -65 0
+270 -269 -67 0
+271 -270 -69 0
+272 -271 -71 0
+272 -261 -73 0
+271 -257 -75 0
+273 -257 -77 0
+274 -273 -79 0
+275 -274 -81 0
+276 -275 -83 0
+277 -276 -85 0
+278 -277 -87 0
+280 -325 -89 0
+280 -279 -91 0
+298 -289 -93 0
+281 -280 -95 0
+282 -281 -97 0
+281 -328 -99 0
+285 -242 -101 0
+283 -285 -103 0
+284 -283 -105 0
+286 -284 -107 0
+284 -243 -109 0
+287 -288 -111 0
+288 -286 -113 0
+299 -287 -115 0
+288 -298 -117 0
+286 -290 -119 0
+289 -290 -121 0
+327 -280 -123 0
+289 -291 -125 0
+290 -326 -127 0
+292 -291 -129 0
+293 -292 -131 0
+293 -275 -133 0
+291 -294 -135 0
+294 -253 -137 0
+295 -282 -139 0
+296 -295 -141 0
+297 -296 -143 0
+329 -295 -145 0
+301 -299 -147 0
+300 -301 -149 0
+301 -330 -151 0
+302 -300 -153 0
+303 -302 -155 0
+304 -303 -157 0
+305 -304 -159 0
+306 -305 -161 0
+307 -306 -163 0
+308 -307 -165 0
+309 -307 -167 0
+310 -305 -169 0
+311 -310 -171 0
+312 -304 -173 0
+310 -312 -175 0
+313 -312 -177 0
+314 -313 -179 0
+315 -314 -181 0
+316 -314 -183 0
+317 -313 -185 0
+317 -316 -187 0
+320 -316 -189 0
+320 -244 -191 0
+319 -320 -193 0
+318 -320 -195 0
+318 -317 -197 0
+321 -258 -199 0
+322 -321 -201 0
+324 -322 -203 0
+323 -321 -205 0
+323 -256 -207 0
+324 -323 -209 0
+326 -325 -211 0
+326 -292 -213 0
+290 -327 -215 0
+328 -285 -217 0
+330 -329 -219 0
+299 -329 -221 0
+325 -276 -223 0
+330 -296 -225 0
+328 -327 -227 0
+260 -247 -229 0
+246 -245 -231 0
+247 -246 -233 0
+239 -332 -235 0
+247 -245 -237 0
+279 0
+-315 0

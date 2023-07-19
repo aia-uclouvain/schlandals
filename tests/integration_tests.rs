@@ -21,7 +21,7 @@ macro_rules! test_input_with_branching {
         paste!{
             #[test]
             fn [<search_ $b _ $name>]() {
-                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
                 let mut propagator = FTReachablePropagator::<false>::new();
                 let path = PathBuf::from(filename);
@@ -36,7 +36,7 @@ macro_rules! test_input_with_branching {
 
             #[test]
             fn [<compile_ $b _ $name>]() {
-                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
                 let mut propagator = FTReachablePropagator::<true>::new();
                 let path = PathBuf::from(filename);
@@ -53,7 +53,7 @@ macro_rules! test_input_with_branching {
 
             #[test]
             fn [<compile_from_file_ $b _ $name>]() {
-                let filename = format!("tests/instances/{}/{}.ppidimacs", stringify!($dir), stringify!($name));
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
                 let mut propagator = FTReachablePropagator::<true>::new();
                 let path = PathBuf::from(filename);

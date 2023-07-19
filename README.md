@@ -23,43 +23,31 @@ In addition to that, we impose two more constraints
   - All clauses in the formula F are Horn clauses (of the form `I => h` with `I` a conjuction of literals)
   - The probabilistic variables are partioned into *distributions* such that the weights in each distribution sum up to 1
 
-Schlandals takes as input a file using the following format (subject to change in the short future)
+Schlandals takes as input a file using a modified version of the [DIMACS](https://mccompetition.org/assets/files/2021/competition2021.pdf) format
 ```
-c Lines that starts with c are comment lines
-c Example of format (modified DIMACS) for a simple bayesian network with three variables A B C with each 2 values
-c B is dependent on A and C is depedent on B (this is a chain)
+c Lines starting with `c` alone are comments.
+c The first line must be the head in the form of "p cnf <number variable> <number clauses>
 p cnf 16 11
-c --- Start of the distributions ---
-c Each line define a distribution as well as the index of the probabilistic variables
-c a0  a1
-d 0.2 0.8
-c a0b0 a0b1
-d 0.3 0.7
-c a1b0 a1b1
-d 0.4 0.6
-c b0c0 b0c1
-d 0.1 0.9
-c b1c0 b1c1
-d 0.5 0.5
-c --- End of the distributions ---
-c --- Clauses ---
-c Clauses for cpt P(A)
-c This clause can be seen as 0 => 10
-10 -0
-11 -1
-c Clauses for cpt P(B | A)
-c Multiple negative indexes can be seen as 10 /\ 2 => 12
-12 -10 -2
-12 -11 -4
-13 -10 -3
-13 -11 -5
-c Clauses for cpt P(C | B)
-14 -12 -6
-14 -13 -8
-15 -12 -7
-15 -13 -9
-c The query is added by such clauses, which is translated as 11 => False
--11
+c Following the header, must be the definition of the distributions. Note that the lines starts with "c p distribution" which is similar to how weights are encoded in DIMACS (c p weight).
+c /!\ The definition of the distribution MUST be before the clauses and induce an implicit numbering on the variable. Below, the first distribution will have
+c variable with index 1 and 2. The second has the variables with index 3 and 4, etc.
+c p distribution 0.2 0.8
+c p distribution 0.3 0.7
+c p distribution 0.4 0.6
+c p distribution 0.1 0.9
+c p distribution 0.5 0.5
+c Finally the clauses are encoded as in DIMACS.
+11 -1 0
+12 -2 0
+13 -11 -3 0
+13 -12 -5 0
+14 -11 -4 0
+14 -12 -6 0
+15 -13 -7 0
+15 -14 -9 0
+16 -13 -8 0
+16 -14 -10 0
+-12 0
 ```
 
 # Usage

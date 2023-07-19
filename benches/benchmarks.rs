@@ -12,7 +12,7 @@ use std::path::PathBuf;
 macro_rules! set_up_solvers {
     ($($name:ident: [$instance:expr, $b:ident, $c:ident],)*) => {
         $(
-            let filename = format!("benches/instances/{}.ppidimacs", $instance);
+            let filename = format!("benches/instances/{}.cnf", $instance);
             let path = PathBuf::from(filename);
             let mut state = StateManager::default();
             let mut propagator = FTReachablePropagator::<false>::new();

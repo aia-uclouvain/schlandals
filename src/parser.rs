@@ -62,20 +62,17 @@ pub fn graph_from_ppidimacs<const C: bool>(
     let mut line_count = 0;
     for line in reader.lines() {
         let l = line.unwrap();
-        if l.starts_with('c') {
-            continue;
-        }
         if l.starts_with("p cnf") {
             // Header, parse the number of clauses and variables
             let mut split = l.split_whitespace();
             number_nodes = Some(split.nth(2).unwrap().parse::<usize>().unwrap());
-        } else if l.starts_with('d') {
+        } else if l.starts_with("c p distribution") {
             if distribution_definition_finished {
                 panic!("[Parsing error at line {}] All distribution should be defined before the clauses", line_count);
             }
             let split = l
                 .split_whitespace()
-                .skip(1)
+                .skip(3)
                 .map(|token| token.parse::<f64>().unwrap())
                 .collect::<Vec<f64>>();
             let nodes = g.add_distribution(&split, state);
@@ -84,6 +81,8 @@ pub fn graph_from_ppidimacs<const C: bool>(
                     propagator.add_to_propagation_stack(nodes[i], true);
                 }
             }
+        } else if l.starts_with('c'){
+            continue;
         } else {
             // First line for the clauses
             if number_nodes.is_none() {
@@ -96,43 +95,46 @@ pub fn graph_from_ppidimacs<const C: bool>(
                     g.add_variable(false, None, None, state);
                 }
             }
-            let split = l.split_whitespace().collect::<Vec<&str>>();
-            let positive_literals = split
-                .iter()
-                .filter(|x| !x.starts_with('-'))
-                .map(|x| x.parse::<usize>().unwrap())
-                .collect::<Vec<usize>>();
-            let negative_literals = split
-                .iter()
-                .filter(|x| x.starts_with('-'))
-                .map(|x| -x.parse::<isize>().unwrap())
-                .collect::<Vec<isize>>();
-            if positive_literals.len() > 1 {
-                panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
-            }
-            let head = if positive_literals.is_empty() {
-                // There is no head in this clause, so it is just a clause of the form
-                //      n1 && n2 && ... && nn =>
-                //  which, in our model implies that the head is false (otherwise it does not
-                //  constrain the problem)
-                let n = g.add_variable(false, None, None, state);
-                propagator.add_to_propagation_stack(n, false);
-                n
-            } else {
-                VariableIndex(positive_literals[0])
-            };
-            let body = if negative_literals.is_empty() {
-                let n = g.add_variable(false, None, None, state);
-                propagator.add_to_propagation_stack(n, true);
-                vec![n]
-            } else {
-                negative_literals
+            // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
+            for clause in l.split(" 0").filter(|cl| !cl.is_empty()) {
+                let split = clause.split_whitespace().collect::<Vec<&str>>();
+                let positive_literals = split
                     .iter()
-                    .copied()
-                    .map(|x| VariableIndex(x as usize))
-                    .collect::<Vec<VariableIndex>>()
-            };
-            g.add_clause(head, body, state);
+                    .filter(|x| !x.starts_with('-'))
+                    .map(|x| x.parse::<usize>().unwrap() - 1)
+                    .collect::<Vec<usize>>();
+                let negative_literals = split
+                    .iter()
+                    .filter(|x| x.starts_with('-'))
+                    .map(|x| (-x.parse::<isize>().unwrap()) - 1)
+                    .collect::<Vec<isize>>();
+                if positive_literals.len() > 1 {
+                    panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
+                }
+                let head = if positive_literals.is_empty() {
+                    // There is no head in this clause, so it is just a clause of the form
+                    //      n1 && n2 && ... && nn =>
+                    //  which, in our model implies that the head is false (otherwise it does not
+                    //  constrain the problem)
+                    let n = g.add_variable(false, None, None, state);
+                    propagator.add_to_propagation_stack(n, false);
+                    n
+                } else {
+                    VariableIndex(positive_literals[0])
+                };
+                let body = if negative_literals.is_empty() {
+                    let n = g.add_variable(false, None, None, state);
+                    propagator.add_to_propagation_stack(n, true);
+                    vec![n]
+                } else {
+                    negative_literals
+                        .iter()
+                        .copied()
+                        .map(|x| VariableIndex(x as usize))
+                        .collect::<Vec<VariableIndex>>()
+                };
+                g.add_clause(head, body, state);
+            }
         }
         line_count += 1;
     }
