@@ -3,6 +3,12 @@ name = "schlandals"
 version = "0.1.0"
 edition = "2021"
 
+authors = ["Alexandre Dubray <alexandre.dubray@uclouvain.be>"]
+readme = "README.md"
+repository = "https://github.com/aia-uclouvain/schlandals"
+description = "A tool for doing probabilistic inference by projected weighted model counting."
+license = "AGPL-3.0"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
