@@ -12,7 +12,7 @@ Current known probability queries that can be solved with the solver include
 
 The solver currently supports two types of solving
   - Search based solving with a DPLL-style backtracing search
-  - Compiling into (or read from a file) an AND/OR Multi-valued decision diagram (AOMDD) (still in early development)
+  - Compiling into (or read from a file) an arithmetic circuit with distributions as leaf
 
 # Problem specification
 
