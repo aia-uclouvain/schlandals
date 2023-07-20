@@ -163,7 +163,7 @@ impl ComponentExtractor {
             *comp_size += 1;
             
             // Adds the variable to the hash if they have not yet been seen
-            for variable in g.clause_body_iter(clause, state) {
+            for variable in g.clause_body_iter(clause) {
                 if !self.seen_var[variable.0] && !g.is_variable_fixed(variable, state) {
                     self.seen_var[variable.0] = true;
                     *hash ^= g.get_variable_random(variable);
@@ -177,7 +177,7 @@ impl ComponentExtractor {
 
             // Explores the clauses that share a distribution with the current clause
             if g.clause_has_probabilistic(clause, state) {
-                for variable in g.clause_body_iter(clause, state).chain(std::iter::once(g.get_clause_head(clause))) {
+                for variable in g.clause_body_iter(clause).chain(std::iter::once(g.get_clause_head(clause))) {
                     if g.is_variable_probabilistic(variable)
                         && !g.is_variable_fixed(variable, state)
                     {

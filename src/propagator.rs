@@ -156,7 +156,7 @@ impl<const C: bool> FTReachablePropagator<C> {
             g.remove_clause_from_children(clause, state);
             g.remove_clause_from_parent(clause, state);
             debug_assert!(!self.unconstrained_clauses.contains(&clause));
-            for variable in g.clause_body_iter(clause, state).chain(std::iter::once(g.get_clause_head(clause))) {
+            for variable in g.clause_body_iter(clause).chain(std::iter::once(g.get_clause_head(clause))) {
                 if g.is_variable_probabilistic(variable) && !g.is_variable_fixed(variable, state) {
                     let distribution = g.get_variable_distribution(variable).unwrap();
                     if g.decrement_distribution_constrained_clause_counter(distribution, state) == 0 {
@@ -193,21 +193,20 @@ impl<const C: bool> FTReachablePropagator<C> {
             }
             g.set_variable(variable, value, state);
             let is_p = g.is_variable_probabilistic(variable);
-            for clause in g.variable_clause_body_iter(variable) {
+            
+            for i in (0..g.number_watchers(variable)).rev() {
+                let clause = g.get_clause_watched(variable, i);
                 if g.is_clause_constrained(clause, state) {
-                    // The clause is constrained, and var is in its body. If value = T then we need to remove the variable from the body
-                    // otherwise the clause is deactivated
                     if value {
+                        let (p_bound, d_bound) = g.update_watchers(i, variable, state);
+
                         let head = g.get_clause_head(clause);
                         let head_value = g.get_variable_value(head, state);
                         //debug_assert!(!(head_value.is_some() && head_value.unwrap()));
                         let head_false = head_value.is_some() && !head_value.unwrap();
-                        let body_remaining = if is_p {
-                            g.clause_decrement_number_probabilistic(clause, state)
-                        } else {
-                            g.clause_decrement_number_deterministic(clause, state)
-                        };
-                        if body_remaining == 0 {
+                        
+                        if p_bound + d_bound == 0 {
+                            // No more variable in the body
                             match head_value {
                                 None => self.add_to_propagation_stack(head, true),
                                 Some(v) => {
@@ -216,8 +215,8 @@ impl<const C: bool> FTReachablePropagator<C> {
                                     return PropagationResult::Err(Unsat);
                                 }
                             }
-                        } else if body_remaining == 1 && head_false {
-                            let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
+                        } else if p_bound + d_bound == 1 && head_false {
+                            let v = g.clause_body_iter(clause).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
                             self.add_to_propagation_stack(v, false);
                         }
                     } else {
@@ -225,13 +224,13 @@ impl<const C: bool> FTReachablePropagator<C> {
                     }
                 }
             }
-            
+
             for clause in g.variable_clause_head_iter(variable) {
                 if g.is_clause_constrained(clause, state) {
                     if value {
                         self.add_unconstrained_clause(clause, g, state);
-                    } else if g.clause_number_unassigned(clause, state) == 1 {
-                        let v = g.clause_body_iter(clause, state).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
+                    } else if g.get_clause_body_bounds(clause, state) == 1 {
+                        let v = g.clause_body_iter(clause).find(|v| !g.is_variable_fixed(*v, state)).unwrap();
                         self.propagation_stack.push((v, false));
                     }
                 }
@@ -325,7 +324,7 @@ impl<const C: bool> FTReachablePropagator<C> {
             if (g.is_variable_probabilistic(head) && !g.is_variable_fixed(head, state)) || (head_value.is_some() && !head_value.unwrap()) {
                 self.set_f_reachability(g, state, clause);
             }
-            if g.clause_number_deterministic(clause, state) == 0 {
+            if g.get_clause_body_bounds_deterministic(clause, state) == 0 {
                 self.set_t_reachability(g, state, clause);
             }
         }

@@ -98,14 +98,12 @@ pub struct Variable {
 pub struct Clause {
     /// Head of the clause
     pub head: VariableIndex,
-    /// Body of the clause, cunjunction of all the variable in the body
-    pub body: SparseSet<VariableIndex>,
+    /// The set of probabilistic variables appearing in the body of the clause
+    pub body_probabilistic: Vec<VariableIndex>,
+    /// The set of deterministic variables appearing in the body of the clause
+    pub body_deterministic: Vec<VariableIndex>,
     /// True if and only if the clause is constrained
     pub constrained: ReversibleBool,
-    /// Numbers of probabilistic variable active in the clause body
-    pub number_probabilistic: ReversibleUsize,
-    /// Numbers of deterministic variable active in the clause body
-    pub number_deterministic: ReversibleUsize,
     /// Vector that stores the children of the clause in the implication graph
     pub children: SparseSet<ClauseIndex>,
     /// Vector that stores the parents of the clause in the implication graph
@@ -156,6 +154,7 @@ pub struct Graph {
     variables_random: Vec<u64>,
     /// Random bitstring for the clauses (used in hash computation)
     clauses_random: Vec<u64>,
+    watchers: Vec<Vec<ClauseIndex>>,
 }
 
 impl Graph {
@@ -175,6 +174,7 @@ impl Graph {
             clauses_bit: vec![],
             variables_random: vec![],
             clauses_random: vec![],
+            watchers: vec![],
         }
     }
 
@@ -216,6 +216,7 @@ impl Graph {
         distribution: Option<DistributionIndex>,
         state: &mut StateManager,
     ) -> VariableIndex {
+        self.watchers.push(vec![]);
         // Random bitstring for the variable, used in the hash computation
         self.variables_random.push(rand::random());
         // Since a variable is added, increase the max unfixed variable
@@ -256,19 +257,17 @@ impl Graph {
             self.clauses_bit.push(state.manage_u64(!0));
         }
         let cid = ClauseIndex(self.clauses.len());
-        let number_probabilistic = body.iter().copied().filter(|v| self.is_variable_probabilistic(*v)).count();
-        let number_deterministic = body.len() - number_probabilistic;
         self.clauses.push(Clause {
             head,
-            body: SparseSet::<VariableIndex>::new(state),
+            body_probabilistic: vec![],
+            body_deterministic: vec![],
             constrained: state.manage_bool(true),
-            number_probabilistic: state.manage_usize(number_probabilistic),
-            number_deterministic: state.manage_usize(number_deterministic),
             children: SparseSet::<ClauseIndex>::new(state),
             parents: SparseSet::<ClauseIndex>::new(state),
         });
         // This part of the code sets up all the necessary counters, references for the propagation algorithm
         state.increment_usize(self.variables[head.0].number_clause_constrained);
+        let has_body = !body.is_empty();
         for n in body {
             if self.is_variable_probabilistic(n) {
                 // We increment the number of clause containing the distribution. Note that it is not a problem
@@ -276,6 +275,9 @@ impl Graph {
                 // is decremented multiple times
                 let distribution = self.variables[n.0].distribution.unwrap();
                 state.increment_usize(self.distributions[distribution.0].number_clause_constrained);
+                self.clauses[cid.0].body_probabilistic.push(n);
+            } else {
+                self.clauses[cid.0].body_deterministic.push(n);
             }
             state.increment_usize(self.variables[n.0].number_clause_constrained);
             // Since n is in the body of the current clause, an edge must be added from each clause in which it is
@@ -284,16 +286,25 @@ impl Graph {
                 self.add_edge(clause, cid, state);
             }
             self.variables[n.0].clauses_body.push(cid);
-            self.clauses[cid.0].body.add(n, state);
+        }
+        // If the body is not empty, watch the clause.
+        if has_body {
+            let k = self.clauses[cid.0].body_deterministic.len().min(2);
+            for i in 0..k {
+                let v = self.clauses[cid.0].body_deterministic[i];
+                self.watchers[v.0].push(cid);
+            }
+            let k = self.clauses[cid.0].body_probabilistic.len().min(2);
+            for i in 0..k {
+                let v = self.clauses[cid.0].body_probabilistic[i];
+                self.watchers[v.0].push(cid);
+            }
         }
         // For each clause in which the head is in the body, add an edge from the current clause to that clause
         for clause in self.variables[head.0].clauses_body.clone() {
             self.add_edge(cid, clause, state);
         }
         self.variables[head.0].clauses_head.push(cid);
-        // Set numbers of probabilistic/deterministic for reachability computations
-        state.set_usize(self.clauses[cid.0].number_probabilistic, number_probabilistic);
-        state.set_usize(self.clauses[cid.0].number_deterministic, number_deterministic);
         cid
     }
 
@@ -321,11 +332,6 @@ impl Graph {
         self.clauses[clause.0].parents.remove(parent, state);
     }
     
-    /// Removes a variable from the sparse-set of the body of the clause
-    fn remove_variable_from_body(&mut self, variable: VariableIndex, clause: ClauseIndex, state: &mut StateManager) {
-        self.clauses[clause.0].body.remove(variable, state);
-    }
-    
     /// Sets a variable to true or false.
     ///     - If true, Removes the variable from the body of the constrained clauses
     ///     - If false, and probabilistic, increase the counter of false variable in the distribution
@@ -339,17 +345,7 @@ impl Graph {
         let bit_idx = variable.0 % 64;
         let cur_word = state.get_u64(self.variables_bit[bit_vec_idx]);
         state.set_u64(self.variables_bit[bit_vec_idx], cur_word & !(1 << bit_idx));
-        
-        // Removes from the body of the clauses it is in
-        if value {
-            for i in 0..self.variables[variable.0].clauses_body.len() {
-                let clause = self.variables[variable.0].clauses_body[i];
-                if self.is_clause_constrained(clause, state) {
-                    self.remove_variable_from_body(variable, clause, state);
-                }
-            }
-        }
-        
+
         // If probabilistic and false, update the counter
         if !value && self.is_variable_probabilistic(variable) {
             let d = self.get_variable_distribution(variable).unwrap();
@@ -374,24 +370,131 @@ impl Graph {
             state.set_usize(self.max_var_unassigned, cur);
         }
     }
+    
+    /// Gets a bound on the number of not-fixed deterministic variables in the body of the clause. If there are
+    /// 0 or 1 unfixed variable, the methods returns respectively 0 and 1. If there are 2 or more unfixed variables,
+    /// the methods return 2 (a lower bound)
+    pub fn get_clause_body_bounds_deterministic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        let mut count = 0;
+        for i in 0..2.min(self.clauses[clause.0].body_deterministic.len()) {
+            count += !self.is_variable_fixed(self.clauses[clause.0].body_deterministic[i], state) as usize;
+        }
+        count
+    }
+    
+    /// Gets a bound on the number of not-fixed probabilistic variables in the body of the clause. If there are
+    /// 0 or 1 unfixed variable, the methods returns respectively 0 and 1. If there are 2 or more unfixed variables,
+    /// the methods return 2 (a lower bound)
+    pub fn get_clause_body_bounds_probabilistic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        let mut count = 0;
+        for i in 0..2.min(self.clauses[clause.0].body_probabilistic.len()) {
+            count += !self.is_variable_fixed(self.clauses[clause.0].body_probabilistic[i], state) as usize;
+        }
+        count
+    }
+    
+    /// Returns a bound on the number of unfixed variables in the body of the clause. It returns the sum of the bounds on the
+    /// deterministic and probabilistic variables in the body. This function should be used only to check that the body is empty
+    /// of has one element left.
+    pub fn get_clause_body_bounds(&self, clause: ClauseIndex, state: &StateManager) -> usize {
+        self.get_clause_body_bounds_probabilistic(clause, state) + self.get_clause_body_bounds_deterministic(clause, state)
+    }
+
+    /// Returns the number of clauses watched by the variable
+    pub fn number_watchers(&self, variable: VariableIndex) -> usize {
+        self.watchers[variable.0].len()
+    }
+
+    /// Returns the clause watched by the variable at id watcher_id
+    pub fn get_clause_watched(&self, variable: VariableIndex, watcher_id: usize) -> ClauseIndex {
+        self.watchers[variable.0][watcher_id]
+    }
+    
+    /// Update the watcher for the clause watched at wid by the variable. Returns the bounds on the deterministic and
+    /// probabilistic variables in the body of the clause.
+    pub fn update_watchers(&mut self, wid: usize, variable: VariableIndex, state: &StateManager) -> (usize, usize) {
+        if self.is_variable_probabilistic(variable) {
+            self.find_new_probabilistic_watched(wid, variable, state)
+        } else {
+            self.find_new_deterministic_watched(wid, variable, state)
+        }
+    }
+    
+    /// Finds a new deterministic variable to watch the clause. Returns the bounds on the deterministic and
+    /// probabilistic variables in the body of the clause.
+    fn find_new_deterministic_watched(&mut self, wid: usize, watched: VariableIndex, state: &StateManager) -> (usize, usize) {
+        let clause = self.watchers[watched.0][wid];
+        let p_bound = self.get_clause_body_bounds_probabilistic(clause, state);
+        if self.clauses[clause.0].body_deterministic.len() == 1 {
+            (p_bound, 0)
+        } else {
+            // If the variable is the first watch, then swap it. We keep the invariant that if there is only one watch variable left,
+            // it is the first one
+            if watched == self.clauses[clause.0].body_deterministic[0] {
+                self.clauses[clause.0].body_deterministic.swap(0, 1);
+            }
+            let mut d_bound = if self.is_variable_fixed(self.clauses[clause.0].body_deterministic[0], state) { 0 } else { 1 };
+            // If the other watch variable is fixed, then all variable in the deterministic body are fixed.
+            if d_bound != 0 {
+                // The variable does not watch the clause anymore
+                self.watchers[watched.0].swap_remove(wid);
+                // Try to find a new watcher
+                for i in 2..self.clauses[clause.0].body_deterministic.len() {
+                    let variable = self.clauses[clause.0].body_deterministic[i];
+                    // The variable is not fixed, new watcher found !
+                    if !self.is_variable_fixed(variable, state) {
+                        // Swap it as the second watcher
+                        self.clauses[clause.0].body_deterministic.swap(1, i);                
+                        // Adds the clause to its watch list
+                        self.watchers[variable.0].push(clause);
+                        // We have two watcher
+                        d_bound += 1;
+                        return (p_bound, d_bound);
+                    }
+                }
+                // No watchers have been found, the old watcher needs to continue watching the clause. Only one deterministic variable
+                // remain
+                self.watchers[watched.0].push(clause);
+            }
+            (p_bound, d_bound)
+        }
+    }
+
+    /// Finds a new probabilistic variable to watch the clause. Returns the bounds on the deterministic and
+    /// probabilistic variables in the body of the clause.
+    fn find_new_probabilistic_watched(&mut self, wid: usize, watched: VariableIndex, state: &StateManager) -> (usize, usize) {
+        let clause = self.watchers[watched.0][wid];
+        let d_bound = self.get_clause_body_bounds_deterministic(clause, state);
+        if self.clauses[clause.0].body_probabilistic.len() == 1 {
+            debug_assert!(self.clauses[clause.0].body_probabilistic[0] == watched);
+            (0, d_bound)
+        } else {
+            if watched == self.clauses[clause.0].body_probabilistic[0] {
+                self.clauses[clause.0].body_probabilistic.swap(0, 1);
+                debug_assert!(!self.is_variable_fixed(self.clauses[clause.0].body_probabilistic[0], state));
+            }
+            let mut p_bound = if self.is_variable_fixed(self.clauses[clause.0].body_probabilistic[0], state) { 0 } else { 1 };
+            debug_assert!(self.clauses[clause.0].body_probabilistic[1] == watched);
+            if p_bound != 0 {
+                self.watchers[watched.0].swap_remove(wid);
+                for i in 2..self.clauses[clause.0].body_probabilistic.len() {
+                    let variable = self.clauses[clause.0].body_probabilistic[i];
+                    if !self.is_variable_fixed(variable, state) {
+                        self.clauses[clause.0].body_probabilistic.swap(1, i);                
+                        self.watchers[variable.0].push(clause);
+                        p_bound += 1;
+                        return (p_bound, d_bound);
+                    }
+                }
+                self.watchers[watched.0].push(clause);
+            }
+            (p_bound, d_bound)
+        }
+    }
 
     /// Decrements the number of constrained clauses a distribution is in
     pub fn decrement_distribution_constrained_clause_counter(&self, distribution: DistributionIndex, state: &mut StateManager) -> usize {
         state.decrement_usize(self.distributions[distribution.0].number_clause_constrained)
-    }
-    
-    /// Decrements the number of unassigned probabilistic variables in the body of a clause and returns the remaining
-    /// number of unassigned variables in the body
-    pub fn clause_decrement_number_probabilistic(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
-        let remaining = state.get_usize(self.clauses[clause.0].number_deterministic);
-        remaining + state.decrement_usize(self.clauses[clause.0].number_probabilistic)
-    }
-
-    /// Decrements the number of unassigned deterministic variables in the body of a clause and returns the remaining
-    /// number of unassigned variables in the body
-    pub fn clause_decrement_number_deterministic(&self, clause: ClauseIndex, state: &mut StateManager) -> usize {
-        let remaining = state.get_usize(self.clauses[clause.0].number_probabilistic);
-        remaining + state.decrement_usize(self.clauses[clause.0].number_deterministic)
     }
     
     // --- QUERIES --- //
@@ -438,25 +541,11 @@ impl Graph {
         self.variables[variable.0].probabilistic
     }
     
-    /// Returns the number of unassigned probabilistic variable in the clause body
-    pub fn clause_number_probabilistic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
-        state.get_usize(self.clauses[clause.0].number_probabilistic)
-    }
-
-    /// Returns the number of unassigned deterministic variable in the clause body
-    pub fn clause_number_deterministic(&self, clause: ClauseIndex, state: &StateManager) -> usize {
-        state.get_usize(self.clauses[clause.0].number_deterministic)
-    }
-    
     /// Returns true if the clause still have probabilistic variable in its implicant
     pub fn clause_has_probabilistic(&self, clause: ClauseIndex, state: &StateManager) -> bool {
-        self.clause_number_probabilistic(clause, state) != 0
+        self.get_clause_body_bounds_probabilistic(clause, state) > 0
     }
     
-    /// Returns the number of unassigned variable in the body of a clause
-    pub fn clause_number_unassigned(&self, clause: ClauseIndex, state: &StateManager) -> usize {
-        self.clauses[clause.0].body.len(state)
-    }
     
     /// Removes the current clause from the child sparse-set of all its parents
     pub fn remove_clause_from_parent(&mut self, clause: ClauseIndex, state: &mut StateManager) {
@@ -541,7 +630,7 @@ impl Graph {
     /// Returns the distribution of the first probabilistic (not fixed) variables in the body, or None if the distribution
     /// does not have any not fixed probabilistic variables in its body.
     pub fn get_clause_active_distribution(&self, clause: ClauseIndex, state: &StateManager) -> Option<DistributionIndex> {
-        self.clause_body_iter(clause, state).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_fixed(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
+        self.clause_body_iter(clause).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_fixed(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
     }
     
     /// Returns the number of constrained parents of the clause
@@ -609,8 +698,8 @@ impl Graph {
     }
 
     /// Returns an iterator over all the variables, not fixed yet, in the body of the clause
-    pub fn clause_body_iter(&self, clause: ClauseIndex, state: &StateManager) -> impl Iterator<Item = VariableIndex> + '_ {
-        self.clauses[clause.0].body.iter(state)
+    pub fn clause_body_iter(&self, clause: ClauseIndex) -> impl Iterator<Item = VariableIndex> + '_ {
+        self.clauses[clause.0].body_probabilistic.iter().copied().chain(self.clauses[clause.0].body_deterministic.iter().copied())
     }
     
 }
@@ -692,23 +781,20 @@ mod test_graph_creation {
         let c1 = g.add_clause(d[0], vec![p[0], p[1]], &mut state);
         let clause = &g.clauses[c1.0];
         assert_eq!(d[0], clause.head);
-        assert_eq!(vec![p[0], p[1]], clause.body.iter(&state).collect::<Vec<VariableIndex>>());
+        assert_eq!(vec![p[0], p[1]], g.clause_body_iter(c1).collect::<Vec<VariableIndex>>());
         assert!(state.get_bool(clause.constrained));
-        assert_eq!(2, state.get_usize(clause.number_probabilistic));
         
         let c2 = g.add_clause(d[1], vec![d[0], p[2]], &mut state);
         let clause = &g.clauses[c2.0];
         assert_eq!(d[1], clause.head);
-        assert_eq!(vec![d[0], p[2]], clause.body.iter(&state).collect::<Vec<VariableIndex>>());
+        assert_eq!(vec![p[2], d[0]], g.clause_body_iter(c2).collect::<Vec<VariableIndex>>());
         assert!(state.get_bool(clause.constrained));
-        assert_eq!(1, state.get_usize(clause.number_probabilistic));
         
         let c3 = g.add_clause(d[0], vec![d[1]], &mut state);
         let clause = &g.clauses[c3.0];
         assert_eq!(d[0], clause.head);
-        assert_eq!(vec![d[1]], clause.body.iter(&state).collect::<Vec<VariableIndex>>());
+        assert_eq!(vec![d[1]], g.clause_body_iter(c3).collect::<Vec<VariableIndex>>());
         assert!(state.get_bool(clause.constrained));
-        assert_eq!(0, state.get_usize(clause.number_probabilistic));
     }
 }
 
