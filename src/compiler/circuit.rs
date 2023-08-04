@@ -82,7 +82,7 @@ struct DistributionNode {
 ///       the next node to be evaluated is i+1 and is likely to be stored in cache.
 ///     - When a node sends its value to its outputs, the same optimization happens (as loading the first output is likely to implies that
 ///       the following outputs are in cache).
-pub struct DAC {
+pub struct Dac {
     /// Internal nodes of the circuit
     nodes: Vec<CircuitNode>,
     /// Input nodes of the circuit
@@ -91,7 +91,7 @@ pub struct DAC {
     outputs: Vec<CircuitNodeIndex>,
 }
 
-impl DAC {
+impl Dac {
 
     /// Creates a new empty DAC. An input node is created for each distribution in the graph.
     pub fn new(graph: &Graph) -> Self {
@@ -160,7 +160,7 @@ impl DAC {
         self.nodes[output.0].input_distributions.push((distribution, value));
     }
     
-    fn swap(&mut self, new: &mut Vec<usize>, old: &mut Vec<usize>, i: usize, j: usize) {
+    fn swap(&mut self, new: &mut [usize], old: &mut [usize], i: usize, j: usize) {
         self.nodes.swap(i, j);
         new[old[i]] = j;
         new[old[j]] = i;
@@ -287,7 +287,7 @@ impl DAC {
     /// In such case it can be bypass (it does not change its input)
     fn is_neutral(&self, node: usize) -> bool {
         !self.nodes[node].to_remove && 
-        self.nodes[node].outputs.len() != 0 &&
+        !self.nodes[node].outputs.is_empty() &&
         self.nodes[node].inputs.len() + self.nodes[node].input_distributions.len() == 1
     }
     
@@ -307,10 +307,10 @@ impl DAC {
                     changed = true;
                     self.nodes[node].to_remove = true;
                     // Either it has an input from another internal node, or from a distribution node
-                    if self.nodes[node].inputs.len() != 0 {
+                    if !self.nodes[node].inputs.is_empty() {
                         let input = *self.nodes[node].inputs.iter().next().unwrap();
                         // Removing the node from the output of the input node
-                        if let Some(idx) = self.nodes[input.0].outputs.iter().position(|x| (*x).0 == node) {
+                        if let Some(idx) = self.nodes[input.0].outputs.iter().position(|x| x.0 == node) {
                             self.nodes[input.0].outputs.remove(idx);
                         }
                         for out_id in 0..self.nodes[node].outputs.len() {
@@ -419,7 +419,7 @@ impl DAC {
 // Various methods for dumping the compiled diagram, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
 
 // Visualization as graphviz DOT file
-impl DAC {
+impl Dac {
     
     fn distribution_node_id(&self, node: DistributionNodeIndex) -> usize {
         node.0
@@ -444,15 +444,15 @@ impl DAC {
 
         for node in (0..self.distribution_nodes.len()).map(DistributionNodeIndex) {
             let id = self.distribution_node_id(node);
-            out.push_str(&DAC::node(id, &dist_node_attributes, &format!("d{}", id)));
+            out.push_str(&Dac::node(id, &dist_node_attributes, &format!("d{}", id)));
         }
 
         for node in (0..self.nodes.len()).map(CircuitNodeIndex) {
             let id = self.sp_node_id(node);
             if self.nodes[node.0].is_mul {
-                out.push_str(&DAC::node(id, &prod_node_attributes, &prod_node_label));
+                out.push_str(&Dac::node(id, &prod_node_attributes, &prod_node_label));
             } else {
-                out.push_str(&DAC::node(id, &sum_node_attributes, &sum_node_label));
+                out.push_str(&Dac::node(id, &sum_node_attributes, &sum_node_label));
             }
         }
         
@@ -462,7 +462,7 @@ impl DAC {
             for (output, value) in self.distribution_nodes[node.0].outputs.iter().copied() {
                 let to = self.sp_node_id(output);
                 let f_value = format!("{:.5}",self.distribution_nodes[node.0].probabilities[value]);
-                out.push_str(&DAC::edge(from, to, Some(f_value)));
+                out.push_str(&Dac::edge(from, to, Some(f_value)));
             }
         }
         
@@ -472,7 +472,7 @@ impl DAC {
             let end = start + self.nodes[node.0].number_outputs;
             for output in self.outputs[start..end].iter().copied() {
                 let to = self.sp_node_id(output);
-                out.push_str(&DAC::edge(from, to, None));
+                out.push_str(&Dac::edge(from, to, None));
             }
         }
         out.push_str("}\n");
@@ -485,9 +485,9 @@ impl DAC {
     
     fn edge(from: usize, to: usize, label: Option<String>) -> String {
         let label = if let Some(v) = label {
-            format!("{}", v)
+            v
         } else {
-            format!("")
+            String::new()
         };
         format!("\t{from} -> {to} [penwidth=1,label=\"{label}\"];\n")
     }
@@ -495,7 +495,7 @@ impl DAC {
 
 // Custom text format for the network
 
-impl fmt::Display for DAC {
+impl fmt::Display for Dac {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "dspn {} {}", self.distribution_nodes.len(), self.nodes.len())?;
         for node in self.distribution_nodes.iter() {
@@ -506,7 +506,7 @@ impl fmt::Display for DAC {
             for (output, value) in node.outputs.iter().copied() {
                 write!(f, " {} {}", output.0, value)?;
             }
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         for node in self.nodes.iter() {
             if node.is_mul {
@@ -517,13 +517,13 @@ impl fmt::Display for DAC {
             for output_id in node.ouput_start..(node.ouput_start+node.number_outputs) {
                 write!(f, " {}", self.outputs[output_id].0)?;
             }
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         fmt::Result::Ok(())
     }
 }
 
-impl DAC {
+impl Dac {
 
     pub fn from_file(filepath: &PathBuf) -> Self {
         let mut spn = Self {
@@ -538,7 +538,7 @@ impl DAC {
             let split = l.split_whitespace().collect::<Vec<&str>>();
             if l.starts_with("dspn") {
                 // Do things ?
-            } else if l.starts_with("d") {
+            } else if l.starts_with('d') {
                 let dom_size = split[1].parse::<usize>().unwrap();
                 let probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
                 let mut outputs: Vec<(CircuitNodeIndex, usize)> = vec![];
@@ -551,18 +551,18 @@ impl DAC {
                     probabilities,
                     outputs,
                 });
-            } else if l.starts_with("x") || l.starts_with("+") {
+            } else if l.starts_with('x') || l.starts_with('+') {
                 let start = spn.outputs.len();
-                for i in 1..split.len() {
-                    spn.outputs.push(CircuitNodeIndex(split[i].parse::<usize>().unwrap()));
+                for item in split.iter().skip(1) {
+                    spn.outputs.push(CircuitNodeIndex(item.parse::<usize>().unwrap()));
                 }
                 let end = spn.outputs.len();
                 spn.nodes.push(CircuitNode {
-                    value: if l.starts_with("x") { f128!(1.0) } else { f128!(0.0) },
+                    value: if l.starts_with('x') { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
                     inputs: FxHashSet::default(),
                     input_distributions: vec![],
-                    is_mul: l.starts_with("x"),
+                    is_mul: l.starts_with('x'),
                     ouput_start: start,
                     number_outputs: end - start,
                     layer: 0,

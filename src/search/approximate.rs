@@ -289,8 +289,8 @@ where
         if ub <= 0.0 {
             return Some(f128!(0.0));
         }
-        if ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
-            let approximation = f128!((lb.clone()*&ub).sqrt());
+        if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
+            let approximation = f128!((lb*&ub).sqrt());
             Some(approximation)
         } else {
             None

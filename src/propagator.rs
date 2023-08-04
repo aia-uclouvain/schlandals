@@ -67,6 +67,12 @@ pub struct FTReachablePropagator<const C: bool> {
     propagation_prob: Float,
 }
 
+impl<const C: bool> Default for FTReachablePropagator<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const C: bool> FTReachablePropagator<C> {
     
     pub fn new() -> Self {
@@ -137,14 +143,12 @@ impl<const C: bool> FTReachablePropagator<C> {
     fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &StateManager) {
         if C {
             self.unconstrained_distributions.push(distribution);
-        } else {
-            if g.distribution_number_false(distribution, state) != 0 {
-                let mut p = f128!(0.0);
-                for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
-                    p += w;
-                }
-                self.propagation_prob *= &p;
+        } else if g.distribution_number_false(distribution, state) != 0 {
+            let mut p = f128!(0.0);
+            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+                p += w;
             }
+            self.propagation_prob *= &p;
         }
     }
     

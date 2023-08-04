@@ -8,7 +8,7 @@ use schlandals::*;
 use schlandals::search::ExactQuietSolver;
 use search_trail::StateManager;
 use schlandals::compiler::exact::ExactDACCompiler;
-use schlandals::compiler::circuit::DAC;
+use schlandals::compiler::circuit::Dac;
 
 use std::path::PathBuf;
 use tempfile::Builder;
@@ -64,7 +64,7 @@ macro_rules! test_input_with_branching {
                 let spn = compiler.compile().unwrap();
                 let mut file = Builder::new().prefix("tmp").suffix(".pc").tempfile().unwrap();
                 writeln!(file, "{}", spn).unwrap();
-                let mut read_spn = DAC::from_file(&PathBuf::from(&file.path()));
+                let mut read_spn = Dac::from_file(&PathBuf::from(&file.path()));
                 let sol = read_spn.evaluate();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);

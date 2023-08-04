@@ -35,7 +35,7 @@ use heuristics::branching::*;
 use search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
 use propagator::FTReachablePropagator;
 use compiler::exact::ExactDACCompiler;
-use compiler::circuit::DAC;
+use compiler::circuit::Dac;
 
 #[derive(Debug, Parser)]
 #[clap(name="Schlandals", version, author, about)]
@@ -118,10 +118,10 @@ enum Branching {
 }
 
 fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) {
-    let mut dac = DAC::from_file(&input);
+    let mut dac = Dac::from_file(&input);
     if let Some(f) = dotfile {
         let out = dac.as_graphviz();
-        let mut outfile = File::create(&f).unwrap();
+        let mut outfile = File::create(f).unwrap();
         match outfile.write(out.as_bytes()) {
             Ok(_) => (),
             Err(e) => println!("Culd not write the PC into the file: {:?}", e),
@@ -150,14 +150,14 @@ fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, 
             println!("Compilation successful");
             if let Some(f) = dotfile {
                 let out = dac.as_graphviz();
-                let mut outfile = File::create(&f).unwrap();
+                let mut outfile = File::create(f).unwrap();
                 match outfile.write(out.as_bytes()) {
                     Ok(_) => (),
                     Err(e) => println!("Culd not write the circuit into the dot file: {:?}", e),
                 }
             }
             if let Some(f) = fdac {
-                let mut outfile = File::create(&f).unwrap();
+                let mut outfile = File::create(f).unwrap();
                 match outfile.write(format!("{}", dac).as_bytes()) {
                     Ok(_) => (),
                     Err(e) => println!("Culd not write the circuit into the fdac file: {:?}", e),
@@ -179,8 +179,8 @@ fn run_approx_search(input: PathBuf, branching: Branching, statistics: bool, mem
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
-    let mlimit = if memory.is_some() {
-        memory.unwrap()
+    let mlimit = if let Some(m) = memory {
+        m
     } else {
         let sys = System::new_all();
         sys.total_memory() / 1000000
@@ -221,8 +221,8 @@ fn run_search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
-    let mlimit = if memory.is_some() {
-        memory.unwrap()
+    let mlimit = if let Some(m) = memory {
+        m
     } else {
         let sys = System::new_all();
         sys.total_memory() / 1000000

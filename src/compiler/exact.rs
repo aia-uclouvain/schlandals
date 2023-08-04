@@ -77,7 +77,7 @@ where
         }
     }
 
-    fn expand_sum_node(&mut self, spn: &mut DAC, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
+    fn expand_sum_node(&mut self, spn: &mut Dac, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
         let mut children: Vec<CircuitNodeIndex> = vec![];
         for variable in self.graph.distribution_variable_iter(distribution) {
             self.state.save_state();
@@ -104,7 +104,7 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, spn: &mut DAC, component: ComponentIndex) -> Option<CircuitNodeIndex> {
+    fn expand_prod_node(&mut self, spn: &mut Dac, component: ComponentIndex) -> Option<CircuitNodeIndex> {
         let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = spn.add_prod_node();
             for (distribution, variable, value) in self.propagator.assignments_iter() {
@@ -176,7 +176,7 @@ where
         prod_node
     }
 
-    pub fn compile(&mut self) -> Option<DAC> {
+    pub fn compile(&mut self) -> Option<Dac> {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.set_number_clauses(self.graph.number_clauses());
@@ -185,7 +185,7 @@ where
             Err(_) => None,
             Ok(_) => {
                 self.branching_heuristic.init(&self.graph, &self.state);
-                let mut spn = DAC::new(&self.graph);
+                let mut spn = Dac::new(&self.graph);
                 match self.expand_prod_node(&mut spn, ComponentIndex(0)) {
                     None => None,
                     Some(_) => {
