@@ -62,7 +62,7 @@ pub struct FTReachablePropagator<const C: bool> {
     pub unconstrained_clauses: Vec<ClauseIndex>,
     t_reachable: Vec<bool>,
     f_reachable: Vec<bool>,
-    assignments: Vec<(DistributionIndex, VariableIndex)>,
+    assignments: Vec<(DistributionIndex, VariableIndex, bool)>,
     unconstrained_distributions: Vec<DistributionIndex>,
     propagation_prob: Float,
 }
@@ -113,7 +113,7 @@ impl<const C: bool> FTReachablePropagator<C> {
     }
     
     /// Returns an iterator over the assignments made during the last propagation
-    pub fn assignments_iter(&self) -> impl Iterator<Item = (DistributionIndex, VariableIndex)> + '_{
+    pub fn assignments_iter(&self) -> impl Iterator<Item = (DistributionIndex, VariableIndex, bool)> + '_{
         self.assignments.iter().copied()
     }
 
@@ -238,15 +238,16 @@ impl<const C: bool> FTReachablePropagator<C> {
 
             if is_p {
                 let distribution = g.get_variable_distribution(variable).unwrap();
+                if C {
+                    self.assignments.push((distribution, variable, value));
+                }
                 if value {
-                    if C {
-                        self.assignments.push((distribution, variable));
-                    } else {
+                    if !C {
                         // If the solver is in search-mode, then we can return as soon as the computed probability is 0.
                         // But in compilation mode, we can not know in advance if the compiled circuit will be used in a
                         // learning framework in which the probabilities might change.
                         self.propagation_prob *= g.get_variable_weight(variable).unwrap();
-                        if !C && self.propagation_prob == 0.0 {
+                        if self.propagation_prob == 0.0 {
                             self.clear();
                             return PropagationResult::Ok(());
                         }
@@ -319,13 +320,15 @@ impl<const C: bool> FTReachablePropagator<C> {
         self.t_reachable.fill(false);
         self.f_reachable.fill(false);
         for clause in extractor.component_iter(component) {
-            let head = g.get_clause_head(clause);
-            let head_value = g.get_variable_value(head, state);
-            if (g.is_variable_probabilistic(head) && !g.is_variable_fixed(head, state)) || (head_value.is_some() && !head_value.unwrap()) {
-                self.set_f_reachability(g, state, clause);
-            }
-            if g.get_clause_body_bounds_deterministic(clause, state) == 0 {
-                self.set_t_reachability(g, state, clause);
+            if g.is_clause_constrained(clause, state) {
+                let head = g.get_clause_head(clause);
+                let head_value = g.get_variable_value(head, state);
+                if (g.is_variable_probabilistic(head) && !g.is_variable_fixed(head, state)) || (head_value.is_some() && !head_value.unwrap()) {
+                    self.set_f_reachability(g, state, clause);
+                }
+                if g.get_clause_body_bounds_deterministic(clause, state) == 0 {
+                    self.set_t_reachability(g, state, clause);
+                }
             }
         }
     }

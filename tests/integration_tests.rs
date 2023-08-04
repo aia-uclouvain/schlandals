@@ -5,7 +5,7 @@ use schlandals::branching::*;
 use schlandals::propagator::FTReachablePropagator;
 use schlandals::components::*;
 use schlandals::*;
-use schlandals::search::QuietSolver;
+use schlandals::search::ExactQuietSolver;
 use search_trail::StateManager;
 use schlandals::compiler::exact::ExactDACCompiler;
 use schlandals::compiler::circuit::DAC;
@@ -28,12 +28,12 @@ macro_rules! test_input_with_branching {
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
                 let mut branching_heuristic = $b::default();
-                let mut solver = QuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
+                let mut solver = ExactQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
                 let sol = solver.solve().unwrap();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
-
+            
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
@@ -73,6 +73,98 @@ macro_rules! test_input_with_branching {
     }
 }
 
+fn compare_approximate(sol: Float, expected: Float, epsilon: f64) {
+    let lb = ((expected.clone()) / (1.0 + epsilon)) - 0.000001;
+    let ub = (expected * (1.0 + epsilon)) + 0.000001;
+    assert!(lb <= sol && sol <= ub);
+}
+
+macro_rules! test_approximate_input_with_branching {
+    ($dir:ident, $name:ident, $value:expr, $b:ty) => {
+        paste! {
+            #[test]
+            fn [<approximate_search_0_ $b _ $name>]() {
+                let epsilon = 0.0;
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                compare_approximate(sol, expected, epsilon);
+            }
+
+            #[test]
+            fn [<approximate_search_5_ $b _ $name>]() {
+                let epsilon = 0.05;
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                compare_approximate(sol, expected, epsilon);
+            }
+
+            #[test]
+            fn [<approximate_search_20_ $b _ $name>]() {
+                let epsilon = 0.2;
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                compare_approximate(sol, expected, epsilon);
+            }
+
+            #[test]
+            fn [<approximate_search_50_ $b _ $name>]() {
+                let epsilon = 0.5;
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                compare_approximate(sol, expected, epsilon);
+            }
+
+            #[test]
+            fn [<approximate_search_100_ $b _ $name>]() {
+                let epsilon = 1.0;
+                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
+                let mut state = StateManager::default();
+                let mut propagator = FTReachablePropagator::<true>::new();
+                let path = PathBuf::from(filename);
+                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic = $b::default();
+                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
+                let sol = solver.solve().unwrap();
+                let expected = Float::with_val(113, $value);
+                compare_approximate(sol, expected, epsilon);
+            }
+        }
+    }
+}
+
 macro_rules! integration_tests {
     ($dir:ident, $($name:ident: $value:expr,)*) => {
         $(
@@ -80,6 +172,17 @@ macro_rules! integration_tests {
             test_input_with_branching!{$dir, $name, $value, MinInDegree}
             test_input_with_branching!{$dir, $name, $value, MinOutDegree}
             test_input_with_branching!{$dir, $name, $value, MaxDegree}
+        )*
+    }
+}
+
+macro_rules! integration_tests_approximate {
+    ($dir:ident, $($name:ident: $value:expr,)*) => {
+        $(
+            test_approximate_input_with_branching!{$dir, $name, $value, Fiedler}
+            test_approximate_input_with_branching!{$dir, $name, $value, MinInDegree}
+            test_approximate_input_with_branching!{$dir, $name, $value, MinOutDegree}
+            test_approximate_input_with_branching!{$dir, $name, $value, MaxDegree}
         )*
     }
 }
@@ -141,4 +244,28 @@ integration_tests! {
     Net3_167_243: 1.0 - 0.247413,
     Net3_167_251: 1.0 - 0.297359,
     Net3_167_253: 1.0 - 0.189425,
+}
+
+integration_tests_approximate! {
+    bayesian_networks,
+    abc_chain_a0: 0.2_f64,
+    abc_chain_a1: 0.8_f64,
+    abc_chain_b0: 0.38_f64,
+    abc_chain_b1: 0.62_f64,
+    abc_chain_c0: 0.348_f64,
+    abc_chain_c1: 0.652_f64,
+    two_parents_p1_true: 0.2_f64,
+    two_parents_p1_false: 0.8_f64,
+    two_parents_p2_true: 0.6_f64,
+    two_parents_p2_false: 0.4_f64,
+    two_parents_child_true: 0.396_f64,
+    two_parents_child_false: 0.604_f64,
+    two_parents_great_children_d_true: 0.6792_f64,
+    two_parents_great_children_d_false: 0.3208_f64,
+    two_parents_great_children_e_true: 0.5188_f64,
+    two_parents_great_children_e_false: 0.4812_f64,
+    asia_xray_true: 0.11029_f64,
+    asia_xray_false: 0.88971_f64,
+    asia_dyspnea_true: 0.435971_f64,
+    asia_dyspnea_false: 0.564029_f64,
 }

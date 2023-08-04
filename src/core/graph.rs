@@ -602,6 +602,11 @@ impl Graph {
     pub fn number_variables(&self) -> usize {
         self.variables.len()
     }
+    
+    /// Returns the number of distribution in the graph
+    pub fn number_distributions(&self) -> usize {
+        self.distributions.len()
+    }
 
     /// Returns the distribution of a probabilistic variable
     pub fn get_variable_distribution(&self, variable: VariableIndex) -> Option<DistributionIndex> {
@@ -630,7 +635,11 @@ impl Graph {
     /// Returns the distribution of the first probabilistic (not fixed) variables in the body, or None if the distribution
     /// does not have any not fixed probabilistic variables in its body.
     pub fn get_clause_active_distribution(&self, clause: ClauseIndex, state: &StateManager) -> Option<DistributionIndex> {
-        self.clause_body_iter(clause).filter(|v| self.is_variable_probabilistic(*v) && !self.is_variable_fixed(*v, state)).map(|v| self.get_variable_distribution(v).unwrap()).next()
+        if self.get_clause_body_bounds_probabilistic(clause, state) > 0 {
+            Some(self.get_variable_distribution(self.clauses[clause.0].body_probabilistic[0]).unwrap())
+        } else {
+            None
+        }
     }
     
     /// Returns the number of constrained parents of the clause

@@ -15,9 +15,13 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 pub mod sequential;
+pub mod approximate;
 mod statistics;
 
-use crate::search::sequential::Solver;
+use crate::search::sequential::Solver as ExactSolver;
+use crate::search::approximate::Solver as ApproximateSolver;
 
-pub type DefaultSolver<'b, B> = Solver<'b, B, true>;
-pub type QuietSolver<'b, B> = Solver<'b, B, false>;
+pub type ExactDefaultSolver<'b, B> = ExactSolver<'b, B, true>;
+pub type ExactQuietSolver<'b, B> = ExactSolver<'b, B, false>;
+pub type ApproximateDefaultSolver<'b, B> = ApproximateSolver<'b, B, true>;
+pub type ApproximateQuietSolver<'b, B> = ApproximateSolver<'b, B, false>;

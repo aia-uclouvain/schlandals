@@ -107,9 +107,11 @@ where
     fn expand_prod_node(&mut self, spn: &mut DAC, component: ComponentIndex) -> Option<CircuitNodeIndex> {
         let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = spn.add_prod_node();
-            for (distribution, variable) in self.propagator.assignments_iter() {
-                let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
-                spn.add_distribution_output(distribution, node, value_id);
+            for (distribution, variable, value) in self.propagator.assignments_iter() {
+                if value {
+                    let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
+                    spn.add_distribution_output(distribution, node, value_id);
+                }
             }
         
             for distribution in self.propagator.unconstrained_distributions_iter() {

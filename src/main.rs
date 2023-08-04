@@ -32,7 +32,7 @@ use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
 use parser::*;
 use heuristics::branching::*;
-use search::{DefaultSolver, QuietSolver};
+use search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
 use propagator::FTReachablePropagator;
 use compiler::exact::ExactDACCompiler;
 use compiler::circuit::DAC;
@@ -46,40 +46,60 @@ pub struct App {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Search based solver
+    /// DPLL-style search based solver.
     Search {
         /// The input file
         #[clap(short, long, value_parser)]
         input: PathBuf,
-        // How to branch
+        /// How to branch
         #[clap(short, long, value_enum)]
         branching: Branching,
-        // Collect stats during the search, default yes
+        /// Collect stats during the search, default yes
         #[clap(short, long, action)]
         statistics: bool,
-        // The memory limit, in mega-bytes
+        /// The memory limit, in mega-bytes
         #[clap(short, long)]
         memory: Option<u64>,
     },
+    /// Approximate DPLL-style solver providing epsilon guarantees on the approximation
+    ApproximateSearch {
+        /// The input file
+        #[clap(short, long, value_parser)]
+        input: PathBuf,
+        /// How to branch
+        #[clap(short, long, value_enum)]
+        branching: Branching,
+        /// Collect stats during the search, default yes
+        #[clap(short, long, action)]
+        statistics: bool,
+        /// The memory limit, in mega-bytes
+        #[clap(short, long)]
+        memory: Option<u64>,
+        /// Epsilon, the quality of the approximation (must be between 0 and 1, inclusive)
+        #[clap(short, long)]
+        epsilon: f64,
+    },
+    /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
         /// The input file
         #[clap(short, long, value_parser)]
         input: PathBuf,
-        // How to branch
+        /// How to branch
         #[clap(short, long, value_enum)]
         branching: Branching,
         /// If present, store a textual representation of the compiled circuit
         #[clap(long)]
         fdac: Option<PathBuf>,
-        // If present, store a DOT representation of the compiled circuit
+        /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
     },
+    /// Read and evaluate an arithmetic circuits that was previously created with the compile sub-command
     ReadCompiled {
         /// Reads a circuit from an input file
         #[clap(short, long, value_parser)]
         input: PathBuf,
-        // If present, store a DOT representation of the compiled circuit
+        /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
     }
@@ -94,7 +114,7 @@ enum Branching {
     /// Minimum Out-degree of a clause in the implication-graph
     MinOutDegree,
     /// Maximum degree of a clause in the implication-graph
-    MaxDegree
+    MaxDegree,
 }
 
 fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) {
@@ -127,7 +147,7 @@ fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, 
             println!("Model UNSAT, can not compile");       
         },
         Some(dac) => {
-            println!("Compilation successfull");
+            println!("Compilation successful");
             if let Some(f) = dotfile {
                 let out = dac.as_graphviz();
                 let mut outfile = File::create(&f).unwrap();
@@ -145,6 +165,48 @@ fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, 
                 
             }
         }
+    }
+}
+
+fn run_approx_search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) {
+    let mut state = StateManager::default();
+    let mut propagator = FTReachablePropagator::<true>::new();
+    let graph = graph_from_ppidimacs(&input, &mut state, &mut propagator);
+    let component_extractor = ComponentExtractor::new(&graph, &mut state);
+    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+        Branching::Fiedler => Box::<Fiedler>::default(),
+        Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+        Branching::MaxDegree => Box::<MaxDegree>::default(),
+    };
+    let mlimit = if memory.is_some() {
+        memory.unwrap()
+    } else {
+        let sys = System::new_all();
+        sys.total_memory() / 1000000
+    };
+    if statistics {
+        let mut solver = ApproximateDefaultSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+            epsilon,
+        );
+        solver.solve();
+    } else {
+        let mut solver = ApproximateQuietSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+            epsilon,
+        );
+        solver.solve();
     }
 }
 
@@ -166,7 +228,7 @@ fn run_search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         sys.total_memory() / 1000000
     };
     if statistics {
-        let mut solver = DefaultSolver::new(
+        let mut solver = ExactDefaultSolver::new(
             graph,
             state,
             component_extractor,
@@ -176,7 +238,7 @@ fn run_search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         );
         solver.solve();
     } else {
-        let mut solver = QuietSolver::new(
+        let mut solver = ExactQuietSolver::new(
             graph,
             state,
             component_extractor,
@@ -196,9 +258,12 @@ fn main() {
         },
         Command::Compile { input, branching, fdac, dotfile } => {
             run_compilation(input, branching, fdac, dotfile);
-        }
+        },
         Command::ReadCompiled { input, dotfile } => {
             read_compiled(input, dotfile);
+        },
+        Command::ApproximateSearch { input, branching, statistics, memory, epsilon }  => {
+            run_approx_search(input, branching, statistics, memory, epsilon);
         }
     }
 }
