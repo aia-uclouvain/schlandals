@@ -138,7 +138,13 @@ where
             let mut p_in = f128!(0.0);
             let mut p_out = f128!(0.0);
             let mut p = f128!(0.0);
-            for variable in self.graph.distribution_variable_iter(distribution) {
+            let mut variables_to_branch = self.graph.distribution_variable_iter(distribution).filter(|v| !self.graph.is_variable_fixed(*v, &self.state)).collect::<Vec<VariableIndex>>();
+            variables_to_branch.sort_unstable_by(|a, b| {
+                let wa = self.graph.get_variable_weight(*a).unwrap();
+                let wb = self.graph.get_variable_weight(*b).unwrap();
+                wa.partial_cmp(&wb).unwrap()
+            });
+            for variable in variables_to_branch.iter().copied().rev() {
                 if !self.graph.is_variable_fixed(variable, &self.state) {
                     let v_weight = self.graph.get_variable_weight(variable).unwrap();
                     self.state.save_state();
