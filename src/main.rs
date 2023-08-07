@@ -33,7 +33,7 @@ use crate::core::components::ComponentExtractor;
 use parser::*;
 use heuristics::branching::*;
 use search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
-use propagator::FTReachablePropagator;
+use propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
 use compiler::exact::ExactDACCompiler;
 use compiler::circuit::Dac;
 
@@ -132,7 +132,7 @@ fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) {
 
 fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) {
     let mut state = StateManager::default();
-    let mut propagator = FTReachablePropagator::<true>::new();
+    let mut propagator = CompiledPropagator::new();
     let graph = graph_from_ppidimacs(&input, &mut state, &mut propagator);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
@@ -170,7 +170,7 @@ fn run_compilation(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, 
 
 fn run_approx_search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) {
     let mut state = StateManager::default();
-    let mut propagator = FTReachablePropagator::<true>::new();
+    let mut propagator = MixedPropagator::new();
     let graph = graph_from_ppidimacs(&input, &mut state, &mut propagator);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
@@ -212,7 +212,7 @@ fn run_approx_search(input: PathBuf, branching: Branching, statistics: bool, mem
 
 fn run_search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>) {
     let mut state = StateManager::default();
-    let mut propagator = FTReachablePropagator::<false>::new();
+    let mut propagator = SearchPropagator::new();
     let graph = graph_from_ppidimacs(&input, &mut state, &mut propagator);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {

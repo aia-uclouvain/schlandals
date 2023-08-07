@@ -57,7 +57,15 @@ pub struct Unsat;
 
 pub type PropagationResult = Result<(), Unsat>;
 
-pub struct FTReachablePropagator<const C: bool> {
+const COMPILED_PROPAGATION: u8 = 1;
+const SEARCH_PROPAGATION: u8 = 2;
+const MIXED_PROPAGATION: u8 = 3;
+
+pub type CompiledPropagator = FTReachablePropagator<COMPILED_PROPAGATION>;
+pub type SearchPropagator = FTReachablePropagator<SEARCH_PROPAGATION>;
+pub type MixedPropagator = FTReachablePropagator<MIXED_PROPAGATION>;
+
+pub struct FTReachablePropagator<const C: u8> {
     propagation_stack: Vec<(VariableIndex, bool)>,
     pub unconstrained_clauses: Vec<ClauseIndex>,
     t_reachable: Vec<bool>,
@@ -67,13 +75,13 @@ pub struct FTReachablePropagator<const C: bool> {
     propagation_prob: Float,
 }
 
-impl<const C: bool> Default for FTReachablePropagator<C> {
+impl<const C: u8> Default for FTReachablePropagator<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const C: bool> FTReachablePropagator<C> {
+impl<const C: u8> FTReachablePropagator<C> {
     
     pub fn new() -> Self {
         Self {
@@ -85,6 +93,10 @@ impl<const C: bool> FTReachablePropagator<C> {
             unconstrained_distributions: vec![],
             propagation_prob: f128!(0.0),
         }
+    }
+    
+    pub fn is_search(&self) -> bool {
+        C == SEARCH_PROPAGATION || C == MIXED_PROPAGATION
     }
     
     /// Sets the number of clauses for the f-reachable and t-reachable vectors
@@ -112,7 +124,7 @@ impl<const C: bool> FTReachablePropagator<C> {
             self.unconstrained_clauses.push(clause);
         }
     }
-    
+
     /// Returns the propagation probability of the last call to propagate
     pub fn get_propagation_prob(&self) -> &Float {
         &self.propagation_prob
@@ -141,14 +153,17 @@ impl<const C: bool> FTReachablePropagator<C> {
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &StateManager) {
-        if C {
-            self.unconstrained_distributions.push(distribution);
-        } else if g.distribution_number_false(distribution, state) != 0 {
-            let mut p = f128!(0.0);
-            for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
-                p += w;
+        if g.distribution_number_false(distribution, state) != 0 {
+            if C == COMPILED_PROPAGATION {
+                self.unconstrained_distributions.push(distribution);
             }
-            self.propagation_prob *= &p;
+            if C == SEARCH_PROPAGATION || C == MIXED_PROPAGATION {
+                let mut p = f128!(0.0);
+                for w in g.distribution_variable_iter(distribution).filter(|v| !g.is_variable_fixed(*v, state)).map(|v| g.get_variable_weight(v).unwrap()) {
+                    p += w;
+                }
+                self.propagation_prob *= &p;
+            }
         }
     }
     
@@ -242,11 +257,14 @@ impl<const C: bool> FTReachablePropagator<C> {
 
             if is_p {
                 let distribution = g.get_variable_distribution(variable).unwrap();
-                if C {
+                if C == COMPILED_PROPAGATION {
+                    self.assignments.push((distribution, variable, value));
+                }
+                if C == MIXED_PROPAGATION && !value {
                     self.assignments.push((distribution, variable, value));
                 }
                 if value {
-                    if !C {
+                    if C == SEARCH_PROPAGATION || C == MIXED_PROPAGATION {
                         // If the solver is in search-mode, then we can return as soon as the computed probability is 0.
                         // But in compilation mode, we can not know in advance if the compiled circuit will be used in a
                         // learning framework in which the probabilities might change.

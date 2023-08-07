@@ -2,7 +2,7 @@
 use rug::Float;
 use schlandals;
 use schlandals::branching::*;
-use schlandals::propagator::FTReachablePropagator;
+use propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
 use schlandals::components::*;
 use schlandals::*;
 use schlandals::search::ExactQuietSolver;
@@ -23,7 +23,7 @@ macro_rules! test_input_with_branching {
             fn [<search_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<false>::new();
+                let mut propagator = SearchPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -38,7 +38,7 @@ macro_rules! test_input_with_branching {
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = CompiledPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -55,7 +55,7 @@ macro_rules! test_input_with_branching {
             fn [<compile_from_file_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = CompiledPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -87,7 +87,7 @@ macro_rules! test_approximate_input_with_branching {
                 let epsilon = 0.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = MixedPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -103,7 +103,7 @@ macro_rules! test_approximate_input_with_branching {
                 let epsilon = 0.05;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = MixedPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -119,7 +119,7 @@ macro_rules! test_approximate_input_with_branching {
                 let epsilon = 0.2;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = MixedPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -135,7 +135,7 @@ macro_rules! test_approximate_input_with_branching {
                 let epsilon = 0.5;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = MixedPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);
@@ -151,7 +151,7 @@ macro_rules! test_approximate_input_with_branching {
                 let epsilon = 1.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let mut state = StateManager::default();
-                let mut propagator = FTReachablePropagator::<true>::new();
+                let mut propagator = MixedPropagator::new();
                 let path = PathBuf::from(filename);
                 let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
                 let component_extractor = ComponentExtractor::new(&graph, &mut state);

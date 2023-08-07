@@ -49,7 +49,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-pub fn graph_from_ppidimacs<const C: bool>(
+pub fn graph_from_ppidimacs<const C: u8>(
     filepath: &PathBuf,
     state: &mut StateManager,
     propagator: &mut FTReachablePropagator<C>,
@@ -77,7 +77,7 @@ pub fn graph_from_ppidimacs<const C: bool>(
                 .collect::<Vec<f64>>();
             let nodes = g.add_distribution(&split, state);
             for i in 0..split.len() {
-                if !C && split[i] == 1.0 {
+                if propagator.is_search() && split[i] == 1.0 {
                     propagator.add_to_propagation_stack(nodes[i], true);
                 }
             }

@@ -30,7 +30,7 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::heuristics::branching::BranchingDecision;
-use crate::propagator::FTReachablePropagator;
+use crate::propagator::SearchPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;
 
@@ -58,7 +58,7 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: FTReachablePropagator<false>,
+    propagator: SearchPropagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Float>,
     /// Statistics collectors
@@ -76,7 +76,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: FTReachablePropagator<false>,
+        propagator: SearchPropagator,
         mlimit: u64,
     ) -> Self {
         let cache = FxHashMap::default();

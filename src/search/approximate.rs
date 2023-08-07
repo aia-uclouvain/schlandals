@@ -30,7 +30,7 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::heuristics::branching::BranchingDecision;
-use crate::propagator::FTReachablePropagator;
+use crate::propagator::MixedPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;
 
@@ -63,7 +63,7 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: FTReachablePropagator<true>,
+    propagator: MixedPropagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, NodeSolution>,
     /// Statistics collectors
@@ -85,7 +85,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: FTReachablePropagator<true>,
+        propagator: MixedPropagator,
         mlimit: u64,
         epsilon: f64,
     ) -> Self {
@@ -153,44 +153,36 @@ where
                             p_out += v_weight;
                         },
                         Ok(_) => {
-                            let mut added_proba = f128!(1.0);
-                            let mut removed_proba = f128!(1.0);
-                            let mut has_removed = false;
-                            self.distribution_out_vec.fill(0.0);
-                            for d in self.propagator.unconstrained_distributions_iter() {
-                                let mut p_unconstrained = 0.0;
-                                if self.graph.distribution_number_false(d, &self.state) != 0 {
-                                    for variable in self.graph.distribution_variable_iter(d) {
-                                        if !self.graph.is_variable_fixed(variable, &self.state) {
-                                            p_unconstrained += self.graph.get_variable_weight(variable).unwrap();
-                                        }
+                            let v = self.propagator.get_propagation_prob().clone();
+                            if v != 0.0 {
+                                let mut removed_proba = f128!(1.0);
+                                let mut has_removed = false;
+                                self.distribution_out_vec.fill(0.0);
+                                for (d, variable, value) in self.propagator.assignments_iter().filter(|a| a.0 != distribution) {
+                                    let weight = self.graph.get_variable_weight(variable).unwrap();
+                                    if !value {
+                                        has_removed = true;
+                                        self.distribution_out_vec[d.0] += weight;
                                     }
-                                    added_proba *= p_unconstrained;
                                 }
-                            }
-                            for (d, variable, value) in self.propagator.assignments_iter().filter(|a| a.0 != distribution) {
-                                let weight = self.graph.get_variable_weight(variable).unwrap();
-                                if value {
-                                    added_proba *= weight;
-                                } else {
-                                    has_removed = true;
-                                    self.distribution_out_vec[d.0] += weight;
+                                if has_removed {
+                                    for v in self.distribution_out_vec.iter().copied() {
+                                        removed_proba *= 1.0 - v;
+                                    }
                                 }
-                            }
-                            if has_removed {
-                                for v in self.distribution_out_vec.iter().copied() {
-                                    removed_proba *= 1.0 - v;
+
+                                let child_sol = self._solve(component);
+                                p_in += child_sol.0 * &v;
+                                p_out += child_sol.1 * &v + v_weight * (1.0 - removed_proba.clone());
+                                p += child_sol.2 * &v; 
+                                if let Some(proba) = self.approximate_count(p_in.clone(), p_out.clone()) {
+                                    self.state.restore_state();
+                                    return (p_in, p_out, proba);
                                 }
+                            } else {
+                                p_out += v_weight;
                             }
 
-                            let child_sol = self._solve(component);
-                            p_in += child_sol.0 * v_weight * &added_proba;
-                            p_out += child_sol.1 * v_weight * &added_proba + v_weight * (1.0 - removed_proba.clone());
-                            p += child_sol.2 * v_weight * &added_proba;
-                            if let Some(proba) = self.approximate_count(p_in.clone(), p_out.clone()) {
-                                self.state.restore_state();
-                                return (p_in, p_out, proba);
-                            }
                         }
                     };
                     self.state.restore_state();
