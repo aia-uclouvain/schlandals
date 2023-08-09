@@ -171,12 +171,29 @@ where
                                         removed_proba *= 1.0 - v;
                                     }
                                 }
+                                p_out += v_weight * (1.0 - removed_proba.clone());
+                                let mut max_proba_children = f128!(1.0);
+                                for d in self.component_extractor.component_distribution_iter(component) {
+                                    if !self.graph.distribution_one_left(d, &self.state) {
+                                        let s: f64 = self.graph.distribution_variable_iter(d).map(|v| self.graph.get_variable_weight(v).unwrap()).sum();
+                                        max_proba_children *= s;
+                                    }
+                                }
+                                let lb = p_in.clone();
+                                let ub = 1.0 - p_out.clone() - (1.0 - max_proba_children);
+
+                                if let Some(proba) = self.approximate_count(lb, ub) {
+                                    self.state.restore_state();
+                                    return (p_in, p_out, proba);
+                                }
 
                                 let child_sol = self._solve(component);
                                 p_in += child_sol.0 * &v;
-                                p_out += child_sol.1 * &v + v_weight * (1.0 - removed_proba.clone());
+                                p_out += child_sol.1 * &v;
                                 p += child_sol.2 * &v; 
-                                if let Some(proba) = self.approximate_count(p_in.clone(), p_out.clone()) {
+                                let lb = p_in.clone();
+                                let ub = 1.0 - p_out.clone();
+                                if let Some(proba) = self.approximate_count(lb, ub) {
                                     self.state.restore_state();
                                     return (p_in, p_out, proba);
                                 }
@@ -267,7 +284,7 @@ where
                     self.statistics.print();
                     ProblemSolution::Ok(solution.2)
                 } else {
-                    match self.approximate_count(p_in.clone(), p_out.clone()) {
+                    match self.approximate_count(p_in.clone(), 1.0 - p_out.clone()) {
                         None => {
                             self.branching_heuristic.init(&self.graph, &self.state);
                             let mut solution = self._solve(ComponentIndex(0));
@@ -282,9 +299,7 @@ where
         }
     }
     
-    fn approximate_count(&mut self, p_in: Float, p_out: Float) -> Option<Float> {
-        let lb = p_in ;
-        let ub: Float = 1.0 - p_out;
+    fn approximate_count(&mut self, lb: Float, ub: Float) -> Option<Float> {
         if ub <= 0.0 {
             return Some(f128!(0.0));
         }

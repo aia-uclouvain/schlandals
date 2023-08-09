@@ -28,7 +28,7 @@
 //! This module also exposes a special component extractor that do not detect any components.
 //! It should only be used for debugging purpose to isolate bugs
 
-use super::graph::{ClauseIndex, Graph};
+use super::graph::{ClauseIndex, Graph, DistributionIndex};
 use crate::propagator::FTReachablePropagator;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
@@ -66,6 +66,10 @@ pub struct ComponentExtractor {
     limit: ReversibleUsize,
     /// Which variable has been seen during the exploration, for the hash computation
     seen_var: Vec<bool>,
+    /// Vector to store the distributions of each component. As for the clause, a distribution can be in only one component at a time
+    distributions: Vec<DistributionIndex>,
+    /// Vector to store the position of each distribution in the vector
+    distribution_positions: Vec<usize>,
 }
 
 /// A Component is identified by two integers. The first is the index in the vector of clauses at
@@ -76,6 +80,10 @@ pub struct Component {
     start: usize,
     /// Size of the component
     size: usize,
+    /// First index of the distribution
+    distribution_start: usize,
+    /// Number of distribution in the component
+    number_distribution: usize,
     /// Hash of the component, computed during its detection
     hash: u64,
 }
@@ -103,9 +111,13 @@ impl ComponentExtractor {
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_clauses()).map(ClauseIndex).collect();
         let positions = (0..g.number_clauses()).collect();
+        let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
+        let distribution_positions = (0..g.number_distributions()).collect();
         let components = vec![Component {
             start: 0,
             size: g.number_clauses(),
+            distribution_start: 0,
+            number_distribution: g.number_distributions(),
             hash: 0,
         }];
         Self {
@@ -115,6 +127,8 @@ impl ComponentExtractor {
             base: state.manage_usize(0),
             limit: state.manage_usize(1),
             seen_var: vec![false; g.number_variables()],
+            distributions,
+            distribution_positions,
         }
     }
 
@@ -135,6 +149,11 @@ impl ComponentExtractor {
         let clause_pos = self.positions[clause.0];
         g.is_clause_constrained(clause, state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
     }
+    
+    fn is_distribution_visitable(&self, distribution: DistributionIndex, distribution_start: usize, distribution_size: &usize) -> bool {
+        let distribution_pos = self.distribution_positions[distribution.0];
+        !(distribution_start <= distribution_pos && distribution_pos < (distribution_start + *distribution_size))
+    }
 
     /// Adds the clause to the component and recursively explores its children, parents and clauses sharing a distribution
     /// with it. If the clause is unconstrained or has already been visited, it is skipped.
@@ -144,6 +163,8 @@ impl ComponentExtractor {
         clause: ClauseIndex,
         comp_start: usize,
         comp_size: &mut usize,
+        comp_distribution_start: usize,
+        comp_number_distribution: &mut usize,
         hash: &mut u64,
         state: &mut StateManager,
     ) {
@@ -177,18 +198,29 @@ impl ComponentExtractor {
 
             // Explores the clauses that share a distribution with the current clause
             if g.clause_has_probabilistic(clause, state) {
-                for variable in g.clause_body_iter(clause).chain(std::iter::once(g.get_clause_head(clause))) {
-                    if g.is_variable_probabilistic(variable)
-                        && !g.is_variable_fixed(variable, state)
-                    {
+                let head = g.get_clause_head(clause);
+                let head_iter = if g.is_variable_probabilistic(head) { vec![head] } else { vec![] };
+                for variable in g.clause_probabilistic_body_iter(clause).chain(head_iter.iter().copied()) {
+                    if !g.is_variable_fixed(variable, state) {
                         let d = g.get_variable_distribution(variable).unwrap();
-                        for v in g.distribution_variable_iter(d) {
-                            if !g.is_variable_fixed(v, state) {
-                                for c in g.variable_clause_body_iter(v) {
-                                    self.explore_component(g, c, comp_start, comp_size, hash, state);
-                                }
-                                for c in g.variable_clause_head_iter(v) {
-                                    self.explore_component(g, c, comp_start, comp_size, hash, state);
+                        if self.is_distribution_visitable(d, comp_distribution_start, comp_number_distribution) {
+                            let current_d_pos = self.distribution_positions[d.0];
+                            let new_d_pos = comp_distribution_start + *comp_number_distribution;
+                            if current_d_pos != new_d_pos {
+                                let moved_d = self.distributions[new_d_pos];
+                                self.distributions.as_mut_slice().swap(new_d_pos, current_d_pos);
+                                self.distribution_positions[d.0] = new_d_pos;
+                                self.distribution_positions[moved_d.0] = current_d_pos;
+                            }
+                            *comp_number_distribution += 1;
+                            for v in g.distribution_variable_iter(d) {
+                                if !g.is_variable_fixed(v, state) {
+                                    for c in g.variable_clause_body_iter(v) {
+                                        self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
+                                    }
+                                    for c in g.variable_clause_head_iter(v) {
+                                        self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
+                                    }
                                 }
                             }
                         }
@@ -198,11 +230,11 @@ impl ComponentExtractor {
             
             // Recursively explore the nodes in the connected components
             for parent in g.parents_clause_iter(clause, state) {
-                self.explore_component(g, parent, comp_start, comp_size, hash, state);
+                self.explore_component(g, parent, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
             }
             
             for child in g.children_clause_iter(clause, state) {
-                self.explore_component(g, child, comp_start, comp_size, hash, state);
+                self.explore_component(g, child, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
             }
         }
     }
@@ -228,6 +260,7 @@ impl ComponentExtractor {
         state.set_usize(self.base, end);
         let super_comp = self.components[component.0];
         let mut start = super_comp.start;
+        let mut distribution_start = super_comp.distribution_start;
         let end = start + super_comp.size;
         // We iterate over all the clause in the current component. When we encounter a constrained clause, we start
         // a component from it
@@ -237,15 +270,21 @@ impl ComponentExtractor {
                 // If the clause is active, then we start a new component from it
                 let mut size = 0;
                 let mut hash: u64 = 0;
+                let mut number_distribution = 0;
                 self.explore_component(
                     g,
                     clause,
                     start,
                     &mut size,
+                    distribution_start,
+                    &mut number_distribution,
                     &mut hash,
                     state,
                 );
-                self.components.push(Component { start, size, hash});
+                if number_distribution > 0 {
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash});
+                }
+                distribution_start += number_distribution;
                 start += size;
             } else {
                 start += 1;
@@ -282,6 +321,13 @@ impl ComponentExtractor {
     
     pub fn get_comp_hash(&self, component: ComponentIndex) -> u64 {
         self.components[component.0].hash
+    }
+    
+    /// Returns an iterator on the distribution of a component
+    pub fn component_distribution_iter(&self, component: ComponentIndex) -> impl Iterator<Item = DistributionIndex> + '_ {
+        let start = self.components[component.0].distribution_start;
+        let end = start + self.components[component.0].number_distribution;
+        self.distributions[start..end].iter().copied()
     }
 }
 

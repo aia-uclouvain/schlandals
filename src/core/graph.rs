@@ -706,9 +706,14 @@ impl Graph {
         (0..self.distributions.len()).map(DistributionIndex)
     }
 
-    /// Returns an iterator over all the variables, not fixed yet, in the body of the clause
+    /// Returns an iterator over all the variables, in the body of the clause
     pub fn clause_body_iter(&self, clause: ClauseIndex) -> impl Iterator<Item = VariableIndex> + '_ {
         self.clauses[clause.0].body_probabilistic.iter().copied().chain(self.clauses[clause.0].body_deterministic.iter().copied())
+    }
+    
+    /// Returns an iterator over all the probabilistic variable, not fixed yet, in the clause
+    pub fn clause_probabilistic_body_iter(&self, clause: ClauseIndex) -> impl Iterator<Item = VariableIndex> + '_ {
+        self.clauses[clause.0].body_probabilistic.iter().copied()
     }
     
 }
