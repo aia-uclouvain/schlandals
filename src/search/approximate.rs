@@ -33,6 +33,7 @@ use crate::heuristics::branching::BranchingDecision;
 use crate::propagator::MixedPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;
+use crate::PEAK_ALLOC;
 
 use rug::Float;
 use rug::Assign;
@@ -302,11 +303,9 @@ where
     pub fn solve(&mut self) -> Option<Float> {
         match self.solve_by_search() {
             Ok(p) => {
-                println!("{}", p);
                 Some(p)
             }
             Err(_) => {
-                println!("Model UNSAT");
                 None
             }
         }

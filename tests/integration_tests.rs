@@ -1,14 +1,7 @@
 #![allow(non_snake_case)]
 use rug::Float;
-use schlandals;
-use schlandals::branching::*;
-use propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
-use schlandals::components::*;
 use schlandals::*;
-use schlandals::search::ExactQuietSolver;
-use search_trail::StateManager;
-use schlandals::compiler::exact::ExactDACCompiler;
-use schlandals::compiler::circuit::Dac;
+use schlandals::Branching::*;
 
 use std::path::PathBuf;
 use tempfile::Builder;
@@ -17,19 +10,12 @@ use std::io::Write;
 use paste::paste;
 
 macro_rules! test_input_with_branching {
-    ($dir:ident, $name:ident, $value:expr, $b:ty) => {
+    ($dir:ident, $name:ident, $value:expr, $b:ident) => {
         paste!{
             #[test]
             fn [<search_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = SearchPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ExactQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000);
-                let sol = solver.solve().unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None).unwrap();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
@@ -37,35 +23,19 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = CompiledPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
-                let mut spn = compiler.compile().unwrap();
-                let sol = spn.evaluate();
+                let sol = compile(PathBuf::from(filename), $b, None, None).unwrap().evaluate();
                 let expected = Float::with_val(113, $value);
-                println!("{} {}", expected, sol);
                 assert!((expected - sol).abs() < 0.000001);
             }
 
             #[test]
             fn [<compile_from_file_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = CompiledPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, &mut branching_heuristic, propagator);
-                let spn = compiler.compile().unwrap();
-                let mut file = Builder::new().prefix("tmp").suffix(".pc").tempfile().unwrap();
-                writeln!(file, "{}", spn).unwrap();
-                let mut read_spn = Dac::from_file(&PathBuf::from(&file.path()));
-                let sol = read_spn.evaluate();
+                let dac = compile(PathBuf::from(filename), $b, None, None).unwrap();
+                let mut file = Builder::new().prefix("tmp").suffix(".dac").tempfile().unwrap();
+                writeln!(file, "{}", dac).unwrap();
+                let mut read_dac = read_compiled(PathBuf::from(file.path()), None);
+                let sol = read_dac.evaluate();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
@@ -80,20 +50,13 @@ fn compare_approximate(sol: Float, expected: Float, epsilon: f64) {
 }
 
 macro_rules! test_approximate_input_with_branching {
-    ($dir:ident, $name:ident, $value:expr, $b:ty) => {
+    ($dir:ident, $name:ident, $value:expr, $b:ident) => {
         paste! {
             #[test]
             fn [<approximate_search_0_ $b _ $name>]() {
                 let epsilon = 0.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = MixedPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
-                let sol = solver.solve().unwrap();
+                let sol = approximate_search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -102,14 +65,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_5_ $b _ $name>]() {
                 let epsilon = 0.05;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = MixedPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
-                let sol = solver.solve().unwrap();
+                let sol = approximate_search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -118,14 +74,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_20_ $b _ $name>]() {
                 let epsilon = 0.2;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = MixedPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
-                let sol = solver.solve().unwrap();
+                let sol = approximate_search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -134,14 +83,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_50_ $b _ $name>]() {
                 let epsilon = 0.5;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = MixedPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
-                let sol = solver.solve().unwrap();
+                let sol = approximate_search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -150,14 +92,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_100_ $b _ $name>]() {
                 let epsilon = 1.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut state = StateManager::default();
-                let mut propagator = MixedPropagator::new();
-                let path = PathBuf::from(filename);
-                let graph = graph_from_ppidimacs(&path, &mut state, &mut propagator);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic = $b::default();
-                let mut solver = ApproximateQuietSolver::new(graph, state, component_extractor, &mut branching_heuristic, propagator, 1000, epsilon);
-                let sol = solver.solve().unwrap();
+                let sol = approximate_search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -168,7 +103,6 @@ macro_rules! test_approximate_input_with_branching {
 macro_rules! integration_tests {
     ($dir:ident, $($name:ident: $value:expr,)*) => {
         $(
-            test_input_with_branching!{ $dir, $name, $value, Fiedler}
             test_input_with_branching!{$dir, $name, $value, MinInDegree}
             test_input_with_branching!{$dir, $name, $value, MinOutDegree}
             test_input_with_branching!{$dir, $name, $value, MaxDegree}
@@ -179,7 +113,6 @@ macro_rules! integration_tests {
 macro_rules! integration_tests_approximate {
     ($dir:ident, $($name:ident: $value:expr,)*) => {
         $(
-            test_approximate_input_with_branching!{$dir, $name, $value, Fiedler}
             test_approximate_input_with_branching!{$dir, $name, $value, MinInDegree}
             test_approximate_input_with_branching!{$dir, $name, $value, MinOutDegree}
             test_approximate_input_with_branching!{$dir, $name, $value, MaxDegree}
