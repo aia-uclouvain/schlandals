@@ -495,6 +495,10 @@ impl Dac {
     pub fn is_circuit_node_mul(&self, node: CircuitNodeIndex) -> bool {
         self.nodes[node.0].is_mul
     }
+    
+    pub fn get_circuit_node_probability(&self, node: CircuitNodeIndex) -> &Float {
+        &self.nodes[node.0].value
+    }
 
 }
 
