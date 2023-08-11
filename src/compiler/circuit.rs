@@ -32,7 +32,7 @@ use rug::{Assign, Float};
 use crate::common::f128;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CircuitNodeIndex(usize);
+pub struct CircuitNodeIndex(pub usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DistributionNodeIndex(usize);
@@ -41,7 +41,7 @@ pub struct DistributionNodeIndex(usize);
 pub struct LayerIndex(usize);
 
 /// An internal node of the circuits
-struct CircuitNode {
+pub struct CircuitNode {
     /// Value of the node. Initialized at 1.0 (0.0) for product (sum) nodes, after the evaluation it is equal to
     /// the product (sum) of its input values.
     value: Float,
@@ -54,9 +54,13 @@ struct CircuitNode {
     /// Is the node a product node?
     is_mul: bool,
     /// Start index of the output in the DAC's output vector
-    ouput_start: usize,
+    output_start: usize,
     /// Number of outputs of the node
     number_outputs: usize,
+    /// Same as the output, but for the inputs
+    input_start: usize,
+    /// Same as the output, but for the inputs
+    number_inputs: usize,
     /// Layer of the network. Only use to re-order the nodes in the circuit vector.
     layer: usize,
     /// Should the node be removed as post-processing ?
@@ -89,6 +93,8 @@ pub struct Dac {
     distribution_nodes: Vec<DistributionNode>,
     /// Outputs of the internal nodes
     outputs: Vec<CircuitNodeIndex>,
+    /// Inputs of the internal nodes
+    inputs: Vec<CircuitNodeIndex>,
 }
 
 impl Dac {
@@ -107,6 +113,7 @@ impl Dac {
             nodes: vec![],
             distribution_nodes,
             outputs: vec![],
+            inputs: vec![],
         }
     }
     
@@ -119,8 +126,10 @@ impl Dac {
             inputs: FxHashSet::default(),
             input_distributions: vec![],
             is_mul: true,
-            ouput_start: 0,
+            output_start: 0,
             number_outputs: 0,
+            input_start: 0,
+            number_inputs: 0,
             layer: 0,
             to_remove: true,
         });
@@ -136,8 +145,10 @@ impl Dac {
             inputs: FxHashSet::default(),
             input_distributions: vec![],
             is_mul: false,
-            ouput_start: 0,
+            output_start: 0,
             number_outputs: 0,
+            input_start: 0,
+            number_inputs: 0,
             layer: 0,
             to_remove: true,
         });
@@ -244,7 +255,7 @@ impl Dac {
         
         // Same for the internal nodes
         for node in (0..end).map(CircuitNodeIndex) {
-            self.nodes[node.0].ouput_start = self.outputs.len();
+            self.nodes[node.0].output_start = self.outputs.len();
             self.nodes[node.0].number_outputs = 0;
             while let Some(output) = self.nodes[node.0].outputs.pop() {
                 // If the node has not been dropped, update the output. At this step, it is also moved in the
@@ -371,6 +382,16 @@ impl Dac {
                 }
             }
         }
+        // Move the inputs into the input vector
+        for node in 0..self.nodes.len() {
+            self.nodes[node].input_start = self.inputs.len();
+            self.nodes[node].number_inputs = self.nodes[node].inputs.len();
+            for input in self.nodes[node].inputs.iter().copied() {
+                self.inputs.push(input);
+            }
+            self.nodes[node].inputs.clear();
+            self.nodes[node].inputs.shrink_to_fit();
+        }
     }
     
     // --- Evaluation ---- //
@@ -399,7 +420,7 @@ impl Dac {
             }
         }
         for node in (0..self.nodes.len()).map(CircuitNodeIndex) {
-            let start = self.nodes[node.0].ouput_start;
+            let start = self.nodes[node.0].output_start;
             let end = start + self.nodes[node.0].number_outputs;
             let value = self.nodes[node.0].value.clone();
             for i in start..end {
@@ -414,6 +435,67 @@ impl Dac {
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value.clone()
     }
+    
+    // --- Various helper methods for the python bindings ---
+    
+    pub fn proba_iter(&self) -> impl Iterator<Item = f64> + '_ {
+        self.nodes.iter().map(|n| n.value.to_f64())
+    }
+
+    pub fn nodes_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> {
+        (0..self.nodes.len()).map(CircuitNodeIndex)
+    }
+    
+    pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionNodeIndex> {
+        (0..self.distribution_nodes.len()).map(DistributionNodeIndex)
+    }
+    
+    pub fn outputs_node_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> + '_ {
+        self.outputs.iter().copied()
+    }
+    
+    pub fn inputs_node_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> + '_ {
+        self.inputs.iter().copied()
+    }
+
+    pub fn get_circuit_node_input_distribution(&self, node: CircuitNodeIndex) -> impl Iterator<Item = (DistributionIndex, usize)> + '_ {
+        self.nodes[node.0].input_distributions.iter().copied()
+    }
+    
+    pub fn get_outputs_circuit_node(&self, node: CircuitNodeIndex) -> &[CircuitNodeIndex] {
+        let start = self.nodes[node.0].output_start;
+        let end = self.nodes[node.0].number_outputs + start;
+        &self.outputs[start..end]
+    }
+    
+    pub fn get_distribution_probabilities(&self, distribution: DistributionNodeIndex) -> &[f64] {
+        &self.distribution_nodes[distribution.0].probabilities
+    }
+    
+    pub fn get_distribution_outputs(&self, distribution: DistributionNodeIndex) -> &[(CircuitNodeIndex, usize)] {
+        &self.distribution_nodes[distribution.0].outputs
+    }
+    
+    pub fn get_circuit_node_out_start(&self, node: CircuitNodeIndex) -> usize {
+        self.nodes[node.0].output_start    
+    }
+
+    pub fn get_circuit_node_number_output(&self, node: CircuitNodeIndex) -> usize {
+        self.nodes[node.0].number_outputs    
+    }
+    
+    pub fn get_circuit_node_in_start(&self, node: CircuitNodeIndex) -> usize {
+        self.nodes[node.0].input_start
+    }
+
+    pub fn get_circuit_node_number_input(&self, node: CircuitNodeIndex) -> usize {
+        self.nodes[node.0].number_inputs
+    }
+
+    pub fn is_circuit_node_mul(&self, node: CircuitNodeIndex) -> bool {
+        self.nodes[node.0].is_mul
+    }
+
 }
 
 // Various methods for dumping the compiled diagram, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
@@ -433,9 +515,7 @@ impl Dac {
         
         let dist_node_attributes = String::from("shape=circle,style=filled");
         let prod_node_attributes = String::from("shape=circle,style=filled");
-        let prod_node_label = String::from("X");
         let sum_node_attributes = String::from("shape=circle,style=filled");
-        let sum_node_label = String::from("+");
         
         let mut out = String::new();
         out.push_str("digraph {\ntranksep = 3;\n\n");
@@ -443,16 +523,18 @@ impl Dac {
         // Generating the nodes in the network 
 
         for node in (0..self.distribution_nodes.len()).map(DistributionNodeIndex) {
-            let id = self.distribution_node_id(node);
-            out.push_str(&Dac::node(id, &dist_node_attributes, &format!("d{}", id)));
+            if !self.distribution_nodes[node.0].outputs.is_empty() {
+                let id = self.distribution_node_id(node);
+                out.push_str(&Dac::node(id, &dist_node_attributes, &format!("d{}", id)));
+            }
         }
 
         for node in (0..self.nodes.len()).map(CircuitNodeIndex) {
             let id = self.sp_node_id(node);
             if self.nodes[node.0].is_mul {
-                out.push_str(&Dac::node(id, &prod_node_attributes, &prod_node_label));
+                out.push_str(&Dac::node(id, &prod_node_attributes, &format!("X ({:.3})", self.nodes[node.0].value)));
             } else {
-                out.push_str(&Dac::node(id, &sum_node_attributes, &sum_node_label));
+                out.push_str(&Dac::node(id, &sum_node_attributes, &format!("+ ({:.3})", self.nodes[node.0].value)));
             }
         }
         
@@ -461,14 +543,14 @@ impl Dac {
             let from = self.distribution_node_id(node);
             for (output, value) in self.distribution_nodes[node.0].outputs.iter().copied() {
                 let to = self.sp_node_id(output);
-                let f_value = format!("{:.5}",self.distribution_nodes[node.0].probabilities[value]);
+                let f_value = format!("({}, {:.3})",value, self.distribution_nodes[node.0].probabilities[value]);
                 out.push_str(&Dac::edge(from, to, Some(f_value)));
             }
         }
         
         for node in (0..self.nodes.len()).map(CircuitNodeIndex) {
             let from = self.sp_node_id(node);
-            let start = self.nodes[node.0].ouput_start;
+            let start = self.nodes[node.0].output_start;
             let end = start + self.nodes[node.0].number_outputs;
             for output in self.outputs[start..end].iter().copied() {
                 let to = self.sp_node_id(output);
@@ -497,7 +579,7 @@ impl Dac {
 
 impl fmt::Display for Dac {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "dspn {} {}", self.distribution_nodes.len(), self.nodes.len())?;
+        writeln!(f, "dac {} {}", self.distribution_nodes.len(), self.nodes.len())?;
         for node in self.distribution_nodes.iter() {
             write!(f, "d {}", node.probabilities.len())?;
             for p in node.probabilities.iter() {
@@ -508,16 +590,23 @@ impl fmt::Display for Dac {
             }
             writeln!(f)?;
         }
+        write!(f, "outputs")?;
+        for output in self.outputs.iter().copied() {
+            write!(f, " {}", output.0)?;
+        }
+        writeln!(f)?;
+        write!(f, "inputs")?;
+        for input in self.inputs.iter().copied() {
+            write!(f, " {}", input.0)?;
+        }
+        writeln!(f)?;
         for node in self.nodes.iter() {
             if node.is_mul {
                 write!(f, "x")?;       
             } else {
                 write!(f, "+")?;
             }
-            for output_id in node.ouput_start..(node.ouput_start+node.number_outputs) {
-                write!(f, " {}", self.outputs[output_id].0)?;
-            }
-            writeln!(f)?;
+            writeln!(f, " {} {} {} {}", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
         }
         fmt::Result::Ok(())
     }
@@ -526,17 +615,18 @@ impl fmt::Display for Dac {
 impl Dac {
 
     pub fn from_file(filepath: &PathBuf) -> Self {
-        let mut spn = Self {
+        let mut dac = Self {
             nodes: vec![],
             distribution_nodes: vec![],
             outputs: vec![],
+            inputs: vec![],
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);
         for line in reader.lines() {
             let l = line.unwrap();
             let split = l.split_whitespace().collect::<Vec<&str>>();
-            if l.starts_with("dspn") {
+            if l.starts_with("dac") {
                 // Do things ?
             } else if l.starts_with('d') {
                 let dom_size = split[1].parse::<usize>().unwrap();
@@ -547,24 +637,26 @@ impl Dac {
                     let value = split[i+1].parse::<usize>().unwrap();
                     outputs.push((output_node, value));
                 }
-                spn.distribution_nodes.push(DistributionNode {
+                dac.distribution_nodes.push(DistributionNode {
                     probabilities,
                     outputs,
                 });
+            } else if l.starts_with("inputs") {
+                dac.inputs = split.iter().skip(1).map(|i| CircuitNodeIndex(i.parse::<usize>().unwrap())).collect();
+            } else if l.starts_with("outputs") {
+                dac.outputs = split.iter().skip(1).map(|i| CircuitNodeIndex(i.parse::<usize>().unwrap())).collect();
             } else if l.starts_with('x') || l.starts_with('+') {
-                let start = spn.outputs.len();
-                for item in split.iter().skip(1) {
-                    spn.outputs.push(CircuitNodeIndex(item.parse::<usize>().unwrap()));
-                }
-                let end = spn.outputs.len();
-                spn.nodes.push(CircuitNode {
+                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
+                dac.nodes.push(CircuitNode {
                     value: if l.starts_with('x') { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
                     inputs: FxHashSet::default(),
                     input_distributions: vec![],
                     is_mul: l.starts_with('x'),
-                    ouput_start: start,
-                    number_outputs: end - start,
+                    output_start: values[0],
+                    number_outputs: values[1],
+                    input_start: values[2],
+                    number_inputs: values[3],
                     layer: 0,
                     to_remove: false,
                 })
@@ -572,6 +664,6 @@ impl Dac {
                 panic!("Bad line format: {}", l);
             }
         }
-        spn
+        dac
     }
 }

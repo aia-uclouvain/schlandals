@@ -28,6 +28,7 @@ use crate::search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolv
 use crate::propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
 use crate::compiler::exact::ExactDACCompiler;
 pub use crate::compiler::circuit::Dac;
+pub use crate::compiler::circuit::CircuitNode;
 
 // Re-export the modules
 mod common;
@@ -63,8 +64,9 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
     let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-    let res = compiler.compile();
-    if let Some(dac) = res.as_ref() {
+    let mut res = compiler.compile();
+    if let Some(dac) = res.as_mut() {
+        dac.evaluate();
         if let Some(f) = dotfile {
             let out = dac.as_graphviz();
             let mut outfile = File::create(f).unwrap();
