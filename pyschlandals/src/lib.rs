@@ -60,7 +60,6 @@ fn approximate_search_function(file: String, branching: BranchingHeuristic, epsi
 fn compilation_submodule(py: Python<'_>, parent_module: &PyModule) -> PyResult<()> {
     let module = PyModule::new(py, "compiler")?;
     module.add_function(wrap_pyfunction!(compile_function, module)?)?;
-    module.add_function(wrap_pyfunction!(compiler_from_file, module)?)?;
     module.add_class::<PyDac>()?;
     module.add_class::<PyCircuitNode>()?;
     module.add_class::<PyDistributionNode>()?;
@@ -123,6 +122,12 @@ impl PyDac {
         }
     }
     
+    #[staticmethod]
+    pub fn from_fdac_file(file: String) -> Self {
+        let dac = Dac::from_file(&PathBuf::from(file));
+        pydac_from_dac(dac)
+    }
+    
     pub fn evaluate(&mut self) -> f64 {
         for i in 0..self.nodes.len() {
             self.nodes[i].value = if self.nodes[i].is_mul { 1.0 } else { 0.0 };
@@ -151,6 +156,10 @@ impl PyDac {
                 }
             }
         }
+        self.nodes.last().unwrap().value
+    }
+    
+    pub fn get_circuit_probability(&self) -> f64 {
         self.nodes.last().unwrap().value
     }
     
@@ -284,13 +293,6 @@ fn compile_function(file: String, branching: BranchingHeuristic) -> Option<PyDac
         Some(dac) => Some(pydac_from_dac(dac)),
     }
 }
-
-#[pyfunction]
-#[pyo3(name = "dac_from_file")]
-fn compiler_from_file(file: String) -> PyDac {
-    pydac_from_dac(Dac::from_file(&PathBuf::from(file)))
-}
-
 
 /// Base module for pyschlandals
 #[pymodule]
