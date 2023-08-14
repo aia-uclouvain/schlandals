@@ -167,6 +167,10 @@ impl PyDac {
         self.nodes[node].value
     }
     
+    pub fn is_node_mul(&self, node: usize) -> bool {
+        self.nodes[node].is_mul
+    }
+    
     pub fn get_node_output_start(&self, node: usize) -> usize {
         self.nodes[node].outputs_start
     }
