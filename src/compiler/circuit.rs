@@ -266,10 +266,13 @@ impl Dac {
                     self.nodes[node.0].number_outputs += 1;
                 }
             }
-            // This remove the allocated space to the outputs/inputs vector
             self.nodes[node.0].outputs.shrink_to_fit();
-            self.nodes[node.0].inputs.clear();
-            self.nodes[node.0].inputs.shrink_to_fit();
+            let input_start = self.nodes[node.0].input_start;
+            let number_input = self.nodes[node.0].number_inputs;
+            for input_index in input_start..(input_start+number_input) {
+                let old = self.inputs[input_index];
+                self.inputs[input_index] = CircuitNodeIndex(new_indexes[old.0]);
+            }
         }
         // Actually remove the nodes (and allocated space) from the nodes vector.
         self.nodes.truncate(end);
