@@ -211,6 +211,14 @@ impl PyDac {
         self.nodes[node].distribution_input[index]
     }
     
+    pub fn get_distribution_number_value(&self, distribution: usize) -> usize {
+        self.distributions[distribution].probabilities.len()
+    }
+    
+    pub fn get_distribution_probability(&self, distribution: usize, probability_index: usize) -> f64 {
+        self.distributions[distribution].probabilities[probability_index]
+    }
+    
     pub fn to_graphviz(&self, path: String) {
         
         let mut out = String::new();
