@@ -630,11 +630,16 @@ impl Dac {
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);
+        let mut input_distributions_node: Vec<Vec<(DistributionIndex, usize)>> = vec![];
         for line in reader.lines() {
             let l = line.unwrap();
             let split = l.split_whitespace().collect::<Vec<&str>>();
             if l.starts_with("dac") {
-                // Do things ?
+                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
+                let number_nodes = values[1];
+                for _ in 0..number_nodes {
+                    input_distributions_node.push(vec![]);
+                }
             } else if l.starts_with('d') {
                 let dom_size = split[1].parse::<usize>().unwrap();
                 let probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
@@ -643,6 +648,7 @@ impl Dac {
                     let output_node = CircuitNodeIndex(split[i].parse::<usize>().unwrap());
                     let value = split[i+1].parse::<usize>().unwrap();
                     outputs.push((output_node, value));
+                    input_distributions_node[output_node.0].push((DistributionIndex(dac.distribution_nodes.len()), value));
                 }
                 dac.distribution_nodes.push(DistributionNode {
                     probabilities,
@@ -658,7 +664,7 @@ impl Dac {
                     value: if l.starts_with('x') { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
                     inputs: FxHashSet::default(),
-                    input_distributions: vec![],
+                    input_distributions: input_distributions_node[dac.nodes.len()].clone(),
                     is_mul: l.starts_with('x'),
                     output_start: values[0],
                     number_outputs: values[1],
