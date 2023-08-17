@@ -269,6 +269,8 @@ where
                             if let Some(v) = self.graph.get_variable_value(variable, &self.state) {
                                 if v {
                                     p_in *= self.graph.get_variable_weight(variable).unwrap();
+                                    sum_neg = 0.0;
+                                    break;
                                 } else {
                                     sum_neg += self.graph.get_variable_weight(variable).unwrap();
                                 }
