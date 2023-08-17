@@ -219,6 +219,10 @@ impl PyDac {
         self.distributions[distribution].probabilities[probability_index]
     }
     
+    pub fn set_distribution_probability(&mut self, distribution: usize, probability_index: usize, probability: f64) {
+        self.distributions[distribution].probabilities[probability_index] = probability;
+    }
+    
     pub fn to_graphviz(&self, path: String) {
         
         let mut out = String::new();
