@@ -47,7 +47,7 @@ type ProblemSolution = Result<Float, Unsat>;
 
 type ProbaMassIn = Float;
 type ProbaMassOut = Float;
-type NodeSolution = (ProbaMassIn, ProbaMassOut, Float);
+type NodeSolution = (ProbaMassIn, ProbaMassOut);
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -138,7 +138,6 @@ where
             self.statistics.or_node();
             let mut p_in = f128!(0.0);
             let mut p_out = f128!(0.0);
-            let mut p = f128!(0.0);
             let mut variables_to_branch = self.graph.distribution_variable_iter(distribution).filter(|v| !self.graph.is_variable_fixed(*v, &self.state)).collect::<Vec<VariableIndex>>();
             variables_to_branch.sort_unstable_by(|a, b| {
                 let wa = self.graph.get_variable_weight(*a).unwrap();
@@ -182,20 +181,19 @@ where
                                 let lb = p_in.clone();
                                 let ub = 1.0 - p_out.clone() - (1.0 - max_proba_children);
 
-                                if let Some(proba) = self.approximate_count(lb, ub) {
+                                if let Some(_) = self.approximate_count(lb, ub) {
                                     self.state.restore_state();
-                                    return (p_in, p_out, proba);
+                                    return (p_in, p_out);
                                 }
 
                                 let child_sol = self._solve(component);
                                 p_in += child_sol.0 * &v;
                                 p_out += child_sol.1 * &v;
-                                p += child_sol.2 * &v; 
                                 let lb = p_in.clone();
                                 let ub = 1.0 - p_out.clone();
-                                if let Some(proba) = self.approximate_count(lb, ub) {
+                                if let Some(_) = self.approximate_count(lb, ub) {
                                     self.state.restore_state();
-                                    return (p_in, p_out, proba);
+                                    return (p_in, p_out);
                                 }
                             } else {
                                 p_out += v_weight;
@@ -206,11 +204,11 @@ where
                     self.state.restore_state();
                 }
             }
-            (p_in, p_out, p)
+            (p_in, p_out)
         } else {
             // The sub-formula is SAT, by definition return 1. In practice should not happen since in that case no components are returned in the detection
             debug_assert!(false);
-            (f128!(1.0), f128!(0.0), f128!(1.0))
+            (f128!(1.0), f128!(0.0))
         }
     }
 
@@ -226,7 +224,6 @@ where
         // there are no sub-components, this is the default solution.
         let mut p_in = f128!(1.0);
         let mut p_out = f128!(1.0);
-        let mut p = f128!(1.0);
         // First we detect the sub-components in the graph
         if self
             .component_extractor
@@ -239,8 +236,7 @@ where
                 let cache_solution = self.get_cached_component_or_compute(sub_component);
                 p_in *= &cache_solution.0;
                 p_out *= &cache_solution.1;
-                p *= &cache_solution.2;
-                if p == 0.0 {
+                if p_in == 0.0 {
                     break;
                 }
             }
@@ -248,7 +244,7 @@ where
             p_out.assign(0.0);
         }
         self.state.restore_state();
-        (p_in, p_out, p)
+        (p_in, p_out)
     }
     
     fn solve_by_search(&mut self) -> ProblemSolution {
@@ -284,17 +280,22 @@ where
                     self.branching_heuristic.init(&self.graph, &self.state);
                     let solution = self._solve(ComponentIndex(0));
                     self.statistics.print();
-                    ProblemSolution::Ok(solution.2)
+                    let ub: Float = 1.0 - solution.1;
+                    let proba = (solution.0 * &ub).sqrt();
+                    ProblemSolution::Ok(proba)
                 } else {
                     match self.approximate_count(p_in.clone(), 1.0 - p_out.clone()) {
                         None => {
                             self.branching_heuristic.init(&self.graph, &self.state);
-                            let mut solution = self._solve(ComponentIndex(0));
-                            solution.2 *= p_in;
+                            let solution = self._solve(ComponentIndex(0));
                             self.statistics.print();
-                            ProblemSolution::Ok(solution.2)
+                            let ub: Float = 1.0 - solution.1;
+                            let proba = p_in * (solution.0 * &ub).sqrt();
+                            ProblemSolution::Ok(proba)
                         },
-                        Some(proba) => ProblemSolution::Ok(proba),
+                        Some(proba) => {
+                            ProblemSolution::Ok(p_in*proba)
+                        },
                     }
                 }
             }
