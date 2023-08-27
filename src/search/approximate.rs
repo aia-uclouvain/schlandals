@@ -181,7 +181,7 @@ where
                                 let lb = p_in.clone();
                                 let ub = 1.0 - p_out.clone() - (1.0 - max_proba_children);
 
-                                if let Some(_) = self.approximate_count(lb, ub) {
+                                if self.are_bounds_tight_enough(lb, ub) {
                                     self.state.restore_state();
                                     return (p_in, p_out);
                                 }
@@ -191,7 +191,7 @@ where
                                 p_out += child_sol.1 * &v;
                                 let lb = p_in.clone();
                                 let ub = 1.0 - p_out.clone();
-                                if let Some(_) = self.approximate_count(lb, ub) {
+                                if self.are_bounds_tight_enough(lb, ub) {
                                     self.state.restore_state();
                                     return (p_in, p_out);
                                 }
@@ -280,38 +280,29 @@ where
                     self.branching_heuristic.init(&self.graph, &self.state);
                     let solution = self._solve(ComponentIndex(0));
                     self.statistics.print();
-                    let ub: Float = 1.0 - solution.1;
+                    let ub: Float = 1.0 - solution.1*(1 - p_out);
                     let proba = (solution.0 * &ub).sqrt();
                     ProblemSolution::Ok(proba)
                 } else {
-                    match self.approximate_count(p_in.clone(), 1.0 - p_out.clone()) {
-                        None => {
-                            self.branching_heuristic.init(&self.graph, &self.state);
-                            let solution = self._solve(ComponentIndex(0));
-                            self.statistics.print();
-                            let ub: Float = 1.0 - solution.1;
-                            let proba = p_in * (solution.0 * &ub).sqrt();
-                            ProblemSolution::Ok(proba)
-                        },
-                        Some(proba) => {
-                            ProblemSolution::Ok(p_in*proba)
-                        },
+                    if self.are_bounds_tight_enough(p_in.clone(), 1.0 - p_out.clone()) {
+                        let ub: Float = 1.0 - p_out;
+                        let proba = (p_in * ub).sqrt();
+                        ProblemSolution::Ok(proba)
+                    } else {
+                        self.branching_heuristic.init(&self.graph, &self.state);
+                        let solution = self._solve(ComponentIndex(0));
+                        self.statistics.print();
+                        let ub: Float = 1.0 - solution.1*(1.0 - p_out);
+                        let proba = p_in * (solution.0 * &ub).sqrt();
+                        ProblemSolution::Ok(proba)
                     }
                 }
             }
         }
     }
     
-    fn approximate_count(&mut self, lb: Float, ub: Float) -> Option<Float> {
-        if ub <= 0.0 {
-            return Some(f128!(0.0));
-        }
-        if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
-            let approximation = f128!((lb*&ub).sqrt());
-            Some(approximation)
-        } else {
-            None
-        }
+    fn are_bounds_tight_enough(&self, lb: Float, ub: Float) -> bool {
+        ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0)
     }
     
     /// Solve the problems represented by the graph with the given branching heuristic.
