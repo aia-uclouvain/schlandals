@@ -35,7 +35,7 @@ use crate::common::f128;
 pub struct CircuitNodeIndex(pub usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct DistributionNodeIndex(usize);
+pub struct DistributionNodeIndex(pub usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct LayerIndex(usize);
@@ -441,66 +441,97 @@ impl Dac {
     
     // --- Various helper methods for the python bindings ---
     
-    pub fn proba_iter(&self) -> impl Iterator<Item = f64> + '_ {
-        self.nodes.iter().map(|n| n.value.to_f64())
-    }
 
-    pub fn nodes_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> {
-        (0..self.nodes.len()).map(CircuitNodeIndex)
-    }
+    // --- GETTERS --- //
     
-    pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionNodeIndex> {
-        (0..self.distribution_nodes.len()).map(DistributionNodeIndex)
-    }
-    
-    pub fn outputs_node_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> + '_ {
-        self.outputs.iter().copied()
-    }
-    
-    pub fn inputs_node_iter(&self) -> impl Iterator<Item = CircuitNodeIndex> + '_ {
-        self.inputs.iter().copied()
-    }
-
-    pub fn get_circuit_node_input_distribution(&self, node: CircuitNodeIndex) -> impl Iterator<Item = (DistributionIndex, usize)> + '_ {
-        self.nodes[node.0].input_distributions.iter().copied()
-    }
-    
-    pub fn get_outputs_circuit_node(&self, node: CircuitNodeIndex) -> &[CircuitNodeIndex] {
-        let start = self.nodes[node.0].output_start;
-        let end = self.nodes[node.0].number_outputs + start;
-        &self.outputs[start..end]
-    }
-    
-    pub fn get_distribution_probabilities(&self, distribution: DistributionNodeIndex) -> &[f64] {
-        &self.distribution_nodes[distribution.0].probabilities
-    }
-    
-    pub fn get_distribution_outputs(&self, distribution: DistributionNodeIndex) -> &[(CircuitNodeIndex, usize)] {
-        &self.distribution_nodes[distribution.0].outputs
-    }
-    
+    /// Returns the index of the first output of the node, in the output vector
     pub fn get_circuit_node_out_start(&self, node: CircuitNodeIndex) -> usize {
         self.nodes[node.0].output_start    
     }
 
+    /// Returns the number of output of the node
     pub fn get_circuit_node_number_output(&self, node: CircuitNodeIndex) -> usize {
         self.nodes[node.0].number_outputs    
     }
     
+    /// Returns the index of the first input of the node, in the input vector
     pub fn get_circuit_node_in_start(&self, node: CircuitNodeIndex) -> usize {
         self.nodes[node.0].input_start
     }
 
+    /// Returns the number of input of the node
     pub fn get_circuit_node_number_input(&self, node: CircuitNodeIndex) -> usize {
         self.nodes[node.0].number_inputs
     }
+    
+    /// Returns the probability of the circuit. If the node has not been evaluated,
+    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
+    /// sum node
+    pub fn get_circuit_node_probability(&self, node: CircuitNodeIndex) -> &Float {
+        &self.nodes[node.0].value
+    }
+    
+    /// Returns the probability of the circuit. If the circuit has not been evaluated,
+    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
+    /// sum node
+    pub fn get_circuit_probability(&self) -> &Float {
+        &self.nodes[self.nodes.len()-1].value
+    }
+    
+    /// Returns the node at the given index in the input vector
+    pub fn get_input_at(&self, index: usize) -> CircuitNodeIndex {
+        self.inputs[index]
+    }
+    
+    /// Returns the node at the given index in the output vector
+    pub fn get_output_at(&self, index: usize) -> CircuitNodeIndex {
+        self.outputs[index]
+    }
+    
+    /// Returns the number of input edges from the distributions of the given node
+    pub fn get_circuit_node_number_distribution_input(&self, node: CircuitNodeIndex) -> usize {
+        self.nodes[node.0].input_distributions.len()
+    }
+    
+    /// Returns, for a given node and an index in its distributions input vector, the distribution index of the input and the value
+    /// index send from the probability
+    pub fn get_circuit_node_input_distribution_at(&self, node: CircuitNodeIndex, index: usize) -> (DistributionIndex, usize) {
+        self.nodes[node.0].input_distributions[index]
+    }
+    
+    /// Returns the number of value in the given distribution
+    pub fn get_distribution_domain_size(&self, distribution: DistributionNodeIndex) -> usize {
+        self.distribution_nodes[distribution.0].probabilities.len()
+    }
+    
+    /// Returns the probability at the given index of the given distribution
+    pub fn get_distribution_probability_at(&self, distribution: DistributionNodeIndex, index: usize) -> f64 {
+        self.distribution_nodes[distribution.0].probabilities[index]
+    }
+    
+    // --- SETTERS --- //
+    
+    /// Set the probability of the distribution, at the given index, to the given value
+    pub fn set_distribution_probability_at(&mut self, distribution: DistributionNodeIndex, index: usize, value: f64) {
+        self.distribution_nodes[distribution.0].probabilities[index] = value;
+    }
 
+
+    // --- QUERIES --- //
+
+    /// Returns true if the given node is a multiplication node
     pub fn is_circuit_node_mul(&self, node: CircuitNodeIndex) -> bool {
         self.nodes[node.0].is_mul
     }
     
-    pub fn get_circuit_node_probability(&self, node: CircuitNodeIndex) -> &Float {
-        &self.nodes[node.0].value
+    /// Returns the number of computational nodes in the circuit
+    pub fn number_nodes(&self) -> usize {
+        self.nodes.len()
+    }
+    
+    /// Returns the number of input distributions in the circuit
+    pub fn number_distributions(&self) -> usize {
+        self.distribution_nodes.len()
     }
 
 }

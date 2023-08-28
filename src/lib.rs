@@ -27,8 +27,7 @@ use crate::heuristics::branching::*;
 use crate::search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
 use crate::propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
 use crate::compiler::exact::ExactDACCompiler;
-pub use crate::compiler::circuit::Dac;
-pub use crate::compiler::circuit::CircuitNode;
+pub use crate::compiler::circuit::{Dac, CircuitNode, CircuitNodeIndex, DistributionNodeIndex};
 
 // Re-export the modules
 mod common;
