@@ -126,8 +126,10 @@ where
             let mut node_sol = f128!(0.0);
             for variable in self.graph.distribution_variable_iter(distribution) {
                 self.state.save_state();
+                self.statistics.propagation();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
                     Err(_) => {
+                        self.statistics.unsat();
                     }
                     Ok(_) => {
                         let v = self.propagator.get_propagation_prob().clone();

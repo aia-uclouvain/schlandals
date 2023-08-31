@@ -25,6 +25,8 @@ pub struct Statistics<const B: bool> {
     number_or_nodes: usize,
     number_and_nodes: usize,
     total_and_decompositions: usize,
+    number_unsat: usize,
+    number_propagation: usize,
 }
 
 impl<const B: bool> Statistics<B> {
@@ -57,6 +59,18 @@ impl<const B: bool> Statistics<B> {
             self.total_and_decompositions += number_components;
         }
     }
+    
+    pub fn unsat(&mut self) {
+       if B {
+            self.number_unsat += 1;
+       } 
+    }
+    
+    pub fn propagation(&mut self) {
+        if B {
+            self.number_propagation += 1;
+        }
+    }
 
     pub fn print(&self) {
         if B {
@@ -68,21 +82,16 @@ impl<const B: bool> Statistics<B> {
 impl<const B: bool> fmt::Display for Statistics<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if B {
-            writeln!(f, "Statistics on the search:")?;
-            writeln!(f, "\tNumber of cache access: {}", self.cache_access)?;
-            writeln!(
-                f,
-                "\tNumber of cache hit: {} ({:.3} %)",
-                self.cache_access - self.cache_miss,
-                100f64 - (self.cache_miss as f64 / self.cache_access as f64) * 100.0
-            )?;
-            writeln!(f, "\tNumber of OR nodes: {}", self.number_or_nodes)?;
-            writeln!(f, "\tNumber of AND nodes: {}", self.number_and_nodes)?;
-            writeln!(
-                f,
-                "\tAverage sub-problem decomposition per AND node: {:.3}",
-                (self.total_and_decompositions as f64) / (self.number_and_nodes as f64)
-            )
+            let cache_hit_percentages = 100f64 - (self.cache_miss as f64 / self.cache_access as f64) * 100.0;
+            let avg_decomposition = (self.total_and_decompositions as f64) / (self.number_and_nodes as f64);
+            writeln!(f,
+                "cache_hit {:.3} | OR nodes {} | AND nodes {} | avg decomposition {} | #propagations {} | #UNSAT {}",
+                cache_hit_percentages,
+                self.number_or_nodes,
+                self.number_and_nodes,
+                avg_decomposition,
+                self.number_propagation,
+                self.number_unsat)
         } else {
             write!(f, "")
         }
