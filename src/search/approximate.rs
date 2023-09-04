@@ -36,7 +36,6 @@ use crate::common::*;
 use crate::PEAK_ALLOC;
 
 use rug::Float;
-use rug::Assign;
 
 /// Unit structure representing the the problem is UNSAT
 #[derive(Debug)]
@@ -108,13 +107,13 @@ where
 
     /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex) -> NodeSolution {
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, should_appoximate: bool) -> NodeSolution {
         self.statistics.cache_access();
         let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
         match self.cache.get(&bit_repr) {
             None => {
                 self.statistics.cache_miss();
-                let f = self.choose_and_branch(component);
+                let f = self.choose_and_branch(component, should_appoximate);
                 self.cache.insert(bit_repr, f.clone());
                 f
             },
@@ -127,7 +126,7 @@ where
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
     /// solution of the component.
     /// The solution is the sum of the probability of the SAT children.
-    fn choose_and_branch(&mut self, component: ComponentIndex) -> NodeSolution {
+    fn choose_and_branch(&mut self, component: ComponentIndex, should_appoximate: bool) -> NodeSolution {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
             &self.state,
@@ -170,28 +169,13 @@ where
                                         removed_proba *= 1.0 - v;
                                     }
                                 }
-                                p_out += v_weight * (1.0 - removed_proba.clone());
-                                let mut max_proba_children = f128!(1.0);
-                                for d in self.component_extractor.component_distribution_iter(component) {
-                                    if !self.graph.distribution_one_left(d, &self.state) {
-                                        let s: f64 = self.graph.distribution_variable_iter(d).map(|v| self.graph.get_variable_weight(v).unwrap()).sum();
-                                        max_proba_children *= s;
-                                    }
-                                }
-                                let lb = p_in.clone();
-                                let ub = 1.0 - p_out.clone() - (1.0 - max_proba_children);
-
-                                if self.are_bounds_tight_enough(lb, ub) {
-                                    self.state.restore_state();
-                                    return (p_in, p_out);
-                                }
-
-                                let child_sol = self._solve(component);
+                                p_out += v_weight * (1.0 - removed_proba);
+                                let child_sol = self._solve(component, should_appoximate);
                                 p_in += child_sol.0 * &v;
                                 p_out += child_sol.1 * &v;
                                 let lb = p_in.clone();
                                 let ub = 1.0 - p_out.clone();
-                                if self.are_bounds_tight_enough(lb, ub) {
+                                if should_appoximate && self.are_bounds_tight_enough(lb, ub) {
                                     self.state.restore_state();
                                     return (p_in, p_out);
                                 }
@@ -213,7 +197,7 @@ where
     }
 
     /// Solves the problem for the sub-graph identified by component.
-    pub fn _solve(&mut self, component: ComponentIndex) -> NodeSolution {
+    pub fn _solve(&mut self, component: ComponentIndex, should_approximate: bool) -> NodeSolution {
         // If the memory limit is reached, clear the cache.
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.cache.clear();
@@ -232,19 +216,18 @@ where
             self.statistics.and_node();
             self.statistics
                 .decomposition(self.component_extractor.number_components(&self.state));
+            let should_approximate = should_approximate & (self.component_extractor.number_components(&self.state) == 1);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let cache_solution = self.get_cached_component_or_compute(sub_component);
+                let cache_solution = self.get_cached_component_or_compute(sub_component, should_approximate);
                 p_in *= &cache_solution.0;
-                p_out *= &cache_solution.1;
+                p_out *= 1.0 - cache_solution.1;
                 if p_in == 0.0 {
                     break;
                 }
             }
-        } else {
-            p_out.assign(0.0);
         }
         self.state.restore_state();
-        (p_in, p_out)
+        (p_in, 1.0 - p_out)
     }
     
     fn solve_by_search(&mut self) -> ProblemSolution {
@@ -276,27 +259,12 @@ where
                     }
                 }
                 p_out = 1.0 - p_out;
-                if p_in == 1.0 {
-                    self.branching_heuristic.init(&self.graph, &self.state);
-                    let solution = self._solve(ComponentIndex(0));
-                    self.statistics.print();
-                    let ub: Float = 1.0 - solution.1*(1 - p_out);
-                    let proba = (solution.0 * &ub).sqrt();
-                    ProblemSolution::Ok(proba)
-                } else {
-                    if self.are_bounds_tight_enough(p_in.clone(), 1.0 - p_out.clone()) {
-                        let ub: Float = 1.0 - p_out;
-                        let proba = (p_in * ub).sqrt();
-                        ProblemSolution::Ok(proba)
-                    } else {
-                        self.branching_heuristic.init(&self.graph, &self.state);
-                        let solution = self._solve(ComponentIndex(0));
-                        self.statistics.print();
-                        let ub: Float = 1.0 - solution.1*(1.0 - p_out);
-                        let proba = p_in * (solution.0 * &ub).sqrt();
-                        ProblemSolution::Ok(proba)
-                    }
-                }
+                self.branching_heuristic.init(&self.graph, &self.state);
+                let solution = self._solve(ComponentIndex(0), true);
+                self.statistics.print();
+                let ub: Float = 1.0 - solution.1*(1.0 - p_out);
+                let proba = p_in * (solution.0 * &ub).sqrt();
+                ProblemSolution::Ok(proba)
             }
         }
     }
