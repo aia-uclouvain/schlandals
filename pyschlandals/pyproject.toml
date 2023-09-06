@@ -4,13 +4,21 @@ build-backend = "maturin"
 
 [project]
 name = "pyschlandals"
+version="0.0.1"
 requires-python = ">=3.7"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+authors = [
+     { name="Alexandre Dubray", email="alexandre.dubray@uclouvain.be" },
+]
+description = "A Python interface to the Schlandals solver"
 
+[project.urls]
+"Homepage" = "https://github.com/aia-uclouvain/schlandals/"
+"Bug Tracker" = "https://github.com/aia-uclouvain/schlandals/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
