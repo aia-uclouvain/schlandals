@@ -17,22 +17,37 @@
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::{DistributionIndex, Graph};
+use crate::heuristics::BranchingDecision;
 
-/// Trait that defined the methods that a branching decision structure must implement.
-pub trait BranchingDecision {
-    /// Chooses one distribution from the component to branch on and returns it. If no distribution is present in
-    /// the component, returns None.
+
+#[derive(Default)]
+pub struct MaxProbability;
+
+impl BranchingDecision for MaxProbability {
     fn branch_on(
         &mut self,
         g: &Graph,
         state: &StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
-    ) -> Option<DistributionIndex>;
+    ) -> Option<DistributionIndex> {
+        let mut best_score = usize::MAX;
+        let mut best_distribution: Option<DistributionIndex> = None;
+        let mut best_tie = 0.0;
+        for clause in component_extractor.component_iter(component) {
+            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
+                let score = g.get_clause_number_parents(clause, state);
+                let (d, proba) = g.get_clause_active_distribution_highest_value(clause, state).unwrap();
+                if score < best_score || (score == best_score && proba > best_tie) {
+                    best_score = score;
+                    best_tie = proba;
+                    best_distribution = Some(d);
+                }
+            }
+        }
+        best_distribution
+    }
     
-    /// Initialize, if necessary, the data structures used by the branching heuristics
-    fn init(&mut self, g: &Graph, state: &StateManager);
+    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    
 }
-
-pub mod branching_exact;
-pub mod branching_approximate;

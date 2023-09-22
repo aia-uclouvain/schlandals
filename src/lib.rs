@@ -23,7 +23,9 @@ use rug::Float;
 use clap::ValueEnum;
 
 use crate::core::components::ComponentExtractor;
-use crate::heuristics::branching::*;
+use crate::heuristics::BranchingDecision;
+use crate::heuristics::branching_exact::*;
+use crate::heuristics::branching_approximate::*;
 use crate::search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
 use crate::propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
 use crate::compiler::exact::ExactDACCompiler;
@@ -50,6 +52,8 @@ pub enum Branching {
     MinOutDegree,
     /// Maximum degree of a clause in the implication-graph
     MaxDegree,
+    /// Select the distribution with the non-assigned variable that has the highest probability
+    MaxProbability,
 }
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac> {
@@ -61,6 +65,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::MaxProbability => Box::<MaxProbability>::default(),
     };
     let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
     let mut res = compiler.compile();
@@ -108,6 +113,7 @@ pub fn approximate_search(input: PathBuf, branching: Branching, statistics: bool
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::MaxProbability => Box::<MaxProbability>::default(),
     };
     let mlimit = if let Some(m) = memory {
         m
@@ -149,6 +155,7 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::MaxProbability => Box::<MaxProbability>::default(),
     };
     let mlimit = if let Some(m) = memory {
         m

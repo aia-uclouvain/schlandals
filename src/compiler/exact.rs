@@ -30,7 +30,7 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::heuristics::branching::BranchingDecision;
+use crate::heuristics::BranchingDecision;
 use crate::propagator::CompiledPropagator;
 use crate::common::*;
 use crate::compiler::circuit::*;
@@ -77,16 +77,14 @@ where
         }
     }
 
-    fn expand_sum_node(&mut self, spn: &mut Dac, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
+    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
         let mut children: Vec<CircuitNodeIndex> = vec![];
         for variable in self.graph.distribution_variable_iter(distribution) {
             self.state.save_state();
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
-                Err(_) => {
-
-                },
+                Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(spn, component) {
+                    if let Some(child) = self.expand_prod_node(dac, component) {
                         children.push(child);
                     }
                 }
@@ -94,9 +92,9 @@ where
             self.state.restore_state();
         }
         if !children.is_empty() {
-            let node = spn.add_sum_node();
+            let node = dac.add_sum_node();
             for child in children {
-                spn.add_spnode_output(child, node);
+                dac.add_circuit_node_output(child, node);
             }
             Some(node)
         } else {
@@ -104,26 +102,26 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, spn: &mut Dac, component: ComponentIndex) -> Option<CircuitNodeIndex> {
+    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex) -> Option<CircuitNodeIndex> {
         let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
-            let node = spn.add_prod_node();
+            let node = dac.add_prod_node();
             for (distribution, variable, value) in self.propagator.assignments_iter() {
                 if value {
                     let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
-                    spn.add_distribution_output(distribution, node, value_id);
+                    dac.add_distribution_output(distribution, node, value_id);
                 }
             }
         
             for distribution in self.propagator.unconstrained_distributions_iter() {
                 if self.graph.distribution_number_false(distribution, &self.state) != 0 {
-                    let sum_node = spn.add_sum_node();
+                    let sum_node = dac.add_sum_node();
                     for variable in self.graph.distribution_variable_iter(distribution) {
                         if !self.graph.is_variable_fixed(variable, &self.state) {
                             let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
-                            spn.add_distribution_output(distribution, sum_node, value_id);
+                            dac.add_distribution_output(distribution, sum_node, value_id);
                         }
                     }
-                    spn.add_spnode_output(sum_node, node);
+                    dac.add_circuit_node_output(sum_node, node);
                 }
             }
             Some(node)
@@ -137,7 +135,7 @@ where
                 match self.cache.get(&bit_repr) {
                     None => {
                         if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &self.state, &self.component_extractor, sub_component) {
-                            if let Some(child) = self.expand_sum_node(spn, sub_component, distribution) {
+                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution) {
                                 sum_children.push(child);
                                 self.cache.insert(bit_repr, Some(child));
                             } else {
@@ -166,11 +164,11 @@ where
             }
         }
         if !sum_children.is_empty() && prod_node.is_none() {
-            prod_node = Some(spn.add_prod_node());
+            prod_node = Some(dac.add_prod_node());
         }
         if let Some(node) = prod_node {
             for child in sum_children {
-                spn.add_spnode_output(child, node);
+                dac.add_circuit_node_output(child, node);
             }
         }
         prod_node
@@ -185,14 +183,14 @@ where
             Err(_) => None,
             Ok(_) => {
                 self.branching_heuristic.init(&self.graph, &self.state);
-                let mut spn = Dac::new(&self.graph);
-                match self.expand_prod_node(&mut spn, ComponentIndex(0)) {
+                let mut dac = Dac::new(&self.graph);
+                match self.expand_prod_node(&mut dac, ComponentIndex(0)) {
                     None => None,
                     Some(_) => {
-                        spn.remove_dead_ends();
-                        spn.reduce();
-                        spn.layerize();
-                        Some(spn)
+                        dac.remove_dead_ends();
+                        dac.reduce();
+                        dac.layerize();
+                        Some(dac)
                     }
                 }
             }

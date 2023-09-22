@@ -57,7 +57,7 @@ pub struct ComponentExtractor {
     /// vector
     clauses: Vec<ClauseIndex>,
     /// The vector mapping for each `ClauseIndex` its position in `clauses`
-    positions: Vec<usize>,
+    clause_positions: Vec<usize>,
     /// Holds the components computed by the extractor during the search
     components: Vec<Component>,
     /// The index of the first component of the current node in the search tree
@@ -110,7 +110,7 @@ impl ComponentExtractor {
     /// Creates a new component extractor for the implication graph `g`
     pub fn new(g: &Graph, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_clauses()).map(ClauseIndex).collect();
-        let positions = (0..g.number_clauses()).collect();
+        let clause_positions = (0..g.number_clauses()).collect();
         let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
         let distribution_positions = (0..g.number_distributions()).collect();
         let components = vec![Component {
@@ -122,7 +122,7 @@ impl ComponentExtractor {
         }];
         Self {
             clauses: nodes,
-            positions,
+            clause_positions,
             components,
             base: state.manage_usize(0),
             limit: state.manage_usize(1),
@@ -146,7 +146,7 @@ impl ComponentExtractor {
     ) -> bool {
         // if the clause has already been visited, then its position in the component must
         // be between [start..(start + size)].
-        let clause_pos = self.positions[clause.0];
+        let clause_pos = self.clause_positions[clause.0];
         g.is_clause_constrained(clause, state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
     }
     
@@ -171,15 +171,15 @@ impl ComponentExtractor {
         if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
             *hash ^= g.get_clause_random(clause);
             // The clause is swap with the clause at position comp_sart + comp_size
-            let current_pos = self.positions[clause.0];
+            let current_pos = self.clause_positions[clause.0];
             let new_pos = comp_start + *comp_size;
             // Only move the nodes if it is not already in position
             // Not sure if this optimization is worth in practice
             if new_pos != current_pos {
                 let moved_node = self.clauses[new_pos];
                 self.clauses.as_mut_slice().swap(new_pos, current_pos);
-                self.positions[clause.0] = new_pos;
-                self.positions[moved_node.0] = current_pos;
+                self.clause_positions[clause.0] = new_pos;
+                self.clause_positions[moved_node.0] = current_pos;
             }
             *comp_size += 1;
             
@@ -329,6 +329,7 @@ impl ComponentExtractor {
         let end = start + self.components[component.0].number_distribution;
         self.distributions[start..end].iter().copied()
     }
+
 }
 
 /// This structure is used to implement a simple component detector that always returns one
@@ -433,7 +434,7 @@ mod test_component_detection {
         let mut state = StateManager::default();
         let g = get_graph(&mut state);
         let extractor = ComponentExtractor::new(&g, &mut state);
-        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.positions);
+        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 6, (0..6).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
         assert_eq!(0, state.get_usize(extractor.base));
         assert_eq!(1, state.get_usize(extractor.limit));
@@ -450,7 +451,7 @@ mod test_component_detection {
         extractor.detect_components(&mut g, &mut state, ComponentIndex(0), &mut propagator);
 
         assert_eq!(2, extractor.number_components(&state));
-        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.positions);
+        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 4, (0..4).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
         check_component(&extractor, 5, 6, vec![ClauseIndex(5)]);
 
@@ -473,7 +474,7 @@ mod test_component_detection {
         extractor.detect_components(&mut g, &mut state, ComponentIndex(0), &mut propagator);
 
         assert_eq!(2, extractor.number_components(&state));
-        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.positions);
+        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 4, (0..4).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
         check_component(&extractor, 5, 6, vec![ClauseIndex(5)]);
         
@@ -487,13 +488,13 @@ mod test_component_detection {
         state.restore_state();
 
         assert_eq!(2, extractor.number_components(&state));
-        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.positions);
+        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 4, (0..4).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
         check_component(&extractor, 5, 6, vec![ClauseIndex(5)]);
 
         state.restore_state();
         
-        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.positions);
+        assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 6, (0..6).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
     }
 }
