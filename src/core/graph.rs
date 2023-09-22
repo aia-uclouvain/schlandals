@@ -642,6 +642,46 @@ impl Graph {
         }
     }
     
+    fn get_distribution_maximum(&self, distribution: DistributionIndex, state: &StateManager) -> f64 {
+        let mut max = 0.0;
+        for v in self.distribution_variable_iter(distribution) {
+            if !self.is_variable_fixed(v, state) {
+                let proba = self.get_variable_weight(v).unwrap();
+                if max < proba {
+                    max = proba;
+                }
+            }
+        }
+        max
+    }
+
+    /// Returns the distribution with the unassgined variable with the highest probability.
+    pub fn get_clause_active_distribution_highest_value(&self, clause: ClauseIndex, state: &StateManager) -> Option<(DistributionIndex, f64)> {
+        let number_probabilistic_watched = self.get_clause_body_bounds_probabilistic(clause, state);
+        if number_probabilistic_watched == 0 {
+            None
+        } else if number_probabilistic_watched == 1 {
+            let d = self.get_variable_distribution(self.clauses[clause.0].body_probabilistic[0]).unwrap();
+            let proba = self.get_distribution_maximum(d, state);
+            Some((d, proba))
+        } else {
+            let d1 = self.get_variable_distribution(self.clauses[clause.0].body_probabilistic[0]).unwrap();
+            let d2 = self.get_variable_distribution(self.clauses[clause.0].body_probabilistic[1]).unwrap();            
+            if d1 == d2 {
+                let proba_1 = self.get_distribution_maximum(d1, state);
+                Some((d1, proba_1))
+            } else {
+                let proba_1 = self.get_distribution_maximum(d1, state);
+                let proba_2 = self.get_distribution_maximum(d2, state);
+                if proba_1 < proba_2 {
+                    Some((d2, proba_2))
+                } else {
+                    Some((d1, proba_1))
+                }
+            }
+        }
+    }
+    
     /// Returns the number of constrained parents of the clause
     pub fn get_clause_number_parents(&self, clause: ClauseIndex, state: &StateManager) -> usize {
         self.clauses[clause.0].parents.len(state)

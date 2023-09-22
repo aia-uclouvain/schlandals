@@ -29,7 +29,7 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::heuristics::branching::BranchingDecision;
+use crate::heuristics::BranchingDecision;
 use crate::propagator::SearchPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;

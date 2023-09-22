@@ -161,6 +161,12 @@ impl PyDac {
         self.dac.get_distribution_domain_size(DistributionNodeIndex(distribution))
     }
     
+    /// Returns the pair (circuit node, value index) of the output of the distribution at its given output-index
+    pub fn get_distribution_node_output_at(&self, distribution: usize, index: usize) -> (usize, usize) {
+        let x = self.dac.get_distribution_output_at(DistributionNodeIndex(distribution), index);
+        (x.0.0, x.1)
+    }
+    
     /// Returns the probability, of the given distribution, at the given index 
     pub fn get_distribution_probability(&self, distribution: usize, probability_index: usize) -> f64 {
     self.dac.get_distribution_probability_at(DistributionNodeIndex(distribution), probability_index)

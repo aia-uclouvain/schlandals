@@ -70,6 +70,7 @@ pub struct CircuitNode {
 /// A distribution node, an input of the circuit. Each distribution node holds the distribution's parameter as well as the outputs.
 /// For each output node, it also stores the value that must be sent to the output (as an index of the probability vector).
 struct DistributionNode {
+    
     /// Probabilities of the distribution
     probabilities: Vec<f64>,
     /// Outputs of the node
@@ -157,7 +158,7 @@ impl Dac {
     
     /// Adds `output` to the outputs of `node` and `node` to the inputs of `output`. Note that this
     /// function uses the vectors in each node. They are transferred afterward in the `outputs` vector.
-    pub fn add_spnode_output(&mut self, node: CircuitNodeIndex, output: CircuitNodeIndex) {
+    pub fn add_circuit_node_output(&mut self, node: CircuitNodeIndex, output: CircuitNodeIndex) {
         self.nodes[node.0].outputs.push(output);
         self.nodes[node.0].number_outputs += 1;
         self.nodes[output.0].inputs.insert(node);
@@ -507,6 +508,16 @@ impl Dac {
     /// Returns the probability at the given index of the given distribution
     pub fn get_distribution_probability_at(&self, distribution: DistributionNodeIndex, index: usize) -> f64 {
         self.distribution_nodes[distribution.0].probabilities[index]
+    }
+    
+    /// Returns the pair (circuit_node, index) for the output of the distribution at the given index
+    pub fn get_distribution_output_at(&self, distribution: DistributionNodeIndex, index: usize) -> (CircuitNodeIndex, usize) {
+        self.distribution_nodes[distribution.0].outputs[index]
+    }
+    
+    /// Returns the number of output of a distribution node
+    pub fn get_distribution_number_output(&self, distribution: DistributionNodeIndex) -> usize {
+        self.distribution_nodes[distribution.0].outputs.len()
     }
     
     // --- SETTERS --- //
