@@ -733,6 +733,11 @@ impl Graph {
     pub fn variable_clause_head_iter(&self, variable: VariableIndex) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.variables[variable.0].clauses_head.iter().copied()
     }
+    
+    /// Returns an iterator over the variable in the problem
+    pub fn variables_iter(&self) -> impl Iterator<Item = VariableIndex> + '_ {
+        (0..self.variables.len()).map(VariableIndex)
+    }
 
     /// Returns an iterator over all the variable (fixed and not fixed) in a distribution
     pub fn distribution_variable_iter(&self, distribution: DistributionIndex) -> impl Iterator<Item = VariableIndex> {
@@ -756,6 +761,29 @@ impl Graph {
         self.clauses[clause.0].body_probabilistic.iter().copied()
     }
     
+}
+
+impl Graph {
+
+    pub fn to_dimacs(&self, state: &StateManager) -> String {
+        let mut out = String::new();
+        let number_variables = self.variables_iter().filter(|v| !self.is_variable_fixed(*v, state)).count();
+        let number_clauses = self.clause_iter().filter(|c| self.is_clause_constrained(*c, state)).count();
+        out.push_str(&format!("p cnf {} {}\n", number_variables, number_clauses));
+        for distribution in self.distributions_iter() {
+            let values: Vec<String> = self.distribution_variable_iter(distribution).map(|v| format!("{}", self.get_variable_weight(v).unwrap())).collect();
+            out.push_str(&format!("c p distribution {}\n", values.join(" ")));
+        }
+        for clause in (0..self.number_clauses()).map(ClauseIndex) {
+            if self.is_clause_constrained(clause, state) {
+                let body: Vec<String> = self.clause_body_iter(clause).filter(|v| !self.is_variable_fixed(*v, state)).map(|v| format!("-{}", v.0 + 1)).collect();
+                let h = self.get_clause_head(clause);
+                let head: Vec<String> = if self.is_variable_fixed(h, state) { vec![] } else { vec![format!("{}", h.0 + 1)] };
+                out.push_str(&format!("{} {} 0\n", body.join(" "), head.join(" ")));
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]

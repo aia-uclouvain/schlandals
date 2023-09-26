@@ -17,6 +17,7 @@
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::Write;
+use preprocessing::Preprocessor;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use rug::Float;
@@ -39,6 +40,7 @@ mod compiler;
 mod search;
 mod parser;
 mod propagator;
+mod preprocessing;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -183,5 +185,26 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
             mlimit,
         );
         solver.solve()
+    }
+}
+
+pub fn preprocess(input: PathBuf, branching: Branching, output: PathBuf, backbone: bool) {
+    let mut state = StateManager::default();
+    let mut propagator = SearchPropagator::new();
+    let mut graph = parser::graph_from_ppidimacs(&input, &mut state, &mut propagator);
+    let mut component_extractor = ComponentExtractor::new(&graph, &mut state);
+    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+        Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+        Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::MaxProbability => Box::<MaxProbability>::default(),
+    };
+    let mut preprocessor = Preprocessor::new(&mut graph, &mut state, branching_heuristic.as_mut(), &mut propagator, &mut component_extractor);
+    preprocessor.preprocess(backbone);
+    let out = graph.to_dimacs(&state);
+    let mut outfile = File::create(output).unwrap();
+    match outfile.write(out.as_bytes()) {
+        Ok(_) => (),
+        Err(e) => println!("Culd not write the preprocessed problem into the file: {:?}", e),
     }
 }

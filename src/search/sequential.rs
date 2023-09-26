@@ -30,19 +30,14 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::heuristics::BranchingDecision;
+use crate::preprocessing::Preprocessor;
 use crate::propagator::SearchPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
+use crate::search::*;
 
 use rug::Float;
-
-/// Unit structure representing the the problem is UNSAT
-#[derive(Debug)]
-pub struct Unsat;
-
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-type ProblemSolution = Result<Float, Unsat>;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -182,15 +177,10 @@ where
     }
     
     fn solve_by_search(&mut self) -> ProblemSolution {
-        // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
-        // because we need it to parse the input file as some variables might be detected as always being true or false.
-        self.propagator.set_number_clauses(self.graph.number_clauses());
-        // Doing an initial propagation to detect some UNSAT formula from the start
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
-            Err(_) => ProblemSolution::Err(Unsat),
-            Ok(_) => {
-                let p = self.propagator.get_propagation_prob().clone();
-                // Checks if there are still constrained clauses in the graph
+        let mut preprocessor = Preprocessor::new(&mut self.graph, & mut self.state, self.branching_heuristic, & mut self.propagator, & mut self.component_extractor);
+        match preprocessor.preprocess(true) {
+            None => ProblemSolution::Err(Unsat),
+            Some(p) => {
                 let mut has_constrained = false;
                 for clause in self.graph.clause_iter() {
                     if self.graph.is_clause_constrained(clause, &self.state) {
@@ -210,9 +200,8 @@ where
                 }
             }
         }
-
     }
-    
+
     /// Solve the problems represented by the graph with the given branching heuristic.
     /// It finds all the assignments to the probabilistic variables for which there
     /// exists an assignment to the deterministic variables that respect the constraints.

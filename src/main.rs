@@ -83,7 +83,22 @@ enum Command {
         /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
-    }
+    },
+    /// DPLL-style search based solver.
+    Preprocess {
+        /// The input file
+        #[clap(short, long, value_parser)]
+        input: PathBuf,
+        /// How to branch
+        #[clap(short, long, value_enum)]
+        branching: schlandals::Branching,
+        #[clap(short, long, value_parser)]
+        /// In which file to store the pre-processed problem
+        output: PathBuf,
+        /// If present, the backbone of the input formula is computed and used to reduce the problem size
+        #[clap(long, action)]
+        backbone: bool,
+    },
 }
 
 fn main() {
@@ -106,6 +121,9 @@ fn main() {
                 None => println!("Model UNSAT"),
                 Some(p) => println!("{}", p),
             };
+        },
+        Command::Preprocess { input, branching, output, backbone } => {
+            schlandals::preprocess(input, branching, output, backbone);
         }
     }
 }

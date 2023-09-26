@@ -1,0 +1,144 @@
+//Schlandals
+//Copyright (C) 2022-2023 A. Dubray
+//
+//This program is free software: you can redistribute it and/or modify
+//it under the terms of the GNU Affero General Public License as published by
+//the Free Software Foundation, either version 3 of the License, or
+//(at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU Affero General Public License for more details.
+//
+//You should have received a copy of the GNU Affero General Public License
+//along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use search_trail::{StateManager, SaveAndRestore};
+
+use crate::core::components::{ComponentExtractor, ComponentIndex};
+use crate::core::graph::*;
+use crate::heuristics::BranchingDecision;
+use crate::propagator::SearchPropagator;
+use rug::Float;
+
+pub struct Preprocessor<'b, B>
+where
+    B: BranchingDecision + ?Sized,
+{
+    /// Implication graph of the input CNF formula
+    graph: &'b mut Graph,
+    /// State manager that allows to retrieve previous values when backtracking in the search tree
+    state: &'b mut StateManager,
+    /// Heuristics that decide on which distribution to branch next
+    branching_heuristic: &'b mut B,
+    /// The propagator
+    propagator: &'b mut SearchPropagator,
+    /// component extractor
+    component_extractor: &'b mut ComponentExtractor,
+}
+
+impl<'b, B> Preprocessor<'b, B>
+where
+    B: BranchingDecision + ?Sized,
+{
+
+    pub fn new(graph: &'b mut Graph, state: &'b mut StateManager, branching_heuristic: &'b mut B, propagator: &'b mut SearchPropagator, component_extractor: &'b mut ComponentExtractor) -> Self {
+        Self {
+            graph,
+            state,
+            branching_heuristic,
+            propagator,
+            component_extractor,
+        }
+    }
+    
+    pub fn preprocess(&mut self, backbone: bool) -> Option<Float> {
+        self.propagator.set_number_clauses(self.graph.number_clauses());
+        // Doing an initial propagation to detect some UNSAT formula from the start
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
+            Err(_) => None,
+            Ok(_) => {
+                let mut p = self.propagator.get_propagation_prob().clone();
+                if backbone {
+                    let backbone = self.identify_backbone();
+                    for (variable, value) in backbone.iter().copied() {
+                        self.propagator.add_to_propagation_stack(variable, value);
+                    }
+                    if !backbone.is_empty() {
+                        self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor).unwrap();
+                        p *= self.propagator.get_propagation_prob().clone();
+                    }
+                }
+                Some(p)
+            }
+        }
+    }
+
+    fn identify_backbone(&mut self) -> Vec<(VariableIndex, bool)> {
+        let mut backbone: Vec<(VariableIndex, bool)> = vec![];
+        for variable in (0..self.graph.number_variables()).map(VariableIndex) {
+            if !self.graph.is_variable_probabilistic(variable) && !self.graph.is_variable_fixed(variable, &mut self.state) {
+                self.state.save_state();
+                for (v, value) in backbone.iter().copied() {
+                    self.propagator.add_to_propagation_stack(v, value)
+                }
+                self.propagator.add_to_propagation_stack(variable, true);
+                let sat_true = match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor) {
+                    Err(_) => false,
+                    Ok(_) => {
+                        self.sat()
+                    },
+                };
+                self.state.restore_state();
+
+                self.state.save_state();
+                for (v, value) in backbone.iter().copied() {
+                    self.propagator.add_to_propagation_stack(v, value)
+                }
+                let sat_false = match self.propagator.propagate_variable(variable, false, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor) {
+                    Err(_) => false,
+                    Ok(_) => {
+                        self.sat()
+                    },
+                };
+                self.state.restore_state();
+                if !sat_true {
+                    backbone.push((variable, false));
+                }
+                if !sat_false {
+                    backbone.push((variable, true));
+                }
+            }
+        }
+        backbone
+    }
+    
+    fn sat(&mut self) -> bool {
+        let decision = self.branching_heuristic.branch_on(
+            &self.graph,
+            &self.state,
+            &self.component_extractor,
+            ComponentIndex(0),
+        );
+        if let Some(distribution) = decision {
+            for variable in self.graph.distribution_variable_iter(distribution) {
+                self.state.save_state();
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
+                    Err(_) => {
+                    }
+                    Ok(_) => {
+                        if self.sat() {
+                            self.state.restore_state();
+                            return true;
+                        }
+                    }
+                };
+                self.state.restore_state();
+            }
+            false
+        } else {
+            true
+        }
+    }
+}

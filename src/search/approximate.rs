@@ -34,15 +34,9 @@ use crate::propagator::MixedPropagator;
 use crate::search::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
+use crate::search::*;
 
 use rug::Float;
-
-/// Unit structure representing the the problem is UNSAT
-#[derive(Debug)]
-pub struct Unsat;
-
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-type ProblemSolution = Result<Float, Unsat>;
 
 type ProbaMassIn = Float;
 type ProbaMassOut = Float;

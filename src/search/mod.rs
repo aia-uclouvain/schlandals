@@ -14,6 +14,8 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use rug::Float;
+
 pub mod sequential;
 pub mod approximate;
 mod statistics;
@@ -25,3 +27,10 @@ pub type ExactDefaultSolver<'b, B> = ExactSolver<'b, B, true>;
 pub type ExactQuietSolver<'b, B> = ExactSolver<'b, B, false>;
 pub type ApproximateDefaultSolver<'b, B> = ApproximateSolver<'b, B, true>;
 pub type ApproximateQuietSolver<'b, B> = ApproximateSolver<'b, B, false>;
+
+/// Unit structure representing the the problem is UNSAT
+#[derive(Debug)]
+pub struct Unsat;
+
+/// Type alias used for the solution of the problem, which is either a Float or UNSAT
+pub type ProblemSolution = Result<Float, Unsat>;
