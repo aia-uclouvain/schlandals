@@ -30,8 +30,8 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::heuristics::BranchingDecision;
-use crate::propagator::MixedPropagator;
-use crate::search::statistics::Statistics;
+use crate::propagator::Propagator;
+use super::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
 
@@ -42,7 +42,7 @@ use rug::Float;
 pub struct Unsat;
 
 /// Type alias used for the solution of the problem, which is either a Float or UNSAT
-type ProblemSolution = Result<Float, Unsat>;
+pub type ProblemSolution = Result<Float, Unsat>;
 
 type ProbaMassIn = Float;
 type ProbaMassOut = Float;
@@ -50,7 +50,7 @@ type NodeSolution = (ProbaMassIn, ProbaMassOut);
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct Solver<'b, B, const S: bool>
+pub struct SearchSolver<'b, B, const S: bool>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -63,20 +63,18 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: MixedPropagator,
+    propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, NodeSolution>,
     /// Statistics collectors
     statistics: Statistics<S>,
     /// Memory limit allowed for the solver. This is a global memory limit, not a cache-size limit
     mlimit: u64,
-    /// The quality of the approximation. If p* is the true probability, the solver returns a probability p such that (p*/(1+e)) <= p <= (1+e)p*
-    epsilon: f64,
     /// Vector used to store probability mass out of the distribution in each node
     distribution_out_vec: Vec<f64>,
 }
 
-impl<'b, B, const S: bool> Solver<'b, B, S>
+impl<'b, B, const S: bool> SearchSolver<'b, B, S>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -85,9 +83,8 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: MixedPropagator,
+        propagator: Propagator,
         mlimit: u64,
-        epsilon: f64,
     ) -> Self {
         let cache = FxHashMap::default();
         let distribution_out_vec = vec![0.0; graph.number_distributions()];
@@ -100,25 +97,30 @@ where
             cache,
             statistics: Statistics::default(),
             mlimit,
-            epsilon,
             distribution_out_vec,
         }
     }
 
     /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, should_appoximate: bool) -> NodeSolution {
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, epsilon: f64, number_component: usize) -> NodeSolution {
         self.statistics.cache_access();
         let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
         match self.cache.get(&bit_repr) {
             None => {
                 self.statistics.cache_miss();
-                let f = self.choose_and_branch(component, should_appoximate);
+                let f = self.choose_and_branch(component, level, epsilon, number_component);
                 self.cache.insert(bit_repr, f.clone());
                 f
             },
             Some(f) => {
-                f.clone()
+                if self.are_bounds_tight_enough(f.0.clone(), f.1.clone(), epsilon, number_component) {
+                    f.clone()
+                } else {
+                    let f = self.choose_and_branch(component, level, epsilon, number_component);
+                    self.cache.insert(bit_repr, f.clone());
+                    f
+                }
             }
         }
     }
@@ -126,7 +128,7 @@ where
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
     /// solution of the component.
     /// The solution is the sum of the probability of the SAT children.
-    fn choose_and_branch(&mut self, component: ComponentIndex, should_appoximate: bool) -> NodeSolution {
+    fn choose_and_branch(&mut self, component: ComponentIndex, level: isize, epsilon: f64, number_component: usize) -> NodeSolution {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
             &self.state,
@@ -137,56 +139,51 @@ where
             self.statistics.or_node();
             let mut p_in = f128!(0.0);
             let mut p_out = f128!(0.0);
-            let mut variables_to_branch = self.graph.distribution_variable_iter(distribution).filter(|v| !self.graph.is_variable_fixed(*v, &self.state)).collect::<Vec<VariableIndex>>();
-            variables_to_branch.sort_unstable_by(|a, b| {
-                let wa = self.graph.get_variable_weight(*a).unwrap();
-                let wb = self.graph.get_variable_weight(*b).unwrap();
-                wa.partial_cmp(&wb).unwrap()
-            });
-            for variable in variables_to_branch.iter().copied().rev() {
-                if !self.graph.is_variable_fixed(variable, &self.state) {
-                    let v_weight = self.graph.get_variable_weight(variable).unwrap();
-                    self.state.save_state();
-                    match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
-                        Err(_) => {
-                            p_out += v_weight;
-                        },
-                        Ok(_) => {
-                            let v = self.propagator.get_propagation_prob().clone();
-                            if v != 0.0 {
-                                let mut removed_proba = f128!(1.0);
-                                let mut has_removed = false;
-                                self.distribution_out_vec.fill(0.0);
-                                for (d, variable, value) in self.propagator.assignments_iter().filter(|a| a.0 != distribution) {
-                                    let weight = self.graph.get_variable_weight(variable).unwrap();
-                                    if !value {
-                                        has_removed = true;
-                                        self.distribution_out_vec[d.0] += weight;
-                                    }
-                                }
-                                if has_removed {
-                                    for v in self.distribution_out_vec.iter().copied() {
-                                        removed_proba *= 1.0 - v;
-                                    }
-                                }
-                                p_out += v_weight * (1.0 - removed_proba);
-                                let child_sol = self._solve(component, should_appoximate);
-                                p_in += child_sol.0 * &v;
-                                p_out += child_sol.1 * &v;
-                                let lb = p_in.clone();
-                                let ub = 1.0 - p_out.clone();
-                                if should_appoximate && self.are_bounds_tight_enough(lb, ub) {
-                                    self.state.restore_state();
-                                    return (p_in, p_out);
-                                }
-                            } else {
-                                p_out += v_weight;
-                            }
-
-                        }
-                    };
-                    self.state.restore_state();
+            for variable in self.graph[distribution].iter_variables() {
+                if self.graph[variable].is_fixed(&self.state) {
+                    continue;
                 }
+                let v_weight = self.graph[variable].weight().unwrap();
+                self.state.save_state();
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor, level) {
+                    Err(_) => {
+                        p_out += v_weight;
+                    },
+                    Ok(_) => {
+                        let v = self.propagator.get_propagation_prob().clone();
+                        if v != 0.0 {
+                            let mut removed_proba = f128!(1.0);
+                            let mut has_removed = false;
+                            self.distribution_out_vec.fill(0.0);
+                            for (d, v, value) in self.propagator.assignments_iter().filter(|a| a.0 != distribution) {
+                                let weight = self.graph[v].weight().unwrap();
+                                if !value {
+                                    has_removed = true;
+                                    self.distribution_out_vec[d.0] += weight;
+                                }
+                            }
+                            if has_removed {
+                                for v in self.distribution_out_vec.iter().copied() {
+                                    removed_proba *= 1.0 - v;
+                                }
+                            }
+                            p_out += v_weight * (1.0 - removed_proba);
+                            let child_sol = self._solve(component, level+1, epsilon);
+                            p_in += child_sol.0 * &v;
+                            p_out += child_sol.1 * &v;
+                            let lb = p_in.clone();
+                            let ub = 1.0 - p_out.clone();
+                            if self.are_bounds_tight_enough(lb, ub, epsilon, number_component) {
+                                self.state.restore_state();
+                                return (p_in, p_out);
+                            }
+                        } else {
+                            p_out += v_weight;
+                        }
+
+                    }
+                };
+                self.state.restore_state();
             }
             (p_in, p_out)
         } else {
@@ -197,7 +194,7 @@ where
     }
 
     /// Solves the problem for the sub-graph identified by component.
-    pub fn _solve(&mut self, component: ComponentIndex, should_approximate: bool) -> NodeSolution {
+    pub fn _solve(&mut self, component: ComponentIndex, level: isize, epsilon: f64) -> NodeSolution {
         // If the memory limit is reached, clear the cache.
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.cache.clear();
@@ -214,11 +211,11 @@ where
             .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
         {
             self.statistics.and_node();
-            self.statistics
-                .decomposition(self.component_extractor.number_components(&self.state));
-            let should_approximate = should_approximate & (self.component_extractor.number_components(&self.state) == 1);
+            let number_component = self.component_extractor.number_components(&self.state);
+            self.statistics.decomposition(number_component);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let cache_solution = self.get_cached_component_or_compute(sub_component, should_approximate);
+                let new_epsilon = epsilon;
+                let cache_solution = self.get_cached_component_or_compute(sub_component, level, new_epsilon, number_component);
                 p_in *= &cache_solution.0;
                 p_out *= 1.0 - cache_solution.1;
                 if p_in == 0.0 {
@@ -230,37 +227,38 @@ where
         (p_in, 1.0 - p_out)
     }
     
-    fn solve_by_search(&mut self) -> ProblemSolution {
+    pub fn solve(&mut self, epsilon: f64) -> ProblemSolution {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
-        self.propagator.set_number_clauses(self.graph.number_clauses());
+        self.propagator.init(self.graph.number_clauses());
         // Doing an initial propagation to detect some UNSAT formula from the start
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
-            Err(_) => ProblemSolution::Err(Unsat),
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor, 0) {
+            Err(_) => {
+                self.statistics.unsat();
+                ProblemSolution::Err(Unsat)
+            },
             Ok(_) => {
                 let mut p_in = f128!(1.0);
                 let mut p_out = f128!(1.0);
                 
                 for distribution in self.graph.distributions_iter() {
-                    if self.graph.distribution_number_false(distribution, &self.state) > 0 {
-                        let mut sum_neg = 0.0;
-                        for variable in self.graph.distribution_variable_iter(distribution) {
-                            if let Some(v) = self.graph.get_variable_value(variable, &self.state) {
-                                if v {
-                                    p_in *= self.graph.get_variable_weight(variable).unwrap();
-                                    sum_neg = 0.0;
-                                    break;
-                                } else {
-                                    sum_neg += self.graph.get_variable_weight(variable).unwrap();
-                                }
+                    let mut sum_neg = 0.0;
+                    for variable in self.graph[distribution].iter_variables() {
+                        if let Some(v) = self.graph[variable].value(&self.state) {
+                            if v {
+                                p_in *= self.graph[variable].weight().unwrap();
+                                sum_neg = 0.0;
+                                break;
+                            } else {
+                                sum_neg += self.graph[variable].weight().unwrap();
                             }
                         }
-                        p_out *= 1.0 - sum_neg;
                     }
+                    p_out *= 1.0 - sum_neg;
                 }
                 p_out = 1.0 - p_out;
                 self.branching_heuristic.init(&self.graph, &self.state);
-                let solution = self._solve(ComponentIndex(0), true);
+                let solution = self._solve(ComponentIndex(0), 1, epsilon);
                 self.statistics.print();
                 let ub: Float = 1.0 - solution.1*(1.0 - p_out);
                 let proba = p_in * (solution.0 * &ub).sqrt();
@@ -269,22 +267,7 @@ where
         }
     }
     
-    fn are_bounds_tight_enough(&self, lb: Float, ub: Float) -> bool {
-        ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0)
-    }
-    
-    /// Solve the problems represented by the graph with the given branching heuristic.
-    /// It finds all the assignments to the probabilistic variables for which there
-    /// exists an assignment to the deterministic variables that respect the constraints.
-    /// Each assignment is weighted by the product of the probabilistic variables assigned to true.
-    pub fn solve(&mut self) -> Option<Float> {
-        match self.solve_by_search() {
-            Ok(p) => {
-                Some(p)
-            }
-            Err(_) => {
-                None
-            }
-        }
+    fn are_bounds_tight_enough(&self, lb: Float, ub: Float, epsilon: f64, number_component: usize) -> bool {
+        ub <= lb.clone()*(1.0 + epsilon).powf(2.0 / number_component as f64)
     }
 }

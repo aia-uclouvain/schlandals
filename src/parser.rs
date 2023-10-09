@@ -43,100 +43,81 @@
 //!     2. The head of the implications can not be a probabilistic variable
 
 use crate::core::graph::{Graph, VariableIndex};
-use crate::propagator::FTReachablePropagator;
+use super::core::literal::Literal;
 use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-pub fn graph_from_ppidimacs<const C: u8>(
+pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
-    propagator: &mut FTReachablePropagator<C>,
 ) -> Graph {
-    let mut g = Graph::new(state);
     let file = File::open(filepath).unwrap();
-    let reader = BufReader::new(file);
-    let mut number_nodes: Option<usize> = None;
-    let mut distribution_definition_finished = false;
-    let mut line_count = 0;
-    for line in reader.lines() {
-        let l = line.unwrap();
-        if l.starts_with("p cnf") {
-            // Header, parse the number of clauses and variables
-            let mut split = l.split_whitespace();
-            number_nodes = Some(split.nth(2).unwrap().parse::<usize>().unwrap());
-        } else if l.starts_with("c p distribution") {
-            if distribution_definition_finished {
-                panic!("[Parsing error at line {}] All distribution should be defined before the clauses", line_count);
-            }
-            let split = l
-                .split_whitespace()
-                .skip(3)
-                .map(|token| token.parse::<f64>().unwrap())
-                .collect::<Vec<f64>>();
-            let nodes = g.add_distribution(&split, state);
-            for i in 0..split.len() {
-                if propagator.is_search() && split[i] == 1.0 {
-                    propagator.add_to_propagation_stack(nodes[i], true);
+    let mut reader = BufReader::new(&file);
+    let mut header = String::new();
+    match reader.read_line(&mut header) {
+        Ok(_) => {},
+        Err(e) => panic!("Error while getting the header: {}",e),
+    };
+    let mut split_header = header.split_whitespace();
+
+    let number_var = split_header.nth(2).unwrap().parse::<usize>().unwrap();
+    let number_clauses = split_header.next().unwrap().parse::<usize>().unwrap();
+    let mut number_probabilistic = 0;
+    
+    let mut g = Graph::new(state, number_var, number_clauses);
+    
+    let mut distributions: Vec<Vec<f64>> = vec![];
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Problem while reading file: {}", e),
+            Ok(line) => {
+                if line.starts_with("c p distribution") {
+                    let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
+                    number_probabilistic += weights.len();
+                    distributions.push(weights);
                 }
-            }
-        } else if l.starts_with('c'){
-            continue;
-        } else {
-            // First line for the clauses
-            if number_nodes.is_none() {
-                panic!("[Parsing error at line {}] The head ``p cnf n m`` is not defined before the clauses", line_count);
-            }
-            if !distribution_definition_finished {
-                distribution_definition_finished = true;
-                let current_number_of_nodes = g.number_variables();
-                for _ in current_number_of_nodes..number_nodes.unwrap() {
-                    g.add_variable(false, None, None, state);
-                }
-            }
-            // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
-            for clause in l.split(" 0").filter(|cl| !cl.is_empty()) {
-                let split = clause.split_whitespace().collect::<Vec<&str>>();
-                let positive_literals = split
-                    .iter()
-                    .filter(|x| !x.starts_with('-'))
-                    .map(|x| x.parse::<usize>().unwrap() - 1)
-                    .collect::<Vec<usize>>();
-                let negative_literals = split
-                    .iter()
-                    .filter(|x| x.starts_with('-'))
-                    .map(|x| (-x.parse::<isize>().unwrap()) - 1)
-                    .collect::<Vec<isize>>();
-                if positive_literals.len() > 1 {
-                    panic!("[Parsing error at line {}] There are more than one positive literals in this clause", line_count);
-                }
-                let head = if positive_literals.is_empty() {
-                    // There is no head in this clause, so it is just a clause of the form
-                    //      n1 && n2 && ... && nn =>
-                    //  which, in our model implies that the head is false (otherwise it does not
-                    //  constrain the problem)
-                    let n = g.add_variable(false, None, None, state);
-                    propagator.add_to_propagation_stack(n, false);
-                    n
-                } else {
-                    VariableIndex(positive_literals[0])
-                };
-                let body = if negative_literals.is_empty() {
-                    let n = g.add_variable(false, None, None, state);
-                    propagator.add_to_propagation_stack(n, true);
-                    vec![n]
-                } else {
-                    negative_literals
-                        .iter()
-                        .copied()
-                        .map(|x| VariableIndex(x as usize))
-                        .collect::<Vec<VariableIndex>>()
-                };
-                g.add_clause(head, body, state);
             }
         }
-        line_count += 1;
+    }
+    
+    g.add_distributions(&distributions, state);
+    
+    // Second pass to parse the clauses
+    let file = File::open(filepath).unwrap();
+    let reader = BufReader::new(file);
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Problem while reading file: {}", e),
+            Ok(line) => {
+                if !line.starts_with('c') && !line.starts_with('p') {
+                    // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
+                    for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                        let mut literals: Vec<Literal> = vec![];
+                        let mut head: Option<Literal> = None;
+                        for lit in clause.split_whitespace() {
+                            let trail_value_index = g[VariableIndex(lit.parse::<isize>().unwrap().abs() as usize - 1)].get_value_index();
+                            let literal = Literal::from_str(lit, trail_value_index);
+                            if literal.to_variable().0 < number_probabilistic {
+                                // The variable is probabilistic, put at the end of the vector
+                                literals.push(literal);
+                            } else {
+                                // The variable is deterministic, put at the beginning of the vector
+                                literals.insert(0, literal);
+                            }
+                            if literal.is_positive() {
+                                if head.is_some() {
+                                    panic!("The clause {} has multiple positive literals", line);
+                                }
+                                head = Some(literal);
+                            }
+                        }
+                        g.add_clause(literals, head, state, false);
+                    }
+                }
+            }
+        }
     }
     g
 }

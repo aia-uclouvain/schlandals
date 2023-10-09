@@ -35,4 +35,3 @@ pub trait BranchingDecision {
 }
 
 pub mod branching_exact;
-pub mod branching_approximate;

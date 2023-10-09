@@ -66,12 +66,6 @@ impl<const B: bool> Statistics<B> {
        } 
     }
     
-    pub fn propagation(&mut self) {
-        if B {
-            self.number_propagation += 1;
-        }
-    }
-
     pub fn print(&self) {
         if B {
             println!("{}", self);
