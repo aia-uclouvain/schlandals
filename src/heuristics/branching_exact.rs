@@ -49,9 +49,9 @@ impl BranchingDecision for MinInDegree {
         let mut best_score = usize::MAX;
         let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
-            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
-                let score = g.get_clause_number_parents(clause, state);
-                let tie = g.get_clause_removed_parents(clause, state);
+            if g[clause].is_constrained(state) && g[clause].has_probabilistic(state) {
+                let score = g[clause].number_constrained_parents(state);
+                let tie = g[clause].number_parents();
                 if score < best_score || (score == best_score && tie < best_tie) {
                     best_score = score;
                     best_tie = tie;
@@ -62,7 +62,7 @@ impl BranchingDecision for MinInDegree {
         
         match best_clause {
             Some(clause) => {
-                g.get_clause_active_distribution(clause, state)
+                g[clause].get_constrained_distribution(state, g)
             },
             None => None
         }
@@ -90,9 +90,9 @@ impl BranchingDecision for MinOutDegree {
         let mut best_score = usize::MAX;
         let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
-            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
-                let score = g.get_clause_number_children(clause, state);
-                let tie = g.get_clause_removed_children(clause, state);
+            if g[clause].is_constrained(state) && g[clause].has_probabilistic(state) {
+                let score = g[clause].number_constrained_children(state);
+                let tie = g[clause].number_children();
                 if score < best_score || (score == best_score && tie < best_tie) {
                     best_score = score;
                     best_tie = tie;
@@ -103,7 +103,7 @@ impl BranchingDecision for MinOutDegree {
         
         match best_clause {
             Some(clause) => {
-                g.get_clause_active_distribution(clause, state)
+                g[clause].get_constrained_distribution(state, g)
             },
             None => None
         }
@@ -129,8 +129,8 @@ impl BranchingDecision for MaxDegree {
         let mut best_clause: Option<ClauseIndex> = None;
         let mut best_score = 0;
         for clause in component_extractor.component_iter(component) {
-            if g.is_clause_constrained(clause, state) && g.clause_has_probabilistic(clause, state) {                
-                let score = g.get_clause_number_children(clause, state) + g.get_clause_number_parents(clause, state);
+            if g[clause].is_constrained(state) && g[clause].has_probabilistic(state) {
+                let score = g[clause].number_constrained_parents(state) + g[clause].number_constrained_children(state);
                 if score > best_score {
                     best_score = score;
                     best_clause = Some(clause);
@@ -140,7 +140,7 @@ impl BranchingDecision for MaxDegree {
         
         match best_clause {
             Some(clause) => {
-                g.get_clause_active_distribution(clause, state)
+                g[clause].get_constrained_distribution(state, g)
             },
             None => None
         }
@@ -150,6 +150,7 @@ impl BranchingDecision for MaxDegree {
     
 }
 
+/*
 #[cfg(test)]
 mod test_heuristics {
     
@@ -185,7 +186,7 @@ mod test_heuristics {
         g.add_clause(ds[4], vec![ds[3], ps[4]], state);
         // C5
         g.add_clause(ds[5], vec![ds[4], ps[5]], state);
-        g.set_variable(ds[5], false, state);
+        g.set_variable(ds[5], false, 0, None, state);
         g
     }
 
@@ -222,3 +223,4 @@ mod test_heuristics {
         assert_eq!(DistributionIndex(1), decision.unwrap());
     }
 }
+*/

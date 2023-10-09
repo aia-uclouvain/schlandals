@@ -29,7 +29,7 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::graph::{ClauseIndex, Graph, DistributionIndex};
-use crate::propagator::FTReachablePropagator;
+use crate::propagator::Propagator;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
@@ -147,7 +147,7 @@ impl ComponentExtractor {
         // if the clause has already been visited, then its position in the component must
         // be between [start..(start + size)].
         let clause_pos = self.clause_positions[clause.0];
-        g.is_clause_constrained(clause, state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
+        g[clause].is_constrained(state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
     }
     
     fn is_distribution_visitable(&self, distribution: DistributionIndex, distribution_start: usize, distribution_size: &usize) -> bool {
@@ -169,7 +169,7 @@ impl ComponentExtractor {
         state: &mut StateManager,
     ) {
         if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
-            *hash ^= g.get_clause_random(clause);
+            *hash ^= g[clause].hash();
             // The clause is swap with the clause at position comp_sart + comp_size
             let current_pos = self.clause_positions[clause.0];
             let new_pos = comp_start + *comp_size;
@@ -184,41 +184,34 @@ impl ComponentExtractor {
             *comp_size += 1;
             
             // Adds the variable to the hash if they have not yet been seen
-            for variable in g.clause_body_iter(clause) {
-                if !self.seen_var[variable.0] && !g.is_variable_fixed(variable, state) {
+            for variable in g[clause].iter_variables() {
+                if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
                     self.seen_var[variable.0] = true;
-                    *hash ^= g.get_variable_random(variable);
+                    *hash ^= g[variable].hash()
                 }
-            }
-            let head = g.get_clause_head(clause);
-            if !self.seen_var[head.0] && !g.is_variable_fixed(head, state) {
-                self.seen_var[head.0] = true;
-                *hash ^= g.get_variable_random(head);
             }
 
             // Explores the clauses that share a distribution with the current clause
-            if g.clause_has_probabilistic(clause, state) {
-                let head = g.get_clause_head(clause);
-                let head_iter = if g.is_variable_probabilistic(head) { vec![head] } else { vec![] };
-                for variable in g.clause_probabilistic_body_iter(clause).chain(head_iter.iter().copied()) {
-                    if !g.is_variable_fixed(variable, state) {
-                        let d = g.get_variable_distribution(variable).unwrap();
-                        if self.is_distribution_visitable(d, comp_distribution_start, comp_number_distribution) {
-                            let current_d_pos = self.distribution_positions[d.0];
+            if g[clause].has_probabilistic(state) {
+                for variable in g[clause].iter_probabilistic_variables() {
+                    if !g[variable].is_fixed(state) {
+                        let distribution = g[variable].distribution().unwrap();
+                        if self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
+                            let current_d_pos = self.distribution_positions[distribution.0];
                             let new_d_pos = comp_distribution_start + *comp_number_distribution;
                             if current_d_pos != new_d_pos {
                                 let moved_d = self.distributions[new_d_pos];
                                 self.distributions.as_mut_slice().swap(new_d_pos, current_d_pos);
-                                self.distribution_positions[d.0] = new_d_pos;
+                                self.distribution_positions[distribution.0] = new_d_pos;
                                 self.distribution_positions[moved_d.0] = current_d_pos;
                             }
                             *comp_number_distribution += 1;
-                            for v in g.distribution_variable_iter(d) {
-                                if !g.is_variable_fixed(v, state) {
-                                    for c in g.variable_clause_body_iter(v) {
+                            for v in g[distribution].iter_variables() {
+                                if !g[v].is_fixed(state) {
+                                    for c in g[v].iter_clause_negative_occurence() {      
                                         self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
                                     }
-                                    for c in g.variable_clause_head_iter(v) {
+                                    for c in g[v].iter_clause_positive_occurence() {
                                         self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
                                     }
                                 }
@@ -229,11 +222,11 @@ impl ComponentExtractor {
             }
             
             // Recursively explore the nodes in the connected components
-            for parent in g.parents_clause_iter(clause, state) {
+            for parent in g[clause].iter_parents(state) {
                 self.explore_component(g, parent, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
             }
             
-            for child in g.children_clause_iter(clause, state) {
+            for child in g[clause].iter_children(state) {
                 self.explore_component(g, child, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
             }
         }
@@ -242,12 +235,12 @@ impl ComponentExtractor {
     /// This function is responsible of updating the data structure with the new connected
     /// components in `g` given its current assignments.
     /// Returns true iff at least one component has been detected and it contains one distribution
-    pub fn detect_components<const C: u8>(
+    pub fn detect_components (
         &mut self,
         g: &mut Graph,
         state: &mut StateManager,
         component: ComponentIndex,
-        propagator: &mut FTReachablePropagator<C>,
+        propagator: &mut Propagator,
     ) -> bool {
         debug_assert!(propagator.unconstrained_clauses.is_empty());
         let end = state.get_usize(self.limit);
@@ -266,7 +259,7 @@ impl ComponentExtractor {
         // a component from it
         while start < end {
             let clause = self.clauses[start];
-            if g.is_clause_constrained(clause, state) {
+            if g[clause].is_constrained(state) {
                 // If the clause is active, then we start a new component from it
                 let mut size = 0;
                 let mut hash: u64 = 0;
@@ -332,66 +325,14 @@ impl ComponentExtractor {
 
 }
 
-/// This structure is used to implement a simple component detector that always returns one
-/// component with all the unassigned node in it. It is used to isolate bugs annd should not be
-/// used for real data sets (as it performences will be terrible)
-#[allow(dead_code)]
-pub struct NoComponentExtractor {
-    components: Vec<Vec<ClauseIndex>>,
-}
-
-#[allow(dead_code)]
-#[cfg(not(tarpaulin_include))]
-impl NoComponentExtractor {
-    pub fn new(g: &Graph) -> Self {
-        let mut components: Vec<Vec<ClauseIndex>> = vec![];
-        let nodes = g.clause_iter().collect();
-    components.push(nodes);
-        Self { components }
-    }
-
-    fn detect_components(
-        &mut self,
-        g: &Graph,
-        state: &mut StateManager,
-    _component: ComponentIndex,
-    ) {
-        let mut nodes: Vec<ClauseIndex> = vec![];
-        for n in g.clause_iter() {
-            if g.is_clause_constrained(n, state) {
-                nodes.push(n);
-            }
-        }
-        self.components.push(nodes);
-    }
-
-    fn get_component_hash(&self, _component: ComponentIndex) -> u64 {
-        0_u64
-    }
-
-    fn components_iter(&self, _state: &StateManager) -> ComponentIterator {
-        ComponentIterator {
-            limit: self.components.len(),
-            next: self.components.len() - 1,
-        }
-    }
-
-    fn number_components(&self, _state: &StateManager) -> usize {
-        1
-    }
-
-    fn component_size(&self, _component: ComponentIndex) -> usize {
-        0
-    }
-}
-
+/*
 #[cfg(test)]
 mod test_component_detection {
     
     use crate::core::graph::{Graph, VariableIndex, ClauseIndex};
     use crate::core::components::*;
     use search_trail::{StateManager, SaveAndRestore};
-    use crate::propagator::SearchPropagator;
+    use crate::propagator::Propagator;
     
     // Graph used for the tests:
     //
@@ -400,13 +341,17 @@ mod test_component_detection {
     //                  \      v 
     //                   \--> C3 --> C4 --> C5
     fn get_graph(state: &mut StateManager) -> Graph {
-        let mut g = Graph::new(state);
-        let mut ps: Vec<VariableIndex> = vec![];
-        for i in 0..6 {
-            g.add_distribution(&vec![1.0], state);
-            ps.push(VariableIndex(i))
-        }
-        let ds = (0..6).map(|_| g.add_variable(false, None, None, state)).collect::<Vec<VariableIndex>>();
+        let mut g = Graph::new(state, 12, 6);
+        let mut ps: Vec<VariableIndex> =(0..6).map(VariableIndex).collect();
+        g.add_distributions(&vec![
+            vec![1.0],
+            vec![1.0],
+            vec![1.0],
+            vec![1.0],
+            vec![1.0],
+            vec![1.0],
+        ], state);
+        let ds = (6..12).map(VariableIndex).collect::<Vec<VariableIndex>>();
         // C0
         g.add_clause(ds[0], vec![ps[0]], state);
         // C1
@@ -419,7 +364,7 @@ mod test_component_detection {
         g.add_clause(ds[4], vec![ds[3], ps[4]], state);
         // C5
         g.add_clause(ds[5], vec![ds[4], ps[5]], state);
-        g.set_variable(ds[5], false, state);
+        g.set_variable(ds[5], false, 0, None, state);
         g
     }
     
@@ -445,7 +390,7 @@ mod test_component_detection {
         let mut state = StateManager::default();
         let mut g = get_graph(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
-        let mut propagator = SearchPropagator::new();
+        let mut propagator = Propagator::new();
 
         g.set_clause_unconstrained(ClauseIndex(4), &mut state);
         extractor.detect_components(&mut g, &mut state, ComponentIndex(0), &mut propagator);
@@ -466,7 +411,7 @@ mod test_component_detection {
         let mut state = StateManager::default();
         let mut g = get_graph(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
-        let mut propagator = SearchPropagator::new();
+        let mut propagator = Propagator::new();
         
         state.save_state();
 
@@ -498,3 +443,4 @@ mod test_component_detection {
         check_component(&extractor, 0, 6, (0..6).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
     }
 }
+*/

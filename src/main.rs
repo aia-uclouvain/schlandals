@@ -90,9 +90,9 @@ fn main() {
     let app = App::parse();
     match app.command {
         Command::Search { input, branching, statistics, memory } => {
-            match schlandals::search(input, branching, statistics, memory) {
-                None => println!("Model UNSAT"),
-                Some(p) => println!("{}", p),
+            match schlandals::search(input, branching, statistics, memory, 0.0) {
+                Err(_) => println!("Model UNSAT"),
+                Ok(p) => println!("{}", p),
             };
         },
         Command::Compile { input, branching, fdac, dotfile } => {
@@ -102,9 +102,9 @@ fn main() {
             schlandals::read_compiled(input, dotfile);
         },
         Command::ApproximateSearch { input, branching, statistics, memory, epsilon }  => {
-            match schlandals::approximate_search(input, branching, statistics, memory, epsilon) {
-                None => println!("Model UNSAT"),
-                Some(p) => println!("{}", p),
+            match schlandals::search(input, branching, statistics, memory, epsilon) {
+                Err(_) => println!("Model UNSAT"),
+                Ok(p) => println!("{}", p),
             };
         }
     }

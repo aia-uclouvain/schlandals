@@ -19,24 +19,23 @@ use std::fs::File;
 use std::io::Write;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
-use rug::Float;
 use clap::ValueEnum;
 
-use crate::core::components::ComponentExtractor;
-use crate::heuristics::BranchingDecision;
-use crate::heuristics::branching_exact::*;
-use crate::heuristics::branching_approximate::*;
-use crate::search::{ExactDefaultSolver, ExactQuietSolver, ApproximateDefaultSolver, ApproximateQuietSolver};
-use crate::propagator::{SearchPropagator, CompiledPropagator, MixedPropagator};
-use crate::compiler::exact::ExactDACCompiler;
-pub use crate::compiler::circuit::{Dac, CircuitNode, CircuitNodeIndex, DistributionNodeIndex};
+use core::components::ComponentExtractor;
+use heuristics::BranchingDecision;
+use heuristics::branching_exact::*;
+use solvers::{QuietSearchSolver, StatSearchSolver};
+use solvers::search::ProblemSolution;
+
+use propagator::Propagator;
+use solvers::compiler::ExactDACCompiler;
+use core::circuit::*;
 
 // Re-export the modules
 mod common;
 mod core;
 mod heuristics;
-mod compiler;
-mod search;
+mod solvers;
 mod parser;
 mod propagator;
 
@@ -52,20 +51,17 @@ pub enum Branching {
     MinOutDegree,
     /// Maximum degree of a clause in the implication-graph
     MaxDegree,
-    /// Select the distribution with the non-assigned variable that has the highest probability
-    MaxProbability,
 }
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac> {
     let mut state = StateManager::default();
-    let mut propagator = CompiledPropagator::new();
-    let graph = parser::graph_from_ppidimacs(&input, &mut state, &mut propagator);
+    let propagator = Propagator::new();
+    let graph = parser::graph_from_ppidimacs(&input, &mut state);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
-        Branching::MaxProbability => Box::<MaxProbability>::default(),
     };
     let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
     let mut res = compiler.compile();
@@ -104,16 +100,15 @@ pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
     dac
 }
 
-pub fn approximate_search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> Option<Float> {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let mut state = StateManager::default();
-    let mut propagator = MixedPropagator::new();
-    let graph = parser::graph_from_ppidimacs(&input, &mut state, &mut propagator);
+    let propagator = Propagator::new();
+    let graph = parser::graph_from_ppidimacs(&input, &mut state);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
-        Branching::MaxProbability => Box::<MaxProbability>::default(),
     };
     let mlimit = if let Some(m) = memory {
         m
@@ -122,49 +117,17 @@ pub fn approximate_search(input: PathBuf, branching: Branching, statistics: bool
         sys.total_memory() / 1000000
     };
     if statistics {
-        let mut solver = ApproximateDefaultSolver::new(
+        let mut solver = StatSearchSolver::new(
             graph,
             state,
             component_extractor,
             branching_heuristic.as_mut(),
             propagator,
             mlimit,
-            epsilon,
         );
-        solver.solve()
+        solver.solve(epsilon)
     } else {
-        let mut solver = ApproximateQuietSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-            epsilon,
-        );
-        solver.solve()
-    }
-}
-
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>) -> Option<Float> {
-    let mut state = StateManager::default();
-    let mut propagator = SearchPropagator::new();
-    let graph = parser::graph_from_ppidimacs(&input, &mut state, &mut propagator);
-    let component_extractor = ComponentExtractor::new(&graph, &mut state);
-    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-        Branching::MinInDegree => Box::<MinInDegree>::default(),
-        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-        Branching::MaxDegree => Box::<MaxDegree>::default(),
-        Branching::MaxProbability => Box::<MaxProbability>::default(),
-    };
-    let mlimit = if let Some(m) = memory {
-        m
-    } else {
-        let sys = System::new_all();
-        sys.total_memory() / 1000000
-    };
-    if statistics {
-        let mut solver = ExactDefaultSolver::new(
+        let mut solver = QuietSearchSolver::new(
             graph,
             state,
             component_extractor,
@@ -172,16 +135,6 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
             propagator,
             mlimit,
         );
-        solver.solve()
-    } else {
-        let mut solver = ExactQuietSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-        );
-        solver.solve()
+        solver.solve(epsilon)
     }
 }

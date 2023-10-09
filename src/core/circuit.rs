@@ -104,7 +104,7 @@ impl Dac {
     pub fn new(graph: &Graph) -> Self {
         let mut distribution_nodes: Vec<DistributionNode> = vec![];
         for distribution in graph.distributions_iter() {
-            let probabilities = graph.distribution_variable_iter(distribution).map(|v| graph.get_variable_weight(v).unwrap()).collect();
+            let probabilities = graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
             distribution_nodes.push(DistributionNode {
                 probabilities,
                 outputs: vec![],

@@ -31,9 +31,9 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::heuristics::BranchingDecision;
-use crate::propagator::CompiledPropagator;
+use crate::propagator::Propagator;
 use crate::common::*;
-use crate::compiler::circuit::*;
+use crate::core::circuit::*;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -50,7 +50,7 @@ where
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: &'b mut B,
     /// The propagator
-    propagator: CompiledPropagator,
+    propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<CircuitNodeIndex>>,
 }
@@ -64,7 +64,7 @@ where
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
-        propagator: CompiledPropagator,
+        propagator: Propagator,
     ) -> Self {
         let cache = FxHashMap::default();
         Self {
@@ -77,14 +77,14 @@ where
         }
     }
 
-    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex) -> Option<CircuitNodeIndex> {
+    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<CircuitNodeIndex> {
         let mut children: Vec<CircuitNodeIndex> = vec![];
-        for variable in self.graph.distribution_variable_iter(distribution) {
+        for variable in self.graph[distribution].iter_variables() {
             self.state.save_state();
-            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor) {
+            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level+1) {
                         children.push(child);
                     }
                 }
@@ -102,22 +102,22 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex) -> Option<CircuitNodeIndex> {
+    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<CircuitNodeIndex> {
         let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for (distribution, variable, value) in self.propagator.assignments_iter() {
                 if value {
-                    let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
+                    let value_id = variable.0 - self.graph[distribution].start().0;
                     dac.add_distribution_output(distribution, node, value_id);
                 }
             }
         
             for distribution in self.propagator.unconstrained_distributions_iter() {
-                if self.graph.distribution_number_false(distribution, &self.state) != 0 {
+                if self.graph[distribution].number_false(&self.state) != 0 {
                     let sum_node = dac.add_sum_node();
-                    for variable in self.graph.distribution_variable_iter(distribution) {
-                        if !self.graph.is_variable_fixed(variable, &self.state) {
-                            let value_id = variable.0 - self.graph.get_distribution_start(distribution).0;
+                    for variable in self.graph[distribution].iter_variables() {
+                        if !self.graph[variable].is_fixed(&self.state) {
+                            let value_id = variable.0 - self.graph[distribution].start().0;
                             dac.add_distribution_output(distribution, sum_node, value_id);
                         }
                     }
@@ -135,7 +135,7 @@ where
                 match self.cache.get(&bit_repr) {
                     None => {
                         if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &self.state, &self.component_extractor, sub_component) {
-                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution) {
+                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
                                 sum_children.push(child);
                                 self.cache.insert(bit_repr, Some(child));
                             } else {
@@ -177,14 +177,14 @@ where
     pub fn compile(&mut self) -> Option<Dac> {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
-        self.propagator.set_number_clauses(self.graph.number_clauses());
+        self.propagator.init(self.graph.number_clauses());
         // Doing an initial propagation to detect some UNSAT formula from the start
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor) {
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor, 0) {
             Err(_) => None,
             Ok(_) => {
                 self.branching_heuristic.init(&self.graph, &self.state);
                 let mut dac = Dac::new(&self.graph);
-                match self.expand_prod_node(&mut dac, ComponentIndex(0)) {
+                match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
                     None => None,
                     Some(_) => {
                         dac.remove_dead_ends();

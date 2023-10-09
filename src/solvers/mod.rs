@@ -1,4 +1,4 @@
-//Schlandals
+//Schlandal
 //Copyright (C) 2022-2023 A. Dubray
 //
 //This program is free software: you can redistribute it and/or modify
@@ -14,14 +14,11 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod sequential;
-pub mod approximate;
+pub mod search;
+pub mod compiler;
 mod statistics;
 
-use crate::search::sequential::Solver as ExactSolver;
-use crate::search::approximate::Solver as ApproximateSolver;
+use search::SearchSolver;
 
-pub type ExactDefaultSolver<'b, B> = ExactSolver<'b, B, true>;
-pub type ExactQuietSolver<'b, B> = ExactSolver<'b, B, false>;
-pub type ApproximateDefaultSolver<'b, B> = ApproximateSolver<'b, B, true>;
-pub type ApproximateQuietSolver<'b, B> = ApproximateSolver<'b, B, false>;
+pub type StatSearchSolver<'b, B> = SearchSolver<'b, B, true>;
+pub type QuietSearchSolver<'b, B> = SearchSolver<'b, B, false>;
