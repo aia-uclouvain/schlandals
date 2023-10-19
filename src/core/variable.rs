@@ -17,9 +17,16 @@
 use search_trail::*;
 use crate::core::graph::{ClauseIndex, DistributionIndex};
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum Reason {
+    Clause(ClauseIndex),
+    Distribution(DistributionIndex),
+}
+
 /// Data structure that actually holds the data of a  variable of the input problem
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Variable {
+    id: usize,
     /// If `probabilistic` is `true`, then this is the weight associated to the variable. Otherwise,
     /// this is None.
     weight: Option<f64>,
@@ -35,23 +42,28 @@ pub struct Variable {
     /// Level at which the decision was made for this variable
     decision: isize,
     /// The clause that set the variable, if any
-    reason: ReversibleOptionUsize,
+    reason: Option<Reason>,
+    is_implied: ReversibleBool,
     /// Random u64 associated to the variable, used for hash computation
     hash: u64,
+    marked: bool,
 }
 
 impl Variable {
     
-    pub fn new(weight: Option<f64>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, weight: Option<f64>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
         Self {
+            id,
             weight,
             distribution,
             clauses_positive: vec![],
             clauses_negative: vec![],
             value: state.manage_option_bool(None),
             decision: -1,
-            reason: state.manage_option_usize(None),
+            reason: None,
+            is_implied: state.manage_bool(false),
             hash: rand::random(),
+            marked: false,
         }
     }
     
@@ -115,19 +127,37 @@ impl Variable {
         self.decision
     }
     
-    pub fn set_reason(&self, clause: ClauseIndex, state: &mut StateManager) {
-        state.set_option_usize(self.reason, Some(clause.0));
+    pub fn set_reason(&mut self, reason: Option<Reason>, state: &mut StateManager) {
+        if reason.is_some() {
+            state.set_bool(self.is_implied, true);
+        } else {
+            state.set_bool(self.is_implied, false);
+        }
+        self.reason = reason;
     }
     
-    pub fn reason(&self, state: &StateManager) -> Option<ClauseIndex> {
-        match state.get_option_usize(self.reason) {
-            None => None,
-            Some(v) => Some(ClauseIndex(v)),
+    pub fn reason(&self, state: &StateManager) -> Option<Reason> {
+        if !state.get_bool(self.is_implied) {
+            None
+        } else {
+            self.reason
         }
     }
     
     pub fn hash(&self) -> u64 {
         self.hash
+    }
+    
+    pub fn is_marked(&self) -> bool {
+        self.marked
+    }
+    
+    pub fn mark(&mut self) {
+        self.marked = true;
+    }
+    
+    pub fn unmark(&mut self) {
+        self.marked = false;
     }
     
     // --- ITERATOR --- //
@@ -140,6 +170,12 @@ impl Variable {
         self.clauses_negative.iter().copied()
     }
 
+}
+
+impl std::fmt::Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "V{}", self.id + 1)
+    }
 }
 
 #[cfg(test)]

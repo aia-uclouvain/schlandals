@@ -39,6 +39,8 @@
 //! Moreover, a consequent number of elements are stored using reversible data structures. This allows to backtrack safely to
 //! previous states of the search space.
 
+use std::cmp::Ordering;
+
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use search_trail::*;
 use crate::common::CacheEntry;
@@ -91,7 +93,7 @@ impl Graph {
 
     /// Creates a new empty implication graph
     pub fn new(state: &mut StateManager, n_var: usize, n_clause: usize) -> Self {
-        let variables = (0..n_var).map(|_| Variable::new(None, None, state)).collect();
+        let variables = (0..n_var).map(|i| Variable::new(i, None, None, state)).collect();
         let watchers = (0..n_var).map(|_| vec![]).collect();
         
         let number_word_variable = (n_var / 64) + if n_var % 64 == 0 { 0 } else { 1 };
@@ -128,8 +130,8 @@ impl Graph {
     ) {
         
         let mut current_start = 0;
-        for weights in distributions.iter() {
-            let distribution = Distribution::new(VariableIndex(current_start), weights.len(), state);
+        for (d_id, weights) in distributions.iter().enumerate() {
+            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
             for (j, w) in weights.iter().copied().enumerate() {
@@ -142,70 +144,68 @@ impl Graph {
     
     pub fn add_clause(
         &mut self,
-        literals: Vec<Literal>,
+        mut literals: Vec<Literal>,
         head: Option<Literal>,
         state: &mut StateManager,
         is_learned: bool,
     ) -> ClauseIndex {
 
         let cid = ClauseIndex(self.clauses.len());
-        let mut limit = 0;
-        // If the clause is not learned, we need to make the distrinction between probabilistic and deterministic variables
-        // in the clause.
-        if !is_learned {
-            // We assume that the literals are sorted by type. First the deterministic literals, then the probabilistic
-            while limit < literals.len() {
-                let var = &literals[limit].to_variable();
-                if self.variables[var.0].is_probabilitic() {
-                    break;
+        // We sort the literals by probabilistic/non-probabilistic
+        let number_probabilistic = literals.iter().copied().filter(|l| self[l.to_variable()].is_probabilitic()).count();
+        let number_deterministic = literals.len() - number_probabilistic;
+        literals.sort_by(|a, b| {
+            let a_var = a.to_variable();
+            let b_var = b.to_variable();
+            if self[a_var].is_probabilitic() && !self[b_var].is_probabilitic() {
+                Ordering::Greater
+            } else if !self[a_var].is_probabilitic() && self[b_var].is_probabilitic() {
+                Ordering::Less
+            } else {
+                if self[a_var].decision_level() < self[b_var].decision_level() {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
                 }
-                limit += 1;
             }
-        } else {
-            limit = literals.len();
-        }
+        });
         
-        let literal_vector = WatchedVector::new(literals, limit, state);
+        let literal_vector = WatchedVector::new(literals, number_deterministic, state);
         
         // The first two deterministic variables in the clause watch the clause
-        for i in 0..limit.min(2) {
+        for i in 0..number_deterministic.min(2) {
             let variable = literal_vector[i].to_variable();
             self.watchers[variable.0].push(cid);
         }
         
-        // Same for the two last probabilistic variables. Note that if the clause is learned, limit = literals.len()
-        // and the loop is not evaluated
-        if limit < literal_vector.len() {
-            let number_watcher = (literal_vector.len() - limit).min(2);
-            for i in 0..number_watcher {
-                debug_assert!(!is_learned);
-                let variable = literal_vector[literal_vector.len() - i - 1].to_variable();
-                self.watchers[variable.0].push(cid);
-            }
-
+        for i in 0..number_probabilistic.min(2) {
+            let variable = literal_vector[number_deterministic + i].to_variable();
+            self.watchers[variable.0].push(cid);
         }
         
-        let mut clause = Clause::new(literal_vector, head, state);
+        let mut clause = Clause::new(cid.0, literal_vector, head, is_learned, state);
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
-        if !is_learned {
-            for literal in clause.iter().collect::<Vec<Literal>>() {
-                let variable = literal.to_variable();
-                if literal.is_positive() {
-                    self[variable].add_clause_positive_occurence(cid);
+        for literal in clause.iter().collect::<Vec<Literal>>() {
+            let variable = literal.to_variable();
+            if literal.is_positive() {
+                self[variable].add_clause_positive_occurence(cid);
+                if !is_learned {
                     for child in self[variable].iter_clause_negative_occurence().collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);
                         self[child].add_parent(cid, state);
                     }
-                } else {
-                    self[variable].add_clause_negative_occurence(cid);
-                    for parent in self[variable].iter_clause_positive_occurence().collect::<Vec<ClauseIndex>>() {
-                        clause.add_parent(parent, state);
-                        self[parent].add_child(cid, state);
-                    }
                 }
-                if let Some(distribution) = self[literal.to_variable()].distribution() {
-                    self[distribution].increment_constrained(state);
+            } else {
+                self[variable].add_clause_negative_occurence(cid);
+                if !is_learned {
+                for parent in self[variable].iter_clause_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                    clause.add_parent(parent, state);
+                    self[parent].add_child(cid, state);
                 }
+            }
+            }
+            if let Some(distribution) = self[literal.to_variable()].distribution() {
+                self[distribution].increment_clause();
             }
         }
         self.clauses.push(clause);
@@ -218,12 +218,10 @@ impl Graph {
     ///     - If true, Removes the variable from the body of the constrained clauses
     ///     - If false, and probabilistic, increase the counter of false variable in the distribution
     /// If the variable is the min or max variable not fixed, update the boundaries accordingly.
-    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, level: isize, reason: Option<ClauseIndex>, state: &mut StateManager) {
+    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, level: isize, reason: Option<Reason>, state: &mut StateManager) {
         self[variable].set_value(value, state);
         self[variable].set_decision_level(level);
-        if let Some(clause) = reason {
-            self[variable].set_reason(clause, state);
-        }
+        self[variable].set_reason(reason, state);
         
         // Updating the bitwise representation of the variables state
         let bit_vec_idx = variable.0 / 64;
@@ -276,7 +274,7 @@ impl Graph {
 
     /// Decrements the number of constrained clauses a distribution is in
     pub fn decrement_distribution_constrained_clause_counter(&self, distribution: DistributionIndex, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.distributions[distribution.0].number_clause_constrained)
+        state.decrement_usize(self.distributions[distribution.0].number_clause_unconstrained)
     }
     
     // --- QUERIES --- //
@@ -302,8 +300,9 @@ impl Graph {
         }
         let cls = extractor.component_iter(component).collect::<Vec<ClauseIndex>>();
         for clause in cls {
-            v.push(state.get_u64(self.clauses_bit[clause.0 / 64]));
-
+            if !self[clause].is_learned() {
+                v.push(state.get_u64(self.clauses_bit[clause.0 / 64]));
+            }
         }
         CacheEntry::new(chash, v)
     }
@@ -313,9 +312,11 @@ impl Graph {
         self[clause].set_unconstrained(state);
         
         // Update the bitwise representation
-        let id = self.clauses_bit[clause.0 / 64];
-        let w = state.get_u64(id);
-        state.set_u64(id, w & !(1 << (clause.0 % 64)));
+        if !self[clause].is_learned() {
+            let id = self.clauses_bit[clause.0 / 64];
+            let w = state.get_u64(id);
+            state.set_u64(id, w & !(1 << (clause.0 % 64)));
+        }
     }
     
     // --- GETTERS --- //
@@ -345,6 +346,10 @@ impl Graph {
     /// Returns an iterator on the distributions of the problem
     pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionIndex> {
         (0..self.distributions.len()).map(DistributionIndex)
+    }
+    
+    pub fn variables_iter(&self) -> impl Iterator<Item = VariableIndex> {
+        (0..self.variables.len()).map(VariableIndex)
     }
 }
 

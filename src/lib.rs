@@ -38,6 +38,7 @@ mod heuristics;
 mod solvers;
 mod parser;
 mod propagator;
+mod preprocess;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -55,7 +56,7 @@ pub enum Branching {
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac> {
     let mut state = StateManager::default();
-    let propagator = Propagator::new();
+    let propagator = Propagator::new(&mut state);
     let graph = parser::graph_from_ppidimacs(&input, &mut state);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
@@ -94,7 +95,7 @@ pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
         let mut outfile = File::create(f).unwrap();
         match outfile.write(out.as_bytes()) {
             Ok(_) => (),
-            Err(e) => println!("Culd not write the PC into the file: {:?}", e),
+            Err(e) => println!("Could not write the PC into the file: {:?}", e),
         }
     }
     dac
@@ -102,7 +103,7 @@ pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let mut state = StateManager::default();
-    let propagator = Propagator::new();
+    let propagator = Propagator::new(&mut state);
     let graph = parser::graph_from_ppidimacs(&input, &mut state);
     let component_extractor = ComponentExtractor::new(&graph, &mut state);
     let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
@@ -124,8 +125,9 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
             branching_heuristic.as_mut(),
             propagator,
             mlimit,
+            epsilon,
         );
-        solver.solve(epsilon)
+        solver.solve()
     } else {
         let mut solver = QuietSearchSolver::new(
             graph,
@@ -134,7 +136,8 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
             branching_heuristic.as_mut(),
             propagator,
             mlimit,
+            epsilon,
         );
-        solver.solve(epsilon)
+        solver.solve()
     }
 }

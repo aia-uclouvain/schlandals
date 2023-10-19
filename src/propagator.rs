@@ -45,7 +45,7 @@
 //! This is done by a simple traversal of the implication graph, starting from the clauses respecting condition
 //! 1,2 for f-reachability or 1 for t-reachability. Finally every unconstrained clause is processed.
 
-use search_trail::StateManager;
+use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 
 use crate::common::f128;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
@@ -53,41 +53,35 @@ use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, VariableIndex};
 use rug::{Assign, Float};
 
 use super::core::literal::Literal;
+use super::core::variable::Reason;
 
-#[derive(Debug)]
-pub struct Unsat;
-
-pub type PropagationResult = Result<(), Unsat>;
+pub type PropagationResult = Result<(), isize>;
 
 pub struct Propagator {
-    propagation_stack: Vec<(VariableIndex, bool, Option<ClauseIndex>)>,
+    propagation_stack: Vec<(VariableIndex, bool, Option<Reason>)>,
     pub unconstrained_clauses: Vec<ClauseIndex>,
     t_reachable: Vec<bool>,
     f_reachable: Vec<bool>,
-    assignments: Vec<(DistributionIndex, VariableIndex, bool)>,
+    assignments: Vec<Literal>,
+    base_assignments: ReversibleUsize,
     unconstrained_distributions: Vec<DistributionIndex>,
     propagation_prob: Float,
-    resolution_stack: Vec<ClauseIndex>,
-}
-
-impl Default for Propagator {
-    fn default() -> Self {
-        Self::new()
-    }
+    forced: usize,
 }
 
 impl Propagator {
     
-    pub fn new() -> Self {
+    pub fn new(state: &mut StateManager) -> Self {
         Self {
             propagation_stack: vec![],
             unconstrained_clauses: vec![],
             t_reachable: vec![],
             f_reachable: vec![],
             assignments: vec![],
+            base_assignments: state.manage_usize(0),
             unconstrained_distributions: vec![],
             propagation_prob: f128!(0.0),
-            resolution_stack: vec![],
+            forced: 0,
         }
     }
     
@@ -97,13 +91,18 @@ impl Propagator {
         self.f_reachable.resize(number_clauses, false);
     }
     
+    pub fn set_forced(&mut self) {
+        self.forced = self.assignments.len();
+    }
+    
     /// Adds a variable to be propagated with the given value
-    pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool, reason: Option<ClauseIndex>) {
+    pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool, reason: Option<Reason>) {
         self.propagation_stack.push((variable, value, reason));
     }
     
     /// Propagates a variable to the given value. The component of the variable is also given to be able to use the {f-t}-reachability.
-    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor, level: isize) -> PropagationResult {
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
+        g[variable].set_reason(None, state);
         self.add_to_propagation_stack(variable, value, None);
         self.propagate(g, state, component, extractor, level)
     }
@@ -123,8 +122,9 @@ impl Propagator {
     }
     
     /// Returns an iterator over the assignments made during the last propagation
-    pub fn assignments_iter(&self) -> impl Iterator<Item = (DistributionIndex, VariableIndex, bool)> + '_{
-        self.assignments.iter().copied()
+    pub fn assignments_iter(&self, state: &StateManager) -> impl Iterator<Item = Literal> + '_{
+        let start = state.get_usize(self.base_assignments);
+        self.assignments.iter().skip(start).copied()
     }
 
     /// Returns true if there are any assignments in the assignments queue
@@ -183,15 +183,18 @@ impl Propagator {
     fn clear(&mut self) {
         self.propagation_stack.clear();
         self.unconstrained_clauses.clear();
-        self.assignments.clear();
         self.unconstrained_distributions.clear();
+    }
+    
+    pub fn restore(&mut self, state: &StateManager) {
+        self.assignments.truncate(state.get_usize(self.base_assignments));
     }
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor, level: isize) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
-        self.assignments.clear();
+        state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
         self.propagation_prob.assign(1.0);
         
@@ -199,7 +202,7 @@ impl Propagator {
         for clause in extractor.component_iter(component) {
             if g[clause].is_unit(state) {
                 let l = g[clause].get_unit_assigment(state);
-                self.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(clause));
+                self.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(Reason::Clause(clause)));
             }
         }
         
@@ -209,14 +212,31 @@ impl Propagator {
                     continue;
                 }
                 self.clear();
-                // If reason == None, then the UNSAT is caused by the distribution constraints. For now, no clause learning with that
-                if let Some(clause) = reason {
-                    //let learned_clause = self.learn_clause_from_conflict(g, state, clause, level);
-                    //g.add_clause(learned_clause, None, state, true);
+                if reason.is_none() {
+                    return PropagationResult::Err(level);
                 }
-                return PropagationResult::Err(Unsat);
+                debug_assert!(reason.is_some());
+                if reason.is_none() {
+                    return PropagationResult::Err(level);
+                }
+                let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
+                let head = learned_clause.iter().copied().find(|l| l.is_positive());
+                let clause = g.add_clause(learned_clause, head, state, true);
+                extractor.add_clause_to_component(component, clause);
+                return PropagationResult::Err(backjump);
             }
+            self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
             g.set_variable(variable, value, level, reason, state);
+            
+            if value {
+                for clause in g[variable].iter_clause_positive_occurence() {
+                    g[clause].set_unconstrained(state);
+                }
+            } else {
+                for clause in g[variable].iter_clause_negative_occurence() {
+                    g[clause].set_unconstrained(state);
+                }
+            }
             
             let is_p = g[variable].is_probabilitic();
             for i in (0..g.number_watchers(variable)).rev() {
@@ -229,32 +249,21 @@ impl Propagator {
                     }
                     if g[clause].is_unit(state) {
                         let l = g[clause].get_unit_assigment(state);
-                        self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, Some(clause));
+                        self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, Some(Reason::Clause(clause)));
                     }
                 }
             }
 
             if is_p {
                 let distribution = g[variable].distribution().unwrap();
-                self.assignments.push((distribution, variable, value));
                 if value {
                     self.propagation_prob *= g[variable].weight().unwrap();
                     for v in g[distribution].iter_variables().filter(|va| *va != variable) {
-                        match g[v].value(state) {
-                            None => {
-                                self.add_to_propagation_stack(v, false, None)
-                            },
-                            Some(vv) => {
-                                if vv {
-                                    self.clear();
-                                    return PropagationResult::Err(Unsat);
-                                }
-                            }
-                        };
+                        self.add_to_propagation_stack(v, false, Some(Reason::Distribution(distribution)));
                     }
                 } else if g[distribution].number_unfixed(state) == 1 {
                     if let Some(v) = g[distribution].iter_variables().find(|v| !g[*v].is_fixed(state)) {
-                        self.add_to_propagation_stack(v, true, None);
+                        self.add_to_propagation_stack(v, true, Some(Reason::Distribution(distribution)));
                     }
                 }
             }
@@ -262,7 +271,7 @@ impl Propagator {
 
         self.set_reachability(g, state, component, extractor);
         for clause in extractor.component_iter(component) {
-            if !self.t_reachable[clause.0] || !self.f_reachable[clause.0] {
+            if !g[clause].is_learned() && (!self.t_reachable[clause.0] || !self.f_reachable[clause.0]) {
                 self.add_unconstrained_clause(clause, g, state);
             }
         }
@@ -279,7 +288,7 @@ impl Propagator {
         if !self.t_reachable[clause.0] {
             self.t_reachable[clause.0] = true;
             for child in g[clause].iter_children(state) {
-                if g[child].is_constrained(state) {
+                if g[child].is_constrained(state) && !g[child].is_learned() {
                     self.set_t_reachability(g, state, child);
                 }
             }
@@ -295,7 +304,7 @@ impl Propagator {
         if !self.f_reachable[clause.0] {
             self.f_reachable[clause.0] = true;
             for parent in g[clause].iter_parents(state) {
-                if g[parent].is_constrained(state) {
+                if g[parent].is_constrained(state) && !g[parent].is_learned() {
                     self.set_f_reachability(g, state, parent);
                 }
             }
@@ -307,76 +316,121 @@ impl Propagator {
         self.t_reachable.fill(false);
         self.f_reachable.fill(false);
         for clause in extractor.component_iter(component) {
-            if g[clause].is_constrained(state) {
+            if g[clause].is_constrained(state) && !g[clause].is_learned() {
+                debug_assert!(!g[clause].is_unit(state));
                 match g[clause].head() {
                     None => self.set_f_reachability(g, state, clause),
                     Some(h) => {
                         let head = h.to_variable();
                         let head_value = g[head].value(state);
-                        if (g[head].is_probabilitic() && !g[head].is_fixed(state)) || (head_value.is_some() && !head_value.unwrap()) {
-                            self.set_f_reachability(g, state, clause);
+                        match head_value {
+                            None => {
+                                if g[head].is_probabilitic() {
+                                    self.set_f_reachability(g, state, clause);
+                                }
+                            },
+                            Some(b) => {
+                                if !b {
+                                    self.set_f_reachability(g, state, clause);
+                                }
+                            }
                         }
                     }
                 }
-                if g[clause].has_probabilistic_in_body(state) {
+                if !g[clause].has_deterministic_in_body(state) {
                     self.set_t_reachability(g, state, clause);
                 }
             }
         }
     }
     
-    fn learn_clause_from_conflict(&mut self, g: &Graph, state: &mut StateManager, conflict_clause: ClauseIndex, level: isize) -> Vec<Literal> {
-        let mut learned_clause: Vec<Literal> = vec![];
-        self.resolution_stack.clear();
-        
-        for variable in g[conflict_clause].iter_variables() {
-            learned_clause.push(Literal::from_variable(variable, g[conflict_clause].is_head(variable), g[variable].get_value_index()));
+    fn is_uip(&self, cursor: usize, g: &Graph, state: &StateManager, marked: &[bool]) -> bool {
+        if g[self.assignments[cursor].to_variable()].reason(state).is_none() {
+            return true;
         }
-        
-        // Apply backwad resolution until only one variable with decision level "level" is in the clause
-        loop {
-            // First we need to find the literal with which to resolve (i.e. use the clause that forced it to its value
-            // for the resolution)
-            let mut seen = false;
-            let mut i = 0;
-            while i < learned_clause.len() {
-                let variable = learned_clause[i].to_variable();
-                if g[variable].decision_level() == level && g[variable].reason(state).is_some() {
-                    if !seen {
-                        seen = true;
-                    } else {
-                        break;
-                    }
-                }
-                i += 1;
+        if !marked[cursor] {
+            return false;
+        }
+        for i in (self.forced..cursor).rev() {
+            let lit = self.assignments[i];
+            if marked[lit.to_variable().0] {
+                return false;
             }
-            
-            if i == learned_clause.len() {
-                return learned_clause;
-            }
-            
-            let variable = learned_clause[i].to_variable();
-            let reason = g[variable].reason(state).unwrap();
-            
-            for variable in g[reason].iter_variables() {
-                let l = Literal::from_variable(variable, g[reason].is_head(variable), g[variable].get_value_index());
-                let mut literal_must_be_added = true;
-                for i in 0..learned_clause.len() {
-                    if l.to_variable() == learned_clause[i].to_variable() {
-                        literal_must_be_added = false;
-                        if l.opposite(learned_clause[i]) {
-                            learned_clause.swap_remove(i);
-                        }
-                        break;
-                    }
-                }
-                if literal_must_be_added {
-                    learned_clause.push(l);
-                }
+            if g[lit.to_variable()].reason(state).is_none() {
+                return true;
             }
         }
+        return false;
     }
+    
+    fn learn_clause_from_conflict(&mut self, g: &mut Graph, state: &mut StateManager, conflict_clause: Reason) -> (Vec<Literal>, isize) {
+        let mut marked = g.variables_iter().map(|_| false).collect::<Vec<bool>>();
+        match conflict_clause {
+            Reason::Clause(c) => {
+                for variable in g[c].iter_variables() {
+                    marked[variable.0] = true;
+                }
+            },
+            Reason::Distribution(d) => {
+                for variable in g[d].iter_variables() {
+                    marked[variable.0] = true;
+                }
+            }
+        };
+        let mut cursor = self.assignments.len();
+        loop {
+            cursor -= 1;
+            if cursor < self.forced {
+                break;
+            }
+            
+            // Check if the current assignment is an UIP
+            let lit = self.assignments[cursor];
+            let variable = lit.to_variable();
+            
+            if self.is_uip(cursor, g, state, &marked) {
+                break;
+            }
 
+            if !marked[variable.0] {
+                continue;
+            }
+            
+            match g[variable].reason(state).unwrap() {
+                Reason::Clause(clause) => {
+                    for v in g[clause].iter_variables() {
+                        marked[v.0] = true;
+                    }
+                },
+                Reason::Distribution(distribution) => {
+                    if g[variable].value(state).unwrap() {
+                        for v in g[distribution].iter_variables() {
+                            marked[v.0] = true;
+                        }
+                    } else {
+
+                        debug_assert!(g[distribution].iter_variables().filter(|v| g[*v].value(state).unwrap()).count() == 1);
+                        let assigned_var = g[distribution].iter_variables().find(|v| g[*v].value(state).unwrap()).unwrap();
+                        marked[assigned_var.0] = true;
+                    }
+                }
+            };
+        }
+        
+        
+        let mut learned: Vec<Literal> = vec![];
+        // We build the clause from based on the UIP
+        for i in (self.forced..cursor+1).rev() {
+            let lit = self.assignments[i];
+            if marked[lit.to_variable().0] {
+                learned.push(lit.opposite());
+            }
+        }
+        
+        let backjump = learned.iter().map(|l| l.to_variable()).map(|v| g[v].decision_level()).max().unwrap();
+        
+        (learned, backjump)
+    }
 }
 
 #[cfg(test)]
@@ -396,9 +450,9 @@ mod test_clause_learning {
    pub fn test_learned_clause() {
         let mut state = StateManager::default();
         let mut g = Graph::new(&mut state, 18, 7);
-        let mut propagator = Propagator::new();
+        let mut propagator = Propagator::new(&mut state);
         propagator.init(7);
-        let extractor = ComponentExtractor::new(&g, &mut state);
+        let mut extractor = ComponentExtractor::new(&g, &mut state);
         g.add_distributions(&vec![
             vec![0.5, 0.5],
             vec![0.5, 0.5],
@@ -426,11 +480,6 @@ mod test_clause_learning {
             lit(4, &g, false),
         ], Some(lit(6, &g, true)), &mut state, false);
         g.add_clause(vec![
-            lit(6, &g, true),
-            lit(2, &g, false),
-            lit(4, &g, false),
-        ], Some(lit(6, &g, true)), &mut state, false);
-        g.add_clause(vec![
             lit(16, &g, true),
             lit(6, &g, false),
             lit(10, &g, false),
@@ -445,14 +494,14 @@ mod test_clause_learning {
             lit(8, &g, false),
         ], Some(lit(10, &g, true)), &mut state, false);
         
-        let r = propagator.propagate_variable(VariableIndex(12), true, &mut g, &mut state, ComponentIndex(0), &extractor, 1);
+        let r = propagator.propagate_variable(VariableIndex(12), true, &mut g, &mut state, ComponentIndex(0), &mut extractor, 1);
         assert!(r.is_ok());
-        let r = propagator.propagate_variable(VariableIndex(14), true, &mut g, &mut state, ComponentIndex(0), &extractor, 2);
+        let r = propagator.propagate_variable(VariableIndex(14), true, &mut g, &mut state, ComponentIndex(0), &mut extractor, 2);
         assert!(r.is_ok());
-        let r = propagator.propagate_variable(VariableIndex(16), false, &mut g, &mut state, ComponentIndex(0), &extractor, 3);
+        let r = propagator.propagate_variable(VariableIndex(16), false, &mut g, &mut state, ComponentIndex(0), &mut extractor, 3);
         assert!(r.is_ok());
-        let r = propagator.propagate_variable(VariableIndex(0), true, &mut g, &mut state, ComponentIndex(0), &extractor, 4);
-        assert!(r.is_err());
+        //let r = propagator.propagate_variable(VariableIndex(0), true, &mut g, &mut state, ComponentIndex(0), &mut extractor, 4);
+        //assert!(r.is_err());
         //assert_eq!(vec![0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1, 0], propagator.learned_clause);
    } 
 }

@@ -25,6 +25,7 @@ use super::graph::{DistributionIndex, VariableIndex, Graph};
 
 #[derive(Debug)]
 pub struct Clause {
+    id: usize,
     /// If the clause is not learned, this is the literal which is the head of the clause. Otherwise, None
     head: Option<Literal>,
     /// The literals of the clause. Implemented using a vector with watched literals
@@ -35,17 +36,20 @@ pub struct Clause {
     pub parents: SparseSet<ClauseIndex>,
     /// Random bitstring used for hash computation
     hash: u64,
+    is_learned: bool,
 }
 
 impl Clause {
 
-    pub fn new(literals: WatchedVector, head: Option<Literal>, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, literals: WatchedVector, head: Option<Literal>, is_learned: bool, state: &mut StateManager) -> Self {
         Self {
+            id,
             literals,
             head,
             children: SparseSet::new(state),
             parents: SparseSet::new(state),
             hash: rand::random(),
+            is_learned
         }
     }
     
@@ -108,10 +112,6 @@ impl Clause {
         self.children.len(state)
     }
     
-    pub fn is_learned(&self) -> bool {
-        self.head.is_none()
-    }
-    
     pub fn head(&self) -> Option<Literal> {
         self.head
     }
@@ -124,7 +124,7 @@ impl Clause {
     }
     
     pub fn notify_variable_value(&mut self, variable: VariableIndex, value: bool, probabilistic: bool, state: &mut StateManager) -> VariableIndex {
-        if self.is_learned() || !probabilistic {
+        if !probabilistic {
             self.literals.update_watcher_start(variable, value, state)
         } else {
             self.literals.update_watcher_end(variable, value, state)
@@ -132,15 +132,18 @@ impl Clause {
     }
 
     pub fn is_unit(&self, state: &StateManager) -> bool {
+        if !self.is_constrained(state) {
+            return false;
+        }
         let bounds = self.literals.get_bounds(state);
-        self.literals.is_constrained(state) && bounds.0 + bounds.1 == 1
+        bounds.0 + bounds.1 == 1
     }
     
     pub fn get_unit_assigment(&self, state: &StateManager) -> Literal {
         debug_assert!(self.is_unit(state));
         let bounds = self.literals.get_bounds(state);
         if bounds.0 == 0 {
-            self.literals[self.literals.len() - 1]
+            self.literals[self.literals.limit()]
         } else {
             self.literals[0]
         }
@@ -148,18 +151,26 @@ impl Clause {
     
     pub fn has_probabilistic_in_body(&self, state: &StateManager) -> bool {
         let bound_probabilistic = self.literals.get_bounds(state).1;
-        if bound_probabilistic == 2 {
-            return true;
+        for i in 0..bound_probabilistic {
+            if !self.literals[self.literals.limit() + i].is_positive() {
+                return true;
+            }
         }
-        if bound_probabilistic == 0 {
-            return false;
+        return false;
+    }
+    
+    pub fn has_deterministic_in_body(&self, state: &StateManager) -> bool {
+        let bound_deterministic = self.literals.get_bounds(state).0;
+        for i in 0..bound_deterministic {
+            if !self.literals[i].is_positive() {
+                return true;
+            }
         }
-        match self.head {
-            None => true,
-            Some(h) => {
-                self.literals.get_alive_end_watcher(state).unwrap() != h
-            },
-        }
+        return false;
+    }
+    
+    pub fn is_learned(&self) -> bool {
+        self.is_learned
     }
     
     // --- ITERATORRS --- //
@@ -184,4 +195,11 @@ impl Clause {
         self.literals.iter_end().map(|l| l.to_variable())
     }
     
+}
+
+impl std::fmt::Display for Clause {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "C{}: {}", self.id + 1, self.literals.iter().map(|l| format!("{}", l)).collect::<Vec<String>>().join(" "))
+    }
 }

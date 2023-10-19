@@ -169,7 +169,9 @@ impl ComponentExtractor {
         state: &mut StateManager,
     ) {
         if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
-            *hash ^= g[clause].hash();
+            if !g[clause].is_learned() {
+                *hash ^= g[clause].hash();
+            }
             // The clause is swap with the clause at position comp_sart + comp_size
             let current_pos = self.clause_positions[clause.0];
             let new_pos = comp_start + *comp_size;
@@ -321,6 +323,25 @@ impl ComponentExtractor {
         let start = self.components[component.0].distribution_start;
         let end = start + self.components[component.0].number_distribution;
         self.distributions[start..end].iter().copied()
+    }
+    
+    pub fn add_clause_to_component(&mut self, component: ComponentIndex, clause: ClauseIndex) {
+        debug_assert!(clause.0 == self.clause_positions.len());
+        let start = self.components[component.0].start;   
+        self.clauses.insert(start, clause);
+        for i in 0..self.clause_positions.len() {
+            if self.clause_positions[i] >= start {
+                self.clause_positions[i] += 1;
+            }
+        }
+        self.clause_positions.push(start);
+        for comp in self.components.iter_mut() {
+            if comp.start <= start && comp.start + comp.size > start {
+                comp.size += 1;
+            } else if comp.start > start {
+                comp.start += 1;
+            }
+        }
     }
 
 }
