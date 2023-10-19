@@ -28,33 +28,37 @@ use search_trail::{StateManager, ReversibleUsize, UsizeManager};
 /// to efficiently detect that only one variable remains in a distribution.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Distribution {
+    id: usize,
     /// First variable in the distribution
     pub first: VariableIndex,
     /// Number of variable in the distribution
     pub size: usize,
     /// Number of constrained clauses in which the distribution appears
-    pub number_clause_constrained: ReversibleUsize,
+    pub number_clause_unconstrained: ReversibleUsize,
+    number_clause: usize,
     /// Number of variables assigned to F in the distribution
     pub number_false: ReversibleUsize,
 }
 
 impl Distribution {
     
-    pub fn new(first: VariableIndex, size: usize, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, first: VariableIndex, size: usize, state: &mut StateManager) -> Self {
         Self {
+            id,
             first,
             size,
-            number_clause_constrained: state.manage_usize(0),
+            number_clause_unconstrained: state.manage_usize(0),
+            number_clause: 0,
             number_false: state.manage_usize(0),
         }
     }
     
-    pub fn increment_constrained(&self, state: &mut StateManager) -> usize {
-        state.increment_usize(self.number_clause_constrained)
+    pub fn increment_clause(&mut self) {
+        self.number_clause += 1;
     }
     
     pub fn decrement_constrained(&self, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.number_clause_constrained)
+        self.number_clause - state.increment_usize(self.number_clause_unconstrained)
     }
     
     pub fn increment_number_false(&self, state: &mut StateManager) -> usize {
@@ -77,5 +81,11 @@ impl Distribution {
 
     pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> {
         (self.first.0..(self.first.0 + self.size)).map(VariableIndex)
+    }
+}
+
+impl std::fmt::Display for Distribution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "D{}", self.id + 1)
     }
 }

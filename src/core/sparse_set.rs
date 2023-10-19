@@ -68,7 +68,7 @@ pub struct SparseSet<T>
     /// Map each elements of the set to its index in the plain vector
     indexes: FxHashMap<T, usize>,
     /// Size of the set
-    size: ReversibleUsize,
+    removed: ReversibleUsize,
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -81,25 +81,28 @@ impl<T> SparseSet<T>
         Self {
             plain: vec![],
             indexes: FxHashMap::<T, usize>::default(),
-            size: state.manage_usize(0),
+            removed: state.manage_usize(0),
         }
     }
-
+    
     /// Adds element `eleme` to the sparse-set
     pub fn add(&mut self, elem: T, state: &mut StateManager) {
-        self.indexes.insert(elem, self.plain.len());
-        self.plain.push(elem);
-        state.increment_usize(self.size);
+        let index = self.plain.len() - state.get_usize(self.removed);
+        self.indexes.insert(elem, index);
+        self.plain.insert(index, elem);
+        for i in (index + 1)..self.plain.len() {
+            self.indexes.insert(self.plain[i], i);
+        }
     }
     
     /// Removes element `elem` from the sparse-set
     pub fn remove(&mut self, elem: T, state: &mut StateManager) {
-        let last_idx = state.get_usize(self.size) - 1;
+        let last_idx = self.plain.len() - 1 - state.get_usize(self.removed);
         let cur_idx = *self.indexes.get(&elem).unwrap();
         self.plain.swap(cur_idx, last_idx);
         self.indexes.insert(self.plain[cur_idx], cur_idx);
         self.indexes.insert(self.plain[last_idx], last_idx);
-        state.decrement_usize(self.size);
+        state.increment_usize(self.removed);
     }
     
     /// Iterates over the current elements of the sparse-set
@@ -109,7 +112,7 @@ impl<T> SparseSet<T>
     
     /// Returns the current size of the sparse-set
     pub fn len(&self, state: &StateManager) -> usize {
-        state.get_usize(self.size)
+        self.plain.len() - state.get_usize(self.removed)
     }
     
     /// Returns the total capacity of the sparse-set (i.e., the total number of element in

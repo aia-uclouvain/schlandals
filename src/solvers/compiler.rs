@@ -81,7 +81,7 @@ where
         let mut children: Vec<CircuitNodeIndex> = vec![];
         for variable in self.graph[distribution].iter_variables() {
             self.state.save_state();
-            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &self.component_extractor, level) {
+            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
                     if let Some(child) = self.expand_prod_node(dac, component, level+1) {
@@ -105,8 +105,10 @@ where
     fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<CircuitNodeIndex> {
         let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
-            for (distribution, variable, value) in self.propagator.assignments_iter() {
-                if value {
+            for literal in self.propagator.assignments_iter(&self.state) {
+                let variable = literal.to_variable();
+                if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
+                    let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
                     dac.add_distribution_output(distribution, node, value_id);
                 }
@@ -179,7 +181,7 @@ where
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.init(self.graph.number_clauses());
         // Doing an initial propagation to detect some UNSAT formula from the start
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &self.component_extractor, 0) {
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
             Err(_) => None,
             Ok(_) => {
                 self.branching_heuristic.init(&self.graph, &self.state);

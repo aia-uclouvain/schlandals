@@ -42,11 +42,19 @@ impl Literal {
         }
     }
     
-    pub fn opposite(&self, of: Literal) -> bool {
-        self.0 == -of.0
+    pub fn opposite(&self) -> Literal {
+        Literal(-self.0, self.1)
     }
     
     pub fn is_variable_fixed(&self, state: &StateManager) -> bool {
         state.get_option_bool(self.1).is_some()
+    }
+}
+
+impl std::fmt::Display for Literal {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)?;
+        Ok(())
     }
 }
