@@ -77,6 +77,11 @@ where
         }
     }
 
+    fn restore(&mut self) {
+        self.propagator.restore(&self.state);
+        self.state.restore_state();
+    }
+
     fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<CircuitNodeIndex> {
         let mut children: Vec<CircuitNodeIndex> = vec![];
         for variable in self.graph[distribution].iter_variables() {
@@ -89,7 +94,7 @@ where
                     }
                 }
             }
-            self.state.restore_state();
+            self.restore();
         }
         if !children.is_empty() {
             let node = dac.add_sum_node();

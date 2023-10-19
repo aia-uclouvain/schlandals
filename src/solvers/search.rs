@@ -102,6 +102,11 @@ where
             epsilon,
         }
     }
+    
+    fn restore(&mut self) {
+        self.propagator.restore(&self.state);
+        self.state.restore_state();
+    }
 
     /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
@@ -152,7 +157,7 @@ where
                         self.statistics.unsat();
                         if backtrack_level != level {
                             debug_assert!(p_in == 0.0);
-                            self.state.restore_state();
+                            self.restore();
                             return ((f128!(0.0), f128!(1.0)), backtrack_level);
                         }
                         p_out += v_weight;
@@ -181,7 +186,7 @@ where
                         p_out += v_weight * (1.0 - removed_proba);
                         let (child_sol, backtrack_level) = self._solve(component, level+1);
                         if backtrack_level != level {
-                            self.state.restore_state();
+                            self.restore();
                             return ((f128!(0.0), f128!(1.0)), backtrack_level);
                         }
                         p_in += child_sol.0 * &added_proba;
@@ -189,13 +194,12 @@ where
                         let lb = p_in.clone();
                         let ub = 1.0 - p_out.clone();
                         if self.are_bounds_tight_enough(lb, ub, number_component) {
-                            self.state.restore_state();
+                            self.restore();
                             return ((p_in, p_out), level);
                         }
                     }
                 };
-                self.propagator.restore(&self.state);
-                self.state.restore_state();
+                self.restore();
             }
             ((p_in, p_out), level)
         } else {
