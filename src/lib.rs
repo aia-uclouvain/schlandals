@@ -33,7 +33,7 @@ use core::circuit::*;
 
 // Re-export the modules
 mod common;
-mod core;
+pub mod core;
 mod heuristics;
 mod solvers;
 mod parser;

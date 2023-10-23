@@ -41,6 +41,7 @@ pub struct Variable {
     value: ReversibleOptionBool,
     /// Level at which the decision was made for this variable
     decision: isize,
+    assignment_position: ReversibleUsize,
     /// The clause that set the variable, if any
     reason: Option<Reason>,
     is_implied: ReversibleBool,
@@ -60,6 +61,7 @@ impl Variable {
             clauses_negative: vec![],
             value: state.manage_option_bool(None),
             decision: -1,
+            assignment_position: state.manage_usize(0),
             reason: None,
             is_implied: state.manage_bool(false),
             hash: rand::random(),
@@ -158,6 +160,14 @@ impl Variable {
     
     pub fn unmark(&mut self) {
         self.marked = false;
+    }
+    
+    pub fn set_assignment_position(&self, position: usize, state: &mut StateManager) {
+        state.set_usize(self.assignment_position, position);
+    }
+    
+    pub fn get_assignment_position(&self, state: &StateManager) -> usize {
+        state.get_usize(self.assignment_position)
     }
     
     // --- ITERATOR --- //

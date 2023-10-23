@@ -23,3 +23,4 @@ mod clause;
 mod distribution;
 pub mod watched_vector;
 pub mod circuit;
+pub mod flags;
