@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use std::path::PathBuf;
 use schlandals::*;
+use schlandals::core::circuit::{CircuitNodeIndex, DistributionNodeIndex, Dac};
 
 #[pyclass]
 #[derive(Clone)]
@@ -35,9 +36,9 @@ fn search_function(file: String, branching: BranchingHeuristic) -> Option<f64> {
         BranchingHeuristic::MinOutDegree => Branching::MinOutDegree,
         BranchingHeuristic::MaxDegree => Branching::MaxDegree,
     };
-    match schlandals::search(PathBuf::from(file), branching_heuristic, false, None) {
-        None => None,
-        Some(p) => Some(p.to_f64()),
+    match schlandals::search(PathBuf::from(file), branching_heuristic, false, None, 0.0) {
+        Err(_) => None,
+        Ok(p) => Some(p.to_f64()),
     }
 }
 
@@ -49,9 +50,9 @@ fn approximate_search_function(file: String, branching: BranchingHeuristic, epsi
         BranchingHeuristic::MinOutDegree => Branching::MinOutDegree,
         BranchingHeuristic::MaxDegree => Branching::MaxDegree,
     };
-    match schlandals::approximate_search(PathBuf::from(file), branching_heuristic, false, None, epsilon) {
-        None => None,
-        Some(p) => Some(p.to_f64()),
+    match schlandals::search(PathBuf::from(file), branching_heuristic, false, None, epsilon) {
+        Err(_) => None,
+        Ok(p) => Some(p.to_f64()),
     }
 }
 
