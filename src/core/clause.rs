@@ -22,7 +22,6 @@ use super::literal::Literal;
 
 use super::graph::{DistributionIndex, VariableIndex, Graph};
 
-
 #[derive(Debug)]
 pub struct Clause {
     id: usize,
