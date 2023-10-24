@@ -110,21 +110,21 @@ where
 
     /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, number_component: usize) -> (Bounds, isize) {
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (Bounds, isize) {
         self.statistics.cache_access();
         let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
         match self.cache.get(&bit_repr) {
             None => {
                 self.statistics.cache_miss();
-                let f = self.choose_and_branch(component, level, number_component);
+                let f = self.choose_and_branch(component, level, bound_factor);
                 self.cache.insert(bit_repr, f.0.clone());
                 f
             },
             Some(f) => {
-                if self.are_bounds_tight_enough(f.0.clone(), f.1.clone(), number_component) {
+                if self.are_bounds_tight_enough(f.0.clone(), f.1.clone(), bound_factor) {
                     (f.clone(), level)
                 } else {
-                    let f = self.choose_and_branch(component, level, number_component);
+                    let f = self.choose_and_branch(component, level, bound_factor);
                     self.cache.insert(bit_repr, f.0.clone());
                     f
                 }
@@ -135,7 +135,7 @@ where
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
     /// solution of the component.
     /// The solution is the sum of the probability of the SAT children.
-    fn choose_and_branch(&mut self, component: ComponentIndex, level: isize, number_component: usize) -> (Bounds, isize) {
+    fn choose_and_branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64)-> (Bounds, isize) {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
             &self.state,
@@ -184,7 +184,7 @@ where
                             }
                         }
                         p_out += v_weight * (1.0 - removed_proba);
-                        let (child_sol, backtrack_level) = self._solve(component, level+1);
+                        let (child_sol, backtrack_level) = self._solve(component, level+1, bound_factor);
                         if backtrack_level != level {
                             self.restore();
                             return ((f128!(0.0), f128!(1.0)), backtrack_level);
@@ -193,7 +193,7 @@ where
                         p_out += child_sol.1 * &added_proba;
                         let lb = p_in.clone();
                         let ub = 1.0 - p_out.clone();
-                        if self.are_bounds_tight_enough(lb, ub, number_component) {
+                        if self.are_bounds_tight_enough(lb, ub, bound_factor) {
                             self.restore();
                             return ((p_in, p_out), level);
                         }
@@ -209,7 +209,7 @@ where
     }
 
     /// Solves the problem for the sub-graph identified by component.
-    pub fn _solve(&mut self, component: ComponentIndex, level: isize) -> (Bounds, isize) {
+    pub fn _solve(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (Bounds, isize) {
         // If the memory limit is reached, clear the cache.
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.cache.clear();
@@ -227,9 +227,10 @@ where
         {
             self.statistics.and_node();
             let number_component = self.component_extractor.number_components(&self.state);
+            let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
             self.statistics.decomposition(number_component);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let (cache_solution, backtrack_level) = self.get_cached_component_or_compute(sub_component, level, number_component);
+                let (cache_solution, backtrack_level) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor);
                 if backtrack_level != level {
                     self.state.restore_state();
                     return ((f128!(0.0), f128!(1.0)), backtrack_level);
@@ -277,7 +278,7 @@ where
                 p_out = 1.0 - p_out;
                 self.branching_heuristic.init(&self.graph, &self.state);
                 self.propagator.set_forced();
-                let (solution, _) = self._solve(ComponentIndex(0), 1);
+                let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt());
                 self.statistics.print();
                 let ub: Float = 1.0 - solution.1*(1.0 - p_out);
                 let proba = p_in * (solution.0 * &ub).sqrt();
@@ -286,7 +287,8 @@ where
         }
     }
     
-    fn are_bounds_tight_enough(&self, lb: Float, ub: Float, number_component: usize) -> bool {
-        ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0 / number_component as f64)
+    #[inline]
+    fn are_bounds_tight_enough(&self, lb: Float, ub: Float, bound_factor: f64) -> bool {
+        ub <= lb.clone()*bound_factor
     }
 }
