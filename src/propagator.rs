@@ -222,9 +222,6 @@ impl Propagator {
                     return PropagationResult::Err(level);
                 }
                 debug_assert!(reason.is_some());
-                if reason.is_none() {
-                    return PropagationResult::Err(level);
-                }
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
                 let head = learned_clause.iter().copied().find(|l| l.is_positive());
                 let clause = g.add_clause(learned_clause, head, state, true);
@@ -376,6 +373,58 @@ impl Propagator {
         return false;
     }
     
+    fn is_implied(&mut self, lit: Literal, g: &Graph, state: &StateManager) -> bool {
+        let pos = g[lit.to_variable()].get_assignment_position(state);
+        if self.lit_flags[pos].is_set(LitFlag::IsImplied){
+            return true;
+        }
+        if self.lit_flags[pos].is_set(LitFlag::IsNotImplied) {
+            return false;
+        }
+        
+        match g[lit.to_variable()].reason(state) {
+            None => return false,
+            Some(r) => {
+                match r {
+                    Reason::Clause(c) => {
+                        for p in g[c].iter_variables().map(|v| g[v].get_assignment_position(state)).filter(|p| *p != pos) {
+                            let l = self.assignments[p];
+                            if !self.lit_flags[p].is_set(LitFlag::IsMarked) && !self.is_implied(l, g, state) {
+                                self.lit_flags[pos].set(LitFlag::IsNotImplied);
+                                return false;
+                            }
+                        }
+                        self.lit_flags[pos].set(LitFlag::IsImplied);
+                        return true;
+                    },
+                    Reason::Distribution(d) => {
+                        if lit.is_positive() {
+                            for p in g[d].iter_variables().map(|v| g[v].get_assignment_position(state)).filter(|p| *p != pos) {
+                                let l = self.assignments[p];
+                                if !self.lit_flags[p].is_set(LitFlag::IsMarked) && !self.is_implied(l, g, state) {
+                                    self.lit_flags[pos].set(LitFlag::IsNotImplied);
+                                    return false;
+                                }
+                            }
+                            self.lit_flags[pos].set(LitFlag::IsImplied);
+                            return true;
+                        } else {
+                            let assigned = g[d].iter_variables().find(|v| g[*v].value(state).unwrap()).unwrap();
+                            let p = g[assigned].get_assignment_position(state);
+                            let l = self.assignments[p];
+                            if !self.lit_flags[p].is_set(LitFlag::IsMarked) && !self.is_implied(l, g, state) {
+                                self.lit_flags[pos].set(LitFlag::IsNotImplied);
+                                return false;
+                            }
+                            self.lit_flags[pos].set(LitFlag::IsImplied);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     fn learn_clause_from_conflict(&mut self, g: &mut Graph, state: &mut StateManager, conflict_clause: Reason) -> (Vec<Literal>, isize) {
         match conflict_clause {
             Reason::Clause(c) => {
@@ -405,7 +454,6 @@ impl Propagator {
                 break;
             }
             
-
             if !self.lit_flags[v_pos].is_set(LitFlag::IsMarked){
                 continue;
             }
@@ -436,14 +484,24 @@ impl Propagator {
         // We build the clause from based on the UIP
         for i in (self.forced..cursor+1).rev() {
             let lit = self.assignments[i];
-            if self.lit_flags[i].is_set(LitFlag::IsMarked) {
+            if self.lit_flags[i].is_set(LitFlag::IsMarked) && !self.is_implied(lit, g, state) {
                 learned.push(lit.opposite());
             }
         }
         
-        let backjump = learned.iter().map(|l| l.to_variable()).map(|v| g[v].decision_level()).max().unwrap();
+        let mut count_used = 0;
+        let mut backjump = cursor;
+        for i in (self.forced..cursor+1).rev() {
+            let lit = self.assignments[i];
+            if self.lit_flags[i].is_set(LitFlag::IsInConflictClause) {
+                count_used += 1;
+            }
+            if count_used == 1 && g[lit.to_variable()].reason(state).is_none() {
+                backjump = i;
+            }
+        }
         
-        (learned, backjump)
+        (learned, g[self.assignments[backjump].to_variable()].decision_level() as isize)
     }
 }
 
