@@ -204,14 +204,6 @@ impl Propagator {
         self.unconstrained_distributions.clear();
         self.propagation_prob.assign(1.0);
         
-        // Find unit clauses
-        for clause in extractor.component_iter(component) {
-            if g[clause].is_unit(state) {
-                let l = g[clause].get_unit_assigment(state);
-                self.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(Reason::Clause(clause)));
-            }
-        }
-        
         while let Some((variable, value, reason)) = self.propagation_stack.pop() {
             if let Some(v) = g[variable].value(state) {
                 if v == value {
@@ -317,10 +309,21 @@ impl Propagator {
     }
     
     /// Sets the t-reachability and f-reachability for all clauses in the component
-    fn set_reachability(&mut self, g: &Graph, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
+    fn set_reachability(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
+        // First we update the parents/child in the graph and clear the flags
         for clause in extractor.component_iter(component) {
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
+            }
+            for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
+                if !g[parent].is_constrained(state) {
+                    g[clause].remove_parent(parent, state);
+                }
+            }
+            for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
+                if !g[child].is_constrained(state) {
+                    g[clause].remove_child(child, state);
+                }
             }
         }
         for clause in extractor.component_iter(component) {
