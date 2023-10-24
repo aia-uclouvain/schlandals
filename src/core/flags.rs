@@ -61,7 +61,8 @@ pub enum LitFlag {
     Clear = 0,
     IsMarked = 1,
     IsImplied = 2,
-    IsInConflictClause = 4,
+    IsNotImplied = 4,
+    IsInConflictClause = 8,
 }
 
 #[derive(Clone, Copy)]
