@@ -38,14 +38,8 @@ use crate::PEAK_ALLOC;
 
 use rug::Float;
 
-/// Unit structure representing the the problem is UNSAT
-#[derive(Debug)]
-pub struct Unsat;
+use super::*;
 
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Result<Float, Unsat>;
-
-pub type Bounds = (Float, Float);
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -146,7 +140,13 @@ where
             self.statistics.or_node();
             let mut p_in = f128!(0.0);
             let mut p_out = f128!(0.0);
-            for variable in self.graph[distribution].iter_variables() {
+            let mut branches = self.graph[distribution].iter_variables().collect::<Vec<VariableIndex>>();
+            branches.sort_by(|v1, v2| {
+                let f1 = self.graph[*v1].weight().unwrap();
+                let f2 = self.graph[*v2].weight().unwrap();
+                f1.total_cmp(&f2)
+            });
+            for variable in branches.iter().copied() {
                 if self.graph[variable].is_fixed(&self.state) {
                     continue;
                 }
@@ -248,43 +248,36 @@ where
     
     pub fn solve(&mut self) -> ProblemSolution {
         self.propagator.init(self.graph.number_clauses());
-        for variable in self.graph.variables_iter() {
-            if self.graph[variable].is_probabilitic() && self.graph[variable].weight().unwrap() == 1.0 {
-                self.propagator.add_to_propagation_stack(variable, true, None);
-            }
+        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
+        if preproc.is_none() {
+            return ProblemSolution::Err(Unsat);
         }
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
-            Err(_) => ProblemSolution::Err(Unsat),
-            Ok(_) => {
-                let mut preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-                let mut p_in = preproc.preprocess(false);
-                let mut p_out = f128!(1.0);
-                
-                for distribution in self.graph.distributions_iter() {
-                    let mut sum_neg = 0.0;
-                    for variable in self.graph[distribution].iter_variables() {
-                        if let Some(v) = self.graph[variable].value(&self.state) {
-                            if v {
-                                p_in *= self.graph[variable].weight().unwrap();
-                                sum_neg = 0.0;
-                                break;
-                            } else {
-                                sum_neg += self.graph[variable].weight().unwrap();
-                            }
-                        }
+        let mut p_in = preproc.unwrap();
+        let mut p_out = f128!(1.0);
+        
+        for distribution in self.graph.distributions_iter() {
+            let mut sum_neg = 0.0;
+            for variable in self.graph[distribution].iter_variables() {
+                if let Some(v) = self.graph[variable].value(&self.state) {
+                    if v {
+                        p_in *= self.graph[variable].weight().unwrap();
+                        sum_neg = 0.0;
+                        break;
+                    } else {
+                        sum_neg += self.graph[variable].weight().unwrap();
                     }
-                    p_out *= 1.0 - sum_neg;
                 }
-                p_out = 1.0 - p_out;
-                self.branching_heuristic.init(&self.graph, &self.state);
-                self.propagator.set_forced();
-                let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt());
-                self.statistics.print();
-                let ub: Float = 1.0 - solution.1*(1.0 - p_out);
-                let proba = p_in * (solution.0 * &ub).sqrt();
-                ProblemSolution::Ok(proba)
             }
+            p_out *= 1.0 - sum_neg;
         }
+        p_out = 1.0 - p_out;
+        self.branching_heuristic.init(&self.graph, &self.state);
+        self.propagator.set_forced();
+        let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt());
+        self.statistics.print();
+        let ub: Float = 1.0 - solution.1*(1.0 - p_out);
+        let proba = p_in * (solution.0 * &ub).sqrt();
+        ProblemSolution::Ok(proba)
     }
     
     #[inline]

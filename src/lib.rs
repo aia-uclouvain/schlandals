@@ -21,15 +21,15 @@ use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
 
-use core::components::ComponentExtractor;
+use crate::core::components::ComponentExtractor;
 use heuristics::BranchingDecision;
 use heuristics::branching_exact::*;
 use solvers::{QuietSearchSolver, StatSearchSolver};
-use solvers::search::ProblemSolution;
+use solvers::ProblemSolution;
 
 use propagator::Propagator;
 use solvers::compiler::ExactDACCompiler;
-use core::circuit::*;
+use crate::core::circuit::*;
 
 // Re-export the modules
 mod common;

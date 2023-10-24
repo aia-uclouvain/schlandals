@@ -14,6 +14,17 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
+use rug::Float;
+/// Unit structure representing the the problem is UNSAT
+#[derive(Debug)]
+pub struct Unsat;
+
+/// Type alias used for the solution of the problem, which is either a Float or UNSAT
+pub type ProblemSolution = Result<Float, Unsat>;
+
+pub type Bounds = (Float, Float);
+
 pub mod search;
 pub mod compiler;
 mod statistics;

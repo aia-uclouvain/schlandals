@@ -23,6 +23,7 @@ use crate::propagator::Propagator;
 use rug::Float;
 use crate::common::f128;
 
+use crate::core::variable::Reason;
 
 pub struct Preprocessor<'b, B>
 where
@@ -55,8 +56,28 @@ where
         }
     }
     
-    pub fn preprocess(&mut self, backbone: bool) -> Float {
+    pub fn preprocess(&mut self, backbone: bool) -> Option<Float> {
         let mut p = f128!(1.0);
+
+        for variable in self.graph.variables_iter() {
+            if self.graph[variable].is_probabilitic() && self.graph[variable].weight().unwrap() == 1.0 {
+                self.propagator.add_to_propagation_stack(variable, true, None);
+            }
+        }
+        
+        // Find unit clauses
+        for clause in self.component_extractor.component_iter(ComponentIndex(0)) {
+            if self.graph[clause].is_unit(self.state) {
+                let l = self.graph[clause].get_unit_assigment(self.state);
+                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(Reason::Clause(clause)));
+            }
+        }
+        match self.propagator.propagate(self.graph, self.state, ComponentIndex(0), self.component_extractor, 0) {
+            Err(_) => return None,
+            Ok(_) => {
+                p *= self.propagator.get_propagation_prob();
+            }
+        };
         if backbone {
             let backbone = self.identify_backbone();
             for (variable, value) in backbone.iter().copied() {
@@ -67,7 +88,7 @@ where
                 p *= self.propagator.get_propagation_prob().clone();
             }
         }
-        p
+        Some(p)
     }
 
     fn identify_backbone(&mut self) -> Vec<(VariableIndex, bool)> {
