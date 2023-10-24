@@ -2,3 +2,5 @@
 Cargo.lock
 pyschlandals/dist
 pyschlandals/target
+.vscode/
+pyschlandals/pipytoken
