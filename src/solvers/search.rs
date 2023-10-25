@@ -273,7 +273,7 @@ where
         p_out = 1.0 - p_out;
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt());
+        let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
         let ub: Float = 1.0 - solution.1*(1.0 - p_out);
         let proba = p_in * (solution.0 * &ub).sqrt();
