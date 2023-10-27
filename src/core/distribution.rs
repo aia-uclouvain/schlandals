@@ -86,6 +86,10 @@ impl Distribution {
     pub fn start(&self) -> VariableIndex {
         self.first
     }
+
+    pub fn len(&self) -> usize {
+        self.size
+    }
     
     // --- ITERATOR --- //
 

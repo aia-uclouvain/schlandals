@@ -17,6 +17,8 @@
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::Write;
+use solvers::QuietLDSSolver;
+use solvers::StatLDSSolver;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -133,6 +135,47 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         solver.solve()
     } else {
         let mut solver = QuietSearchSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+            epsilon,
+        );
+        solver.solve()
+    }
+}
+
+pub fn lds(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
+    let mut state = StateManager::default();
+    let propagator = Propagator::new(&mut state);
+    let graph = parser::graph_from_ppidimacs(&input, &mut state);
+    let component_extractor = ComponentExtractor::new(&graph, &mut state);
+    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+        Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+        Branching::MaxDegree => Box::<MaxDegree>::default(),
+    };
+    let mlimit = if let Some(m) = memory {
+        m
+    } else {
+        let sys = System::new_all();
+        sys.total_memory() / 1000000
+    };
+    if statistics {
+        let mut solver = StatLDSSolver::new(
+            graph,
+            state,
+            component_extractor,
+            branching_heuristic.as_mut(),
+            propagator,
+            mlimit,
+            epsilon,
+        );
+        solver.solve()
+    } else {
+        let mut solver = QuietLDSSolver::new(
             graph,
             state,
             component_extractor,

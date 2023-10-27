@@ -27,9 +27,13 @@ pub type Bounds = (Float, Float);
 
 pub mod search;
 pub mod compiler;
+pub mod lds;
 mod statistics;
 
 use search::SearchSolver;
+use lds::LDSSolver;
 
 pub type StatSearchSolver<'b, B> = SearchSolver<'b, B, true>;
 pub type QuietSearchSolver<'b, B> = SearchSolver<'b, B, false>;
+pub type StatLDSSolver<'b, B> = LDSSolver<'b, B, true>;
+pub type QuietLDSSolver<'b, B> = LDSSolver<'b, B, false>;
