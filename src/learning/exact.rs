@@ -33,12 +33,12 @@ use crate::core::graph::*;
 use crate::branching::BranchingDecision;
 use crate::propagator::Propagator;
 use crate::common::*;
-use crate::core::circuit::*;
 use crate::preprocess::Preprocessor;
+use crate::learning::circuit::*;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct ExactDACCompiler<'b, B>
+pub struct DACCompiler<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -53,10 +53,10 @@ where
     /// The propagator
     propagator: Propagator,
     /// Cache used to store results of sub-problems
-    cache: FxHashMap<CacheEntry, Option<CircuitNodeIndex>>,
+    cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
 }
 
-impl<'b, B> ExactDACCompiler<'b, B>
+impl<'b, B> DACCompiler<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -78,24 +78,19 @@ where
         }
     }
 
-    fn restore(&mut self) {
-        self.propagator.restore(&self.state);
-        self.state.restore_state();
-    }
-
-    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<CircuitNodeIndex> {
-        let mut children: Vec<CircuitNodeIndex> = vec![];
+    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> {
+        let mut children: Vec<NodeIndex> = vec![];
         for variable in self.graph[distribution].iter_variables() {
             self.state.save_state();
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level+1) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1) {
                         children.push(child);
                     }
                 }
             }
-            self.restore();
+            self.state.restore_state();
         }
         if !children.is_empty() {
             let node = dac.add_sum_node();
@@ -108,15 +103,15 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<CircuitNodeIndex> {
-        let mut prod_node: Option<CircuitNodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
+    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<NodeIndex> {
+        let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for literal in self.propagator.assignments_iter(&self.state) {
                 let variable = literal.to_variable();
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
                     let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
-                    dac.add_distribution_output(distribution, node, value_id);
+                    dac.add_distribution_output(dac.get_distribution_value_node_index(distribution, value_id), node);
                 }
             }
         
@@ -126,7 +121,7 @@ where
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
-                            dac.add_distribution_output(distribution, sum_node, value_id);
+                            dac.add_distribution_output(dac.get_distribution_value_node_index(distribution, value_id), sum_node);
                         }
                     }
                     dac.add_circuit_node_output(sum_node, node);
@@ -136,7 +131,7 @@ where
         } else {
             None
         };
-        let mut sum_children: Vec<CircuitNodeIndex> = vec![];
+        let mut sum_children: Vec<NodeIndex> = vec![];
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
@@ -185,13 +180,18 @@ where
     pub fn compile(&mut self) -> Option<Dac> {
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
+        let mut probabilities: Vec<Vec<f64>>= vec![];
+        for distribution in self.graph.distributions_iter() {
+            let proba: Vec<f64>= self.graph[distribution].iter_variables().map(|v|self.graph[v].weight().unwrap()).collect();
+            probabilities.push(proba);
+        }
         self.propagator.init(self.graph.number_clauses());
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
             return None;
         }
         self.branching_heuristic.init(&self.graph, &self.state);
-        let mut dac = Dac::new(&self.graph);
+        let mut dac = Dac::new(&probabilities);
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
             Some(_) => {

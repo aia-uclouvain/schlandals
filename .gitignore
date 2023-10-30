@@ -5,3 +5,4 @@ pyschlandals/target
 .vscode/
 pyschlandals/pipytoken
 .vimspector.json
+*.cnf

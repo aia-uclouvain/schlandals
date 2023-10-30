@@ -83,7 +83,7 @@ fn main() {
             if should_read {
                 schlandals::compile(input, branching, fdac, dotfile);
             } else {
-                schlandals::read_compiled(input, dotfile);
+                //schlandals::read_compiled(input, dotfile);
             }
         },
     }
