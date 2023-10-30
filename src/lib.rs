@@ -17,6 +17,8 @@
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::Write;
+use learning::exact::DACCompiler;
+use learning::learner::Learner;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -28,8 +30,7 @@ use solvers::{QuietSearchSolver, StatSearchSolver};
 use solvers::ProblemSolution;
 
 use propagator::Propagator;
-use solvers::compiler::ExactDACCompiler;
-use crate::core::circuit::*;
+use crate::learning::circuit::*;
 
 // Re-export the modules
 mod common;
@@ -39,6 +40,7 @@ mod solvers;
 mod parser;
 mod propagator;
 mod preprocess;
+mod learning;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -64,31 +66,50 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
-    let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
+    let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
     let mut res = compiler.compile();
     if let Some(dac) = res.as_mut() {
         dac.evaluate();
-        if let Some(f) = dotfile {
-            let out = dac.as_graphviz();
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(out.as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Culd not write the circuit into the dot file: {:?}", e),
-            }
-        }
-        if let Some(f) = fdac {
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(format!("{}", dac).as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Culd not write the circuit into the fdac file: {:?}", e),
-            }
-            
-        }
     }
     res
 }
 
-pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
+pub fn learner(inputs: Vec<PathBuf>, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, lr:f64) -> Learner {    
+    let mut state = StateManager::default();
+    let mut propagator = Propagator::new(&mut state);
+    let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
+    let mut distributions: Vec<Vec<f64>> = vec![];
+    for distribution in graph.distributions_iter() {
+        let mut probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
+        for el in &mut probabilities {
+            *el = el.log10();
+        }
+        distributions.push(probabilities);
+    }
+    let mut learner = Learner::new(distributions, lr);
+
+    for input in inputs {
+        let mut state = StateManager::default();
+        let mut propagator = Propagator::new(&mut state);
+        let graph = parser::graph_from_ppidimacs(&input, &mut state);
+        let component_extractor = ComponentExtractor::new(&graph, &mut state);
+        let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+            Branching::MinInDegree => Box::<MinInDegree>::default(),
+            Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+            Branching::MaxDegree => Box::<MaxDegree>::default(),
+        };
+        let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
+        let res = compiler.compile();
+        if res.is_some() {
+            learner.add_dac(res.unwrap());
+        }
+    }
+    learner
+
+
+}
+
+/* pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
     let dac = Dac::from_file(&input);
     if let Some(f) = dotfile {
         let out = dac.as_graphviz();
@@ -99,7 +120,7 @@ pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
         }
     }
     dac
-}
+} */
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let mut state = StateManager::default();

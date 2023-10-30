@@ -1,5 +1,5 @@
 //Schlandals
-//Copyright (C) 2022-2023 A. Dubray
+//Copyright (C) 2022 A. Dubray
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
@@ -14,12 +14,6 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod components;
-pub mod graph;
-pub mod sparse_set;
-pub mod literal;
-pub mod variable;
-mod clause;
-mod distribution;
-pub mod watched_vector;
-pub mod flags;
+pub mod circuit;
+pub mod learner;
+pub mod exact;

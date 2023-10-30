@@ -99,7 +99,7 @@ fn main() {
             schlandals::compile(input, branching, fdac, dotfile);
         },
         Command::ReadCompiled { input, dotfile } => {
-            schlandals::read_compiled(input, dotfile);
+            //schlandals::read_compiled(input, dotfile);
         },
         Command::ApproximateSearch { input, branching, statistics, memory, epsilon }  => {
             match schlandals::search(input, branching, statistics, memory, epsilon) {

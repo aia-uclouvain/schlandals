@@ -4,3 +4,4 @@ pyschlandals/dist
 pyschlandals/target
 .vscode/
 pyschlandals/pipytoken
+*.cnf

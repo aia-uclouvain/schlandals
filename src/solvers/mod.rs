@@ -26,7 +26,6 @@ pub type ProblemSolution = Result<Float, Unsat>;
 pub type Bounds = (Float, Float);
 
 pub mod search;
-pub mod compiler;
 mod statistics;
 
 use search::SearchSolver;
