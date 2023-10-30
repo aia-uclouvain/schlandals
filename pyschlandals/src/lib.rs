@@ -88,6 +88,11 @@ impl PyDac {
     pub fn evaluate(&mut self) -> f64 {
         self.dac.evaluate().to_f64()
     }
+
+    /// Computes the gradient of each distribution, layer by layer (starting from the root, to the distributions)
+    pub fn compute_grads(&mut self, grad_loss: f64, lr: f64){
+        self.dac.compute_grads(grad_loss, lr);
+    }
     
     /// Returns the probability computed by the circuit
     pub fn get_circuit_probability(&self) -> f64 {
@@ -178,7 +183,11 @@ impl PyDac {
     self.dac.get_distribution_probability_at(DistributionNodeIndex(distribution), probability_index)
     }
     
-    /// Sets the probability at the given index in the given distribution
+    pub fn get_distribution_gradient_at(&self, distribution: usize, probability_index: usize) -> f64 {
+        self.dac.get_distribution_gradient_at(DistributionNodeIndex(distribution), probability_index)
+    }
+
+    /// Sets the unsoftmaxed probability at the given index in the given distribution
     pub fn set_distribution_probability(&mut self, distribution: usize, probability_index: usize, probability: f64) {
         self.dac.set_distribution_probability_at(DistributionNodeIndex(distribution), probability_index, probability);
     }

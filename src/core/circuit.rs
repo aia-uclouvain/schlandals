@@ -65,16 +65,31 @@ pub struct CircuitNode {
     layer: usize,
     /// Should the node be removed as post-processing ?
     to_remove: bool,
+    // Gradient computation, the value of the path from the root
+    path_value: Float,
 }
 
 /// A distribution node, an input of the circuit. Each distribution node holds the distribution's parameter as well as the outputs.
 /// For each output node, it also stores the value that must be sent to the output (as an index of the probability vector).
 struct DistributionNode {
-    
-    /// Probabilities of the distribution
-    probabilities: Vec<f64>,
+    /// Probabilities of the distribution, not softmaxed
+    unsoftmaxed_probabilities: Vec<f64>,
     /// Outputs of the node
     outputs: Vec<(CircuitNodeIndex, usize)>,
+    // Gradient computation, the current value of the gradient of each possible value of the distribution
+    grad_value: Vec<Float>,
+}
+
+/// Calculates the softmax (the normalized exponential) function, which is a generalization of the
+/// logistic function to multiple dimensions.
+///
+/// Takes in a vector of real numbers and normalizes it to a probability distribution such that
+/// each of the components are in the interval (0, 1) and the components add up to 1. Larger input
+/// components correspond to larger probabilities.
+/// From https://docs.rs/compute/latest/src/compute/functions/statistical.rs.html#43-46
+pub fn softmax(x: &[f64]) -> Vec<f64> {
+    let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
+    x.iter().map(|i| i.exp() / sum_exp).collect()
 }
 
 /// Structure representing the Distribution awared Arithmetic Circuit (DAC).
@@ -104,11 +119,16 @@ impl Dac {
     pub fn new(graph: &Graph) -> Self {
         let mut distribution_nodes: Vec<DistributionNode> = vec![];
         for distribution in graph.distributions_iter() {
-            let probabilities = graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
+            let mut probabilities: Vec<f64> = graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
+            for el in &mut probabilities {
+                *el = el.log10();
+            }
+            let prob_len = probabilities.len();
             distribution_nodes.push(DistributionNode {
-                probabilities,
+                unsoftmaxed_probabilities: probabilities,
                 outputs: vec![],
-             });
+                grad_value: vec![f128!(0.0); prob_len],
+            });
         }
         Self {
             nodes: vec![],
@@ -133,6 +153,7 @@ impl Dac {
             number_inputs: 0,
             layer: 0,
             to_remove: true,
+            path_value: f128!(1.0),
         });
         id
     }
@@ -152,6 +173,7 @@ impl Dac {
             number_inputs: 0,
             layer: 0,
             to_remove: true,
+            path_value: f128!(1.0),
         });
         id
     }
@@ -362,7 +384,7 @@ impl Dac {
             // If a distribution node send all its value to a sum node, remove the node from the output
             let mut out_count = (0..self.nodes.len()).map(|_| 0).collect::<Vec<usize>>();
             for node in 0..self.distribution_nodes.len() {
-                let number_value = self.distribution_nodes[node].probabilities.len();
+                let number_value = self.get_distribution_domain_size(DistributionNodeIndex(node));
                 for (output, _) in self.distribution_nodes[node].outputs.iter().copied() {
                     if !self.nodes[output.0].is_mul {
                         out_count[output.0] += 1;
@@ -408,6 +430,12 @@ impl Dac {
             } else {
                 node.value.assign(0.0);
             }
+            node.path_value = f128!(1.0);
+        }
+        for distr in self.distribution_nodes.iter_mut() {
+            for val in distr.grad_value.iter_mut() {
+                val.assign(0.0);
+            }
         }
     }
     
@@ -416,10 +444,11 @@ impl Dac {
         self.reset_nodes();
         for d_node in (0..self.distribution_nodes.len()).map(DistributionNodeIndex) {
             for (output, value) in self.distribution_nodes[d_node.0].outputs.iter().copied() {
+                let prob = self.get_distribution_probability_at(d_node, value);
                 if self.nodes[output.0].is_mul {
-                    self.nodes[output.0].value *= self.distribution_nodes[d_node.0].probabilities[value];
+                    self.nodes[output.0].value *= prob;//distribution_nodes[d_node.0].probabilities[value];
                 } else {
-                    self.nodes[output.0].value += self.distribution_nodes[d_node.0].probabilities[value];                    
+                    self.nodes[output.0].value += prob;//distribution_nodes[d_node.0].probabilities[value];                    
                 }
             }
         }
@@ -438,6 +467,62 @@ impl Dac {
         }
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value.clone()
+    }
+
+    /// Computes the gradient of each distribution, layer by layer (starting from the root, to the distributions)
+    pub fn compute_grads(&mut self, grad_loss: f64, lr: f64) {
+        for node in (0..self.nodes.len()).map(CircuitNodeIndex).rev() {
+            // Iterate on all nodes from the DAC, top-down way
+            let start = self.nodes[node.0].input_start;
+            let end = start + self.nodes[node.0].number_inputs;
+            let value= self.nodes[node.0].value.clone();
+            let path_val = self.nodes[node.0].path_value.clone();
+            // Update the path value for children that are other nodes
+            for i in start..end {
+                let child = self.inputs[i];
+                if self.nodes[node.0].is_mul {
+                    // In case of a multiplicative node, multiply the current value with all the other branches values
+                    // == multiply by the node value and divide by the considered branch value
+                    self.nodes[child.0].path_value.assign(&path_val);
+                    self.nodes[child.0].path_value *=  &value;
+                    let child_val = self.nodes[child.0].value.clone();
+                    self.nodes[child.0].path_value /= child_val;
+                } else {
+                    // In case of an additive node, simply propagate the current value
+                    self.nodes[child.0].path_value.assign(path_val.clone());                    
+                }
+            }
+
+            // Compute the gradient for children that are leaf distributions
+            for node_i_distr in 0..self.get_circuit_node_number_distribution_input(node){
+                let (distr_i, val_i) = self.get_circuit_node_input_distribution_at(node, node_i_distr);
+                let mut factor = self.nodes[node.0].path_value.clone()*grad_loss.clone();
+                if self.nodes[node.0].is_mul {
+                    // In case of a multiplicative node, the factor of the gradient is multiplied by the values of all the other branches of the node
+                    factor *= &value;
+                    factor /= self.get_distribution_probability_at(DistributionNodeIndex(distr_i.0), val_i);
+                }
+
+                // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
+                let mut sum_other_w = f128!(0.0);
+                let child_w = self.get_distribution_probability_at(DistributionNodeIndex(distr_i.0), val_i);
+                for params in 0..self.get_distribution_domain_size(DistributionNodeIndex(distr_i.0)){
+                    let weigth = self.get_distribution_probability_at(DistributionNodeIndex(distr_i.0), params);
+                    if params != val_i {
+                        // For the other possible values of the distribution, the gradient contribution 
+                        // is simply the factor and the product of both weights
+                        self.distribution_nodes[distr_i.0].grad_value[params] -= factor.clone()*weigth.clone()*child_w.clone();
+                        sum_other_w += weigth.clone();
+                    }
+                }
+                self.distribution_nodes[distr_i.0].grad_value[val_i] += factor.clone()*child_w.clone()*sum_other_w.clone();
+            }
+        }
+        for distr in 0..self.distribution_nodes.len() {
+            for val in 0..self.get_distribution_domain_size(DistributionNodeIndex(distr)){
+                self.distribution_nodes[distr].unsoftmaxed_probabilities[val] -= lr*self.distribution_nodes[distr].grad_value[val].to_f64();
+            }
+        }
     }
     
     // --- Various helper methods for the python bindings ---
@@ -502,12 +587,13 @@ impl Dac {
     
     /// Returns the number of value in the given distribution
     pub fn get_distribution_domain_size(&self, distribution: DistributionNodeIndex) -> usize {
-        self.distribution_nodes[distribution.0].probabilities.len()
+        self.distribution_nodes[distribution.0].unsoftmaxed_probabilities.len()
     }
     
     /// Returns the probability at the given index of the given distribution
     pub fn get_distribution_probability_at(&self, distribution: DistributionNodeIndex, index: usize) -> f64 {
-        self.distribution_nodes[distribution.0].probabilities[index]
+        let softmaxed = softmax(&self.distribution_nodes[distribution.0].unsoftmaxed_probabilities);
+        softmaxed[index]
     }
     
     /// Returns the pair (circuit_node, index) for the output of the distribution at the given index
@@ -519,12 +605,17 @@ impl Dac {
     pub fn get_distribution_number_output(&self, distribution: DistributionNodeIndex) -> usize {
         self.distribution_nodes[distribution.0].outputs.len()
     }
+
+    /// Returns the gradient of the given distribution at the given index
+    pub fn get_distribution_gradient_at(&self, distribution: DistributionNodeIndex, index: usize) -> f64 {
+        self.distribution_nodes[distribution.0].grad_value[index].to_f64()
+    }
     
     // --- SETTERS --- //
     
-    /// Set the probability of the distribution, at the given index, to the given value
+    /// Set the unsoftmaxed probability of the distribution, at the given index, to the given value
     pub fn set_distribution_probability_at(&mut self, distribution: DistributionNodeIndex, index: usize, value: f64) {
-        self.distribution_nodes[distribution.0].probabilities[index] = value;
+        self.distribution_nodes[distribution.0].unsoftmaxed_probabilities[index] = value;
     }
 
 
@@ -592,7 +683,7 @@ impl Dac {
             let from = self.distribution_node_id(node);
             for (output, value) in self.distribution_nodes[node.0].outputs.iter().copied() {
                 let to = self.sp_node_id(output);
-                let f_value = format!("({}, {:.3})",value, self.distribution_nodes[node.0].probabilities[value]);
+                let f_value = format!("({}, {:.3})",value, self.get_distribution_probability_at(node, value));
                 out.push_str(&Dac::edge(from, to, Some(f_value)));
             }
         }
@@ -629,11 +720,13 @@ impl Dac {
 impl fmt::Display for Dac {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "dac {} {}", self.distribution_nodes.len(), self.nodes.len())?;
-        for node in self.distribution_nodes.iter() {
-            write!(f, "d {}", node.probabilities.len())?;
-            for p in node.probabilities.iter() {
-                write!(f, " {:.8}", p)?;
+        for node_i in 0..self.distribution_nodes.len(){
+            let dom_size = self.get_distribution_domain_size(DistributionNodeIndex(node_i));
+            write!(f, "d {}", dom_size)?;
+            for p_i in 0..dom_size{
+                write!(f, " {:.8}", self.get_distribution_probability_at(DistributionNodeIndex(node_i), p_i))?;
             }
+            let node = &self.distribution_nodes[node_i];
             for (output, value) in node.outputs.iter().copied() {
                 write!(f, " {} {}", output.0, value)?;
             }
@@ -684,7 +777,7 @@ impl Dac {
                 }
             } else if l.starts_with('d') {
                 let dom_size = split[1].parse::<usize>().unwrap();
-                let probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                let mut probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
                 let mut outputs: Vec<(CircuitNodeIndex, usize)> = vec![];
                 for i in ((2+dom_size)..split.len()).step_by(2) {
                     let output_node = CircuitNodeIndex(split[i].parse::<usize>().unwrap());
@@ -692,9 +785,14 @@ impl Dac {
                     outputs.push((output_node, value));
                     input_distributions_node[output_node.0].push((DistributionIndex(dac.distribution_nodes.len()), value));
                 }
+                for el in &mut probabilities {
+                    *el = el.log10();
+                }
+                let prob_len = probabilities.len();
                 dac.distribution_nodes.push(DistributionNode {
-                    probabilities,
+                    unsoftmaxed_probabilities: probabilities,
                     outputs,
+                    grad_value: vec![f128!(0.0); prob_len],
                 });
             } else if l.starts_with("inputs") {
                 dac.inputs = split.iter().skip(1).map(|i| CircuitNodeIndex(i.parse::<usize>().unwrap())).collect();
@@ -714,6 +812,7 @@ impl Dac {
                     number_inputs: values[3],
                     layer: 0,
                     to_remove: false,
+                    path_value: f128!(1.0),
                 })
             } else if !l.is_empty() {
                 panic!("Bad line format: {}", l);
