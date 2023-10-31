@@ -34,6 +34,7 @@ use crate::heuristics::BranchingDecision;
 use crate::propagator::Propagator;
 use crate::common::*;
 use crate::core::circuit::*;
+use crate::preprocess::Preprocessor;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -185,21 +186,19 @@ where
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.init(self.graph.number_clauses());
-        // Doing an initial propagation to detect some UNSAT formula from the start
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
-            Err(_) => None,
-            Ok(_) => {
-                self.branching_heuristic.init(&self.graph, &self.state);
-                let mut dac = Dac::new(&self.graph);
-                match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
-                    None => None,
-                    Some(_) => {
-                        dac.remove_dead_ends();
-                        dac.reduce();
-                        dac.layerize();
-                        Some(dac)
-                    }
-                }
+        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
+        if preproc.is_none() {
+            return None;
+        }
+        self.branching_heuristic.init(&self.graph, &self.state);
+        let mut dac = Dac::new(&self.graph);
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
+            None => None,
+            Some(_) => {
+                dac.remove_dead_ends();
+                dac.reduce();
+                dac.layerize();
+                Some(dac)
             }
         }
     }
