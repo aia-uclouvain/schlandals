@@ -9,10 +9,7 @@ Schlandals is a projected weighted model counter which targets inference in prob
 Current known probability queries that can be solved with the solver include
   - Computing the probability of some target variables (given some evidences) in a Bayesian network
   - Computing the probability that two nodes are connected in a probabilistic graph
-
-The solver currently supports two types of solving
-  - Search based solving with a DPLL-style backtracing search
-  - Compiling into (or read from a file) an arithmetic circuit with distributions as leaf
+  - A mapping from [ProbLog](https://github.com/ML-KULeuven/problog) programs to Schlandals
 
 # Problem specification
 
@@ -28,9 +25,9 @@ Schlandals takes as input a file using a modified version of the [DIMACS](https:
 c Lines starting with `c` alone are comments.
 c The first line must be the head in the form of "p cnf <number variable> <number clauses>
 p cnf 16 11
-c Following the header, must be the definition of the distributions. Note that the lines starts with "c p distribution" which is similar to how weights are encoded in DIMACS (c p weight).
-c /!\ The definition of the distribution MUST be before the clauses and induce an implicit numbering on the variable. Below, the first distribution will have
-c variable with index 1 and 2. The second has the variables with index 3 and 4, etc.
+c The distribution are defined by lines starting with "c p distribution"
+c Each value in a distribution is assigned to a variable, starting from 1. Hence, the first N variables
+c are used for the distributions.
 c p distribution 0.2 0.8
 c p distribution 0.3 0.7
 c p distribution 0.4 0.6
@@ -84,3 +81,28 @@ The circuit can be stored in the file given by the `fdac` argument and a DOT vis
 ### Reading a compiled file
 
 A previously compiled file can be read using `schlandals read-compiled -i <fdac file> [--dotfile <dotfile]`.
+
+# Citing
+
+To cite Schlandals in your work, use the following
+
+```
+@InProceedings{dubray_et_al:LIPIcs.CP.2023.15,
+  author =	{Dubray, Alexandre and Schaus, Pierre and Nijssen, Siegfried},
+  title =	{{Probabilistic Inference by Projected Weighted Model Counting on Horn Clauses}},
+  booktitle =	{29th International Conference on Principles and Practice of Constraint Programming (CP 2023)},
+  pages =	{15:1--15:17},
+  series =	{Leibniz International Proceedings in Informatics (LIPIcs)},
+  ISBN =	{978-3-95977-300-3},
+  ISSN =	{1868-8969},
+  year =	{2023},
+  volume =	{280},
+  editor =	{Yap, Roland H. C.},
+  publisher =	{Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik},
+  address =	{Dagstuhl, Germany},
+  URL =		{https://drops.dagstuhl.de/opus/volltexte/2023/19052},
+  URN =		{urn:nbn:de:0030-drops-190520},
+  doi =		{10.4230/LIPIcs.CP.2023.15},
+  annote =	{Keywords: Model Counting, Bayesian Networks, Probabilistic Networks}
+}
+```

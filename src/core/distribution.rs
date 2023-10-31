@@ -14,20 +14,19 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+//! This module provide the implementation of a distribution in Schlandals.
+//! A distribution is a set of variable that respects the following constraints:
+//!     1. Every variable must have a weight
+//!     2. The sum of the variables' weight must sum to 1
+//!     3. In each model of the input formula, exactly one of the variables is set to true
+
 use super::graph::VariableIndex;
 use search_trail::{StateManager, ReversibleUsize, UsizeManager};
 
-/// Represents a set of variable in a same distribution. This assume that the variable of a distribution
-/// are inserted in the graph one after the other (i.e. that their `VariableIndex` are consecutive).
-/// Since no variable should be removed from the graph once constructed, this should not be a problem.
-/// Thus a distribution is identified by the first `VariableIndex` and the number of variable in it.
-/// 
-/// We also store the number of clauses in which the distribution appears. This is usefull to compute
-/// the unconstrained probability during the propagation.
-/// In the same manner, the number of variable assigned to false in the distribution is kept, allowing us
-/// to efficiently detect that only one variable remains in a distribution.
+/// A distribution of the input problem
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Distribution {
+    /// Id of the distribution in the problem
     id: usize,
     /// First variable in the distribution
     pub first: VariableIndex,
@@ -35,6 +34,7 @@ pub struct Distribution {
     pub size: usize,
     /// Number of constrained clauses in which the distribution appears
     pub number_clause_unconstrained: ReversibleUsize,
+    /// Number of clauses in which the distribution appears
     number_clause: usize,
     /// Number of variables assigned to F in the distribution
     pub number_false: ReversibleUsize,
@@ -53,32 +53,43 @@ impl Distribution {
         }
     }
     
+    /// Increments the number of clauses in which the distribution appears
     pub fn increment_clause(&mut self) {
         self.number_clause += 1;
     }
     
+    /// Decrements the number of constrained clause in which the distribution appears. This
+    /// operation is reversed when the trail restore its state.
+    /// Returns the remaining number of constrained clauses in which it appears.
     pub fn decrement_constrained(&self, state: &mut StateManager) -> usize {
         self.number_clause - state.increment_usize(self.number_clause_unconstrained)
     }
     
+    /// Icrements the number of variable assigned to false in the distribution. This operation
+    /// is reversed when the trail restore its state.
     pub fn increment_number_false(&self, state: &mut StateManager) -> usize {
         state.increment_usize(self.number_false)
     }
     
+    /// Returns the number of unfixed variables in the distribution. This assume that the distribution
+    /// has no variable set to true (otherwise there is no need to consider it).
     pub fn number_unfixed(&self, state: &StateManager) -> usize {
         self.size - state.get_usize(self.number_false)
     }
     
+    /// Returns the number of variable set to false in the distribution.
     pub fn number_false(&self, state: &StateManager) -> usize {
         state.get_usize(self.number_false)
     }
     
+    /// Returns the start of the distribution in the vector of variables in the graph.
     pub fn start(&self) -> VariableIndex {
         self.first
     }
     
     // --- ITERATOR --- //
 
+    /// Returns an iterator on the variables of the distribution
     pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> {
         (self.first.0..(self.first.0 + self.size)).map(VariableIndex)
     }
