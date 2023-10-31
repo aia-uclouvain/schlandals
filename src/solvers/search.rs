@@ -252,7 +252,7 @@ where
         if preproc.is_none() {
             return ProblemSolution::Err(Unsat);
         }
-        let mut p_in = preproc.unwrap();
+        let p_in = preproc.unwrap();
         let mut p_out = f128!(1.0);
         
         for distribution in self.graph.distributions_iter() {
@@ -260,7 +260,6 @@ where
             for variable in self.graph[distribution].iter_variables() {
                 if let Some(v) = self.graph[variable].value(&self.state) {
                     if v {
-                        p_in *= self.graph[variable].weight().unwrap();
                         sum_neg = 0.0;
                         break;
                     } else {
