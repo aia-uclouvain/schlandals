@@ -150,6 +150,7 @@ impl ComponentExtractor {
         g[clause].is_constrained(state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
     }
     
+    /// Returns true if the distribution has not yet been visited during the component exploration
     fn is_distribution_visitable(&self, distribution: DistributionIndex, distribution_start: usize, distribution_size: &usize) -> bool {
         let distribution_pos = self.distribution_positions[distribution.0];
         !(distribution_start <= distribution_pos && distribution_pos < (distribution_start + *distribution_size))
@@ -210,10 +211,10 @@ impl ComponentExtractor {
                             *comp_number_distribution += 1;
                             for v in g[distribution].iter_variables() {
                                 if !g[v].is_fixed(state) {
-                                    for c in g[v].iter_clause_negative_occurence() {      
+                                    for c in g[v].iter_clauses_negative_occurence() {      
                                         self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
                                     }
-                                    for c in g[v].iter_clause_positive_occurence() {
+                                    for c in g[v].iter_clauses_positive_occurence() {
                                         self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
                                     }
                                 }
@@ -325,6 +326,8 @@ impl ComponentExtractor {
         self.distributions[start..end].iter().copied()
     }
     
+    /// Adds a clause to a component. This function is called when the solver encounters an UNSAT and needs to learn a clause.
+    /// During this process we ensure that the learned clause is horn and can be safely added in the component for further detections.
     pub fn add_clause_to_component(&mut self, component: ComponentIndex, clause: ClauseIndex) {
         debug_assert!(clause.0 == self.clause_positions.len());
         let start = self.components[component.0].start;   

@@ -14,10 +14,19 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+///! This modules provide flags for the clauses and the literals. They are used during the propagation to set
+/// various information
+
+
 //  Inspired from @xgillard rsolve (https://www.github.com/xgillard/rsolve)
+
+/// Flags that a clause can take
 pub enum ClauseFlag {
+    /// No flags
     Clear = 0,
+    /// The clause is reachable from a clause whose implicant might be true
     TrueReachable = 1,
+    /// The clause is reachable from a clause whose consequence might be false
     FalseReachable = 2,    
 }
 
@@ -57,11 +66,17 @@ impl ClauseFlags {
     } 
 }
 
+/// Flags that a literal can take
 pub enum LitFlag {
+    /// No flags
     Clear = 0,
+    /// The literal has been marked during the clause learning procedure
     IsMarked = 1,
+    /// The literal has been analyzed as implied in the learned clause
     IsImplied = 2,
+    /// The literal has been analyzed as not implied in the learned clause
     IsNotImplied = 4,
+    /// The literal is in the conflict clause
     IsInConflictClause = 8,
 }
 
