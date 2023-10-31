@@ -29,11 +29,11 @@ use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::{graph::*, variable};
+use crate::core::graph::*;
 use crate::heuristics::BranchingDecision;
+use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
-use crate::preprocess::Preprocessor;
 use crate::learning::circuit::*;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
