@@ -95,7 +95,7 @@ where
         if !children.is_empty() {
             let node = dac.add_sum_node();
             for child in children {
-                dac.add_circuit_node_output(child, node);
+                dac.add_node_output(child, node);
             }
             Some(node)
         } else {
@@ -111,7 +111,7 @@ where
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
                     let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
-                    dac.add_distribution_output(dac.get_distribution_value_node_index(distribution, value_id), node);
+                    dac.add_node_output(dac.get_distribution_value_node_index(distribution, value_id), node);
                 }
             }
         
@@ -121,10 +121,10 @@ where
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
-                            dac.add_distribution_output(dac.get_distribution_value_node_index(distribution, value_id), sum_node);
+                            dac.add_node_output(dac.get_distribution_value_node_index(distribution, value_id), sum_node);
                         }
                     }
-                    dac.add_circuit_node_output(sum_node, node);
+                    dac.add_node_output(sum_node, node);
                 }
             }
             Some(node)
@@ -171,7 +171,7 @@ where
         }
         if let Some(node) = prod_node {
             for child in sum_children {
-                dac.add_circuit_node_output(child, node);
+                dac.add_node_output(child, node);
             }
         }
         prod_node
