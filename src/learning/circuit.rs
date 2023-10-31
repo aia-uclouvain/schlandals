@@ -188,9 +188,8 @@ impl Dac {
         let mut distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex> = FxHashMap::default();
         for (i, distribution) in distributions.iter().enumerate(){
             for (j, value) in distribution.iter().enumerate(){
-                index += 1;
                 distribution_nodes.push(Node {
-                    value: f128!(value.clone()),
+                    value: f128!(*value),
                     outputs: vec![],
                     inputs: FxHashSet::default(),
                     typenode: TypeNode::Distribution{d: i, v: j},
@@ -203,6 +202,7 @@ impl Dac {
                     path_value: f128!(1.0),
                 });
                 distribution_mapping.insert((DistributionIndex(i), j), NodeIndex(index));
+                index += 1;
             }
         }
         Self {
@@ -253,22 +253,13 @@ impl Dac {
     
     /// Adds `output` to the outputs of `node` and `node` to the inputs of `output`. Note that this
     /// function uses the vectors in each node. They are transferred afterward in the `outputs` vector.
-    pub fn add_circuit_node_output(&mut self, node: NodeIndex, output: NodeIndex) {
+    pub fn add_node_output(&mut self, node: NodeIndex, output: NodeIndex) {
         self.nodes[node.0].outputs.push(output);
         self.nodes[node.0].number_outputs += 1;
         self.nodes[output.0].inputs.insert(node);
-        self.nodes[output.0].number_inputs += 1;
+        //self.nodes[output.0].number_inputs += 1;
     }
-    
-    /// Adds `output` to the outputs of the distribution's input node. Adds the distribution
-    /// to the input of `output`
-    pub fn add_distribution_output(&mut self, distribution: NodeIndex, output: NodeIndex) {
-        let node = NodeIndex(distribution.0);
-        self.nodes[node.0].outputs.push(output);
-        self.nodes[node.0].number_outputs += 1;
-        self.nodes[output.0].inputs.insert(distribution);
-        self.nodes[output.0].number_inputs += 1;
-    }
+
     
     fn swap(&mut self, new: &mut [usize], old: &mut [usize], i: usize, j: usize) {
         self.nodes.swap(i, j);
@@ -280,7 +271,6 @@ impl Dac {
     /// Layerizes the circuit. This function sort the internal nodes of the circuits such that an internal nodes at index i
     /// has all its input at an index j < i.
     pub fn layerize(&mut self) {
-        println!("Layerizing");
         // First, we need to add the layer to each node
         let mut to_process: Vec<(NodeIndex, usize)> = vec![];
         for i in 0..self.nodes.len() {
@@ -291,7 +281,6 @@ impl Dac {
         }
         let mut number_layers = 1;
         while let Some((node, layer)) = to_process.pop() {
-            if (layer<20){println!("Node {:?} type {:?} at layer {} size to process {}", node, self.nodes[node.0].typenode, layer, to_process.len());}
             // Only change if the layer must be increased
             if layer >= self.nodes[node.0].layer {
                 if number_layers < layer + 1 {
@@ -299,7 +288,6 @@ impl Dac {
                 }
                 self.nodes[node.0].layer = layer;
                 for output in self.nodes[node.0].outputs.iter().copied() {
-                    if (layer<20){println!("Output {:?} at layer {}", output.0, layer+1);}
                     if self.nodes[output.0].layer < layer + 1 {
                         to_process.push((output, layer+1));
                     }
@@ -369,7 +357,6 @@ impl Dac {
         // Actually remove the nodes (and allocated space) from the nodes vector.
         self.nodes.truncate(end);
         self.nodes.shrink_to(end);
-        println!("Layerized");
     }
     
     /// Tag all nodes that are not on a path from an input to the root of the DAC as to be removed
@@ -409,10 +396,8 @@ impl Dac {
     ///     2. If a sum node has as input a distribution and all its value, it can be removed. In practice it only
     ///        has input from that distribution
     pub fn reduce(&mut self) {
-        println!("Reducing");
         let mut changed = true;
         while changed {
-            println!("in while");
             changed = false;
             // First, we remove all neutral node. Since it can lead to a possible optimization of the sum node, we do that first
             for node in 0..self.nodes.len() {
@@ -462,7 +447,6 @@ impl Dac {
                         }
                     }
                     if in_count == 1.0 {
-                        println!("Removing node {:?}", node);
                         changed = true;
                         for input in self.nodes[node].inputs.iter().copied().collect::<Vec<NodeIndex>>() {
                             self.nodes[input.0].outputs.swap_remove(node);
@@ -487,7 +471,6 @@ impl Dac {
             self.nodes[node].inputs.clear();
             self.nodes[node].inputs.shrink_to_fit();
         }
-        println!("Reduced");
     }
     
     // --- Evaluation ---- //
@@ -711,7 +694,8 @@ impl Dac {
             let from = self.sp_node_id(node);
             let start = self.nodes[node.0].output_start;
             let end = start + self.nodes[node.0].number_outputs;
-            for output in self.outputs[start..end].iter().copied() {
+            //for output in self.outputs[start..end].iter().copied() {
+            for output in self.nodes[node.0].outputs.iter().copied() {
                 let to = self.sp_node_id(output);
                 out.push_str(&Dac::edge(from, to, None));
             }
