@@ -449,7 +449,9 @@ impl Dac {
                     if in_count == 1.0 {
                         changed = true;
                         for input in self.nodes[node].inputs.iter().copied().collect::<Vec<NodeIndex>>() {
-                            self.nodes[input.0].outputs.swap_remove(node);
+                            debug_assert!(matches!(self.nodes[input.0].typenode, TypeNode::Distribution{..}));
+                            let index_to_remove: usize = self.nodes[input.0].outputs.iter().position(|x| x.0 == node).unwrap();
+                            self.nodes[input.0].outputs.swap_remove(index_to_remove);
                         }
                         self.nodes[node].to_remove = true;
                         self.nodes[node].inputs.clear();
@@ -474,37 +476,35 @@ impl Dac {
     }
     
     // --- Evaluation ---- //
-    
-    /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self) -> Float {
+
+    fn send_value(&mut self, node: NodeIndex, value: Float) {
+        let start = self.nodes[node.0].get_output_start();
+        let end = start + self.nodes[node.0].get_number_outputs();
+        for i in start..end {
+            let output = self.outputs[i];
+            if matches!(self.nodes[output.0].typenode, TypeNode::Product){
+                self.nodes[output.0].value *= &value;
+            } else if matches!(self.nodes[output.0].typenode, TypeNode::Sum) {
+                self.nodes[output.0].value += &value;                    
+            }
+        }
+    }
+
+    fn reset(&mut self) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             match self.nodes[node.0].typenode {
-                TypeNode::Distribution {..} => {
-                    let prob = self.nodes[node.0].value.clone();
-                    for output in 0..self.nodes[node.0].outputs.len() {
-                        let out = self.nodes[node.0].outputs[output];
-                        if let TypeNode::Product = self.nodes[out.0].typenode {
-                            self.nodes[out.0].value *= &prob;
-                        }
-                        else if let TypeNode::Sum = self.nodes[out.0].typenode {
-                            self.nodes[out.0].value += &prob;
-                        }
-                    }
-                }
-                TypeNode::Product | TypeNode::Sum => {
-                    let start = self.nodes[node.0].output_start;
-                    let end = start + self.nodes[node.0].number_outputs;
-                    let value = self.nodes[node.0].value.clone();
-                    for i in start..end {
-                        let output = self.outputs[i];
-                        if matches!(self.nodes[output.0].typenode, TypeNode::Product){
-                            self.nodes[output.0].value *= &value;
-                        } else if matches!(self.nodes[output.0].typenode, TypeNode::Sum) {
-                            self.nodes[output.0].value += &value;                    
-                        }
-                    }
-                }
+                TypeNode::Product => self.nodes[node.0].value.assign(1.0),
+                TypeNode::Sum => self.nodes[node.0].value.assign(0.0),
+                TypeNode::Distribution {..} => {},
             }
+        }
+    }
+
+    /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
+    pub fn evaluate(&mut self) -> Float {
+        self.reset();
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            self.send_value(node, self.nodes[node.0].value.clone())
         }
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value.clone()
