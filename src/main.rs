@@ -63,6 +63,24 @@ enum Command {
         #[clap(short, long)]
         read: Option<bool>,
     },
+    /// Learn a circuit from a set of queries
+    Learn {
+        /// The input files
+        #[clap(short, long, value_parser)]
+        inputs: PathBuf,
+        /// How to branch
+        #[clap(short, long, value_enum)]
+        branching: schlandals::Branching,
+        /// If present, file to store the learned distributions
+        #[clap(long)]
+        fout: Option<PathBuf>,
+        /// Learning rate
+        #[clap(short, long)]
+        lr: f64,
+        /// Number of epochs
+        #[clap(short, long)]
+        nepochs: usize,
+    }
 }
 
 fn main() {
@@ -86,5 +104,8 @@ fn main() {
                 //schlandals::read_compiled(input, dotfile);
             }
         },
+        Command::Learn { inputs, branching, fout, lr, nepochs } => {
+            schlandals::learn(vec![inputs], branching, fout, lr, nepochs);
+        }
     }
 }
