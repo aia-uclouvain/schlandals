@@ -25,7 +25,6 @@ macro_rules! test_input_with_branching {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
                 let sol = compile(PathBuf::from(filename), $b, None, None).unwrap().evaluate();
                 let expected = Float::with_val(113, $value);
-                println!("{} {}", sol, expected);
                 assert!((expected - sol).abs() < 0.000001);
             }
 

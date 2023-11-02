@@ -74,9 +74,8 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     res
 }
 
-pub fn learner(inputs: Vec<PathBuf>, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, lr:f64) -> Learner {    
+pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize) {    
     let mut state = StateManager::default();
-    let mut propagator = Propagator::new(&mut state);
     let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
     let mut distributions: Vec<Vec<f64>> = vec![];
     for distribution in graph.distributions_iter() {
@@ -90,7 +89,7 @@ pub fn learner(inputs: Vec<PathBuf>, branching: Branching, fdac: Option<PathBuf>
 
     for input in inputs {
         let mut state = StateManager::default();
-        let mut propagator = Propagator::new(&mut state);
+        let propagator = Propagator::new(&mut state);
         let graph = parser::graph_from_ppidimacs(&input, &mut state);
         let component_extractor = ComponentExtractor::new(&graph, &mut state);
         let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
@@ -104,7 +103,7 @@ pub fn learner(inputs: Vec<PathBuf>, branching: Branching, fdac: Option<PathBuf>
             learner.add_dac(res.unwrap());
         }
     }
-    learner
+    learner.train(nepochs);
 
 
 }

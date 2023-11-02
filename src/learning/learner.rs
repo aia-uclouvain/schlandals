@@ -3,6 +3,7 @@ use rand::distributions;
 use rug::{Assign, Float};
 use crate::common::*;
 use crate::learning::circuit::*;
+use rand::Rng;
 
 
 pub struct Learner {
@@ -10,6 +11,9 @@ pub struct Learner {
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     lr: f64,
+    expected_distribution: Vec<Vec<f64>>,
+    expected_outputs: Vec<f64>,
+    nb_var: usize,
 }
 
 impl Learner {
@@ -32,11 +36,28 @@ impl Learner {
         /* for dac in dacs.iter_mut(){
             dac.push(Dac::new(&softmaxed_distributions));
         } */
+        let mut rng = rand::thread_rng();
+        let mut rand_init: Vec<Vec<f64>> = vec![];
+        let mut nb_var = 0;
+        for i in 0..distributions.len() {
+            let mut vector: Vec<f64> = vec![0.0; distributions[i].len()];
+            for j in 0..distributions[i].len() {
+                vector[j] = rng.gen_range(0.0..1.0);
+                vector[j] = vector[j].log10();
+            }
+            rand_init.push(vector);
+            nb_var += distributions[i].len();
+            grads.push(vec![f128!(0.0); distributions[i].len()]);
+        }
+
         Self { 
             dacs: vec![], 
-            unsoftmaxed_distributions: distributions, 
+            unsoftmaxed_distributions: rand_init, 
             gradients: grads,
-            lr: lr }
+            lr: lr,
+            expected_distribution: distributions,
+            expected_outputs: vec![],
+            nb_var: nb_var,}
     }
 
     // --- Getters --- //
@@ -65,7 +86,8 @@ impl Learner {
         }
     }
 
-    pub fn add_dac(&mut self, dac: Dac) {
+    pub fn add_dac(&mut self, mut dac: Dac) {
+        self.expected_outputs.push(dac.evaluate().to_f64());
         self.dacs.push(dac);
     }
 
@@ -104,7 +126,7 @@ impl Learner {
     // --- Gradient computation --- //
 
     // Compute the gradient of the distributions, from the different DAC queries
-    pub fn compute_gradients(&mut self, gradient_loss: f64){
+    pub fn compute_gradients(&mut self, gradient_loss: Vec<f64>){
         self.zero_grads();
         for dac_i in 0..self.dacs.len() {
             // Iterate on the different DAC queries
@@ -129,7 +151,7 @@ impl Learner {
                         },
                         TypeNode::Distribution{d,v} => {
                             // Compute the gradient for children that are leaf distributions
-                            let mut factor = path_val.clone() * gradient_loss;
+                            let mut factor = path_val.clone() * gradient_loss[dac_i];
                             if matches!(self.dacs[dac_i].nodes[node.0].get_type(), TypeNode::Product) {
                                 factor *= &value;
                                 factor /= self.get_probability(d, v);
@@ -143,6 +165,8 @@ impl Learner {
                                 if params != v {
                                     // For the other possible values of the distribution, the gradient contribution
                                     // is simply the dactor and the product of both weights
+                                    println!("Gradient for {} {} {}", d, params, child_w.clone() * weight.clone() * factor.clone());
+                                    println!("self grad{:?}", self.gradients);
                                     self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
                                     sum_other_w += weight.clone();
                                 }
@@ -160,6 +184,34 @@ impl Learner {
             for (value, grad) in distribution.iter_mut().zip(grad.iter()) {
                 *value -= (self.lr * grad.clone()).to_f64();
             }
+        }
+    }
+
+    // --- Training --- //
+    pub fn train(&mut self, nepochs:usize) {
+        let mut epoch_error_evolution = vec![0.0; nepochs];
+        let mut epoch_distance_distribution = vec![0.0; nepochs];
+        for e in 0..nepochs {
+            let do_print = e % 1 == 0;
+            let predictions = self.evaluate();
+            if do_print { println!("Epoch {} -\n Predictions: {:?} Expected: {:?}", e, predictions, self.expected_outputs);}
+            let mut loss = 0.0;
+            let mut loss_grad = vec![0.0; self.dacs.len()];
+            for dac_i in 0..self.dacs.len() {
+                loss += (predictions[dac_i].to_f64() - self.expected_outputs[dac_i]).powi(2);
+                loss_grad[dac_i] = 2.0 * (predictions[dac_i].to_f64() - self.expected_outputs[dac_i]);
+            }
+            loss /= self.dacs.len() as f64;
+            self.compute_gradients(loss_grad);
+            self.update_distributions();
+            epoch_error_evolution[e] = loss;
+
+            for i in 0..self.expected_distribution.len() {
+                for j in 0..self.expected_distribution[i].len() {
+                    epoch_distance_distribution[e] += (self.expected_distribution[i][j] - self.get_probability(i, j)).abs();
+                }
+            }
+            epoch_distance_distribution[e] /= self.nb_var as f64;
         }
     }
 

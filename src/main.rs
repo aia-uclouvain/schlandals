@@ -83,6 +83,24 @@ enum Command {
         /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
+    },
+    /// Learn a circuit from a set of queries
+    Learn {
+        /// The input files
+        #[clap(short, long, value_parser)]
+        inputs: PathBuf,
+        /// How to branch
+        #[clap(short, long, value_enum)]
+        branching: schlandals::Branching,
+        /// If present, file to store the learned distributions
+        #[clap(long)]
+        fout: Option<PathBuf>,
+        /// Learning rate
+        #[clap(short, long)]
+        lr: f64,
+        /// Number of epochs
+        #[clap(short, long)]
+        nepochs: usize,
     }
 }
 
@@ -106,6 +124,9 @@ fn main() {
                 Err(_) => println!("Model UNSAT"),
                 Ok(p) => println!("{}", p),
             };
+        }
+        Command::Learn { inputs, branching, fout, lr, nepochs } => {
+            schlandals::learn(vec![inputs], branching, fout, lr, nepochs);
         }
     }
 }
