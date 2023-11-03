@@ -15,10 +15,9 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::path::PathBuf;
-use std::fs::File;
-use std::io::Write;
+use learning::LogLearner;
+use learning::QuietLearner;
 use learning::exact::DACCompiler;
-use learning::learner::Learner;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -67,14 +66,14 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         Branching::MaxDegree => Box::<MaxDegree>::default(),
     };
     let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-    let mut res = compiler.compile();
+    let mut res = compiler.compile(u64::MAX);
     if let Some(dac) = res.as_mut() {
         dac.evaluate();
     }
     res
 }
 
-pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize) {    
+pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, log:bool, timeout:u64) {    
     let mut state = StateManager::default();
     let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
     let mut distributions: Vec<Vec<f64>> = vec![];
@@ -85,27 +84,14 @@ pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, 
         }
         distributions.push(probabilities);
     }
-    let mut learner = Learner::new(distributions, lr);
-
-    for input in inputs {
-        let mut state = StateManager::default();
-        let propagator = Propagator::new(&mut state);
-        let graph = parser::graph_from_ppidimacs(&input, &mut state);
-        let component_extractor = ComponentExtractor::new(&graph, &mut state);
-        let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-            Branching::MinInDegree => Box::<MinInDegree>::default(),
-            Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-            Branching::MaxDegree => Box::<MaxDegree>::default(),
-        };
-        let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-        let res = compiler.compile();
-        if res.is_some() {
-            learner.add_dac(res.unwrap());
-        }
+    if log { 
+        let mut learner = LogLearner::new(distributions, inputs, branching, timeout);
+        learner.train(nepochs, lr, fout);
     }
-    learner.train(nepochs);
-
-
+    else {
+        let mut learner = QuietLearner::new(distributions, inputs, branching, timeout);
+        learner.train(nepochs, lr, fout);
+    }
 }
 
 /* pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
