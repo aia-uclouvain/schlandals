@@ -66,8 +66,8 @@ enum Command {
     /// Learn a circuit from a set of queries
     Learn {
         /// The input files
-        #[clap(short, long, value_parser)]
-        inputs: PathBuf,
+        #[clap(short, long, value_parser, num_args=1.., value_delimiter=' ')]
+        inputs: Vec<PathBuf>,
         /// How to branch
         #[clap(short, long, value_enum)]
         branching: schlandals::Branching,
@@ -80,6 +80,12 @@ enum Command {
         /// Number of epochs
         #[clap(short, long)]
         nepochs: usize,
+        /// If present, save a detailled csv of the training and use a codified output filename
+        #[clap(long, short, action)]
+        do_log: bool,
+        /// If present, define the compilation timeout
+        #[clap(long, short, default_value_t=u64::MAX)]
+        timeout: u64,
     }
 }
 
@@ -104,8 +110,8 @@ fn main() {
                 //schlandals::read_compiled(input, dotfile);
             }
         },
-        Command::Learn { inputs, branching, fout, lr, nepochs } => {
-            schlandals::learn(vec![inputs], branching, fout, lr, nepochs);
+        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout} => {
+            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout);
         }
     }
 }

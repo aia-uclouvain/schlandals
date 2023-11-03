@@ -1,44 +1,38 @@
-use crate::core::graph::*;
-use rand::distributions;
+use std::path::PathBuf;
+
+use std::io::{self, Write};
+use std::fs::File;
 use rug::{Assign, Float};
 use crate::common::*;
 use crate::learning::circuit::*;
 use rand::Rng;
+use super::logger::Logger;
+use search_trail::StateManager;
+use crate::branching::*;
+use crate::parser;
+use crate::propagator::Propagator;
+use crate::core::components::ComponentExtractor;
+use crate::Branching;
+use super::exact::DACCompiler;
 
 
-pub struct Learner {
+pub struct Learner<const S: bool> {
     dacs: Vec<Dac>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     lr: f64,
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
-    nb_var: usize,
+    log: Logger<S>,
 }
 
-impl Learner {
+impl <const S: bool> Learner<S> {
 
     /// Creates a new learner from the given graphs.
-    pub fn new(distributions:Vec<Vec<f64>>, lr:f64) -> Self {
-        //let mut distributions: Vec<Vec<f64>> = vec![];
+    pub fn new(distributions:Vec<Vec<f64>>, inputs: Vec<PathBuf>, branching: Branching, timeout:u64) -> Self {
         let mut grads: Vec<Vec<Float>> = vec![];
-        // let mut softmaxed_distributions: Vec<Vec<f64>> = vec![];
-        /* for distribution in graph.distributions_iter() {
-            let mut probabilities: Vec<f64>= graphs[0].distribution_variable_iter(distribution).map(|v| graphs[0].get_variable_weight(v).unwrap()).collect();
-            for el in &mut probabilities {
-                *el = el.log10();
-            }
-            let prob_len = probabilities.len();
-            softmaxed_distributions.push(softmax(&probabilities));
-            distributions.push(probabilities);
-            grads.push(vec![f128!(0.0); prob_len]);
-        } */
-        /* for dac in dacs.iter_mut(){
-            dac.push(Dac::new(&softmaxed_distributions));
-        } */
         let mut rng = rand::thread_rng();
         let mut rand_init: Vec<Vec<f64>> = vec![];
-        let mut nb_var = 0;
         for i in 0..distributions.len() {
             let mut vector: Vec<f64> = vec![0.0; distributions[i].len()];
             for j in 0..distributions[i].len() {
@@ -46,18 +40,37 @@ impl Learner {
                 vector[j] = vector[j].log10();
             }
             rand_init.push(vector);
-            nb_var += distributions[i].len();
             grads.push(vec![f128!(0.0); distributions[i].len()]);
         }
 
-        Self { 
+        let mut learner = Self { 
             dacs: vec![], 
             unsoftmaxed_distributions: rand_init, 
             gradients: grads,
-            lr: lr,
+            lr: 0.0,
             expected_distribution: distributions,
             expected_outputs: vec![],
-            nb_var: nb_var,}
+            log: Logger::default(),
+        };
+
+        for input in &inputs {
+            let mut state = StateManager::default();
+            let propagator = Propagator::new(&mut state);
+            let graph = parser::graph_from_ppidimacs(&input, &mut state);
+            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+                Branching::MinInDegree => Box::<MinInDegree>::default(),
+                Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+                Branching::MaxDegree => Box::<MaxDegree>::default(),
+                Branching::VSIDS => Box::<VSIDS>::default(),
+            };
+            let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
+            let res = compiler.compile(timeout);
+            if let Some(dac) = res {
+                learner.add_dac(dac);
+            }
+        }
+        learner
     }
 
     // --- Getters --- //
@@ -165,8 +178,6 @@ impl Learner {
                                 if params != v {
                                     // For the other possible values of the distribution, the gradient contribution
                                     // is simply the dactor and the product of both weights
-                                    println!("Gradient for {} {} {}", d, params, child_w.clone() * weight.clone() * factor.clone());
-                                    println!("self grad{:?}", self.gradients);
                                     self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
                                     sum_other_w += weight.clone();
                                 }
@@ -188,13 +199,36 @@ impl Learner {
     }
 
     // --- Training --- //
-    pub fn train(&mut self, nepochs:usize) {
-        let mut epoch_error_evolution = vec![0.0; nepochs];
-        let mut epoch_distance_distribution = vec![0.0; nepochs];
+    fn training_to_file(& self, fout: Option<PathBuf>) {
+        let mut out_writer = match &fout {
+            Some(x) => {
+                Box::new(File::create(&x).unwrap()) as Box<dyn Write>
+            }
+            None => Box::new(io::stdout()) as Box<dyn Write>,
+        };
+        writeln!(out_writer, "Obtained distributions:").unwrap();
+        for i in 0..self.unsoftmaxed_distributions.len() {
+            writeln!(out_writer, "Distribution {}: {:?}", i, self.get_softmaxed(i)).unwrap();
+        }
+
+        let mut csv_file = match &fout {
+            Some(x) => {
+                Box::new(File::create(x.with_extension("csv")).unwrap()) as Box<dyn Write>
+            }
+            None => Box::new(io::stdout()) as Box<dyn Write>,
+        };
+        writeln!(csv_file, "{}", self.log).unwrap();
+        
+    }
+
+    pub fn train(&mut self, nepochs:usize, lr:f64, fout: Option<PathBuf>) {
+        self.lr = lr;
+        self.log.start();
+
         for e in 0..nepochs {
-            let do_print = e % 1 == 0;
+            let do_print = e % 500 == 0;
             let predictions = self.evaluate();
-            if do_print { println!("Epoch {} -\n Predictions: {:?} Expected: {:?}", e, predictions, self.expected_outputs);}
+            if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
             let mut loss = 0.0;
             let mut loss_grad = vec![0.0; self.dacs.len()];
             for dac_i in 0..self.dacs.len() {
@@ -204,15 +238,10 @@ impl Learner {
             loss /= self.dacs.len() as f64;
             self.compute_gradients(loss_grad);
             self.update_distributions();
-            epoch_error_evolution[e] = loss;
-
-            for i in 0..self.expected_distribution.len() {
-                for j in 0..self.expected_distribution[i].len() {
-                    epoch_distance_distribution[e] += (self.expected_distribution[i][j] - self.get_probability(i, j)).abs();
-                }
-            }
-            epoch_distance_distribution[e] /= self.nb_var as f64;
+            self.log.add_epoch(loss, &self.expected_distribution, &self.get_softmaxed_array(), self.lr);
         }
+
+        self.training_to_file(fout);
     }
 
 }
