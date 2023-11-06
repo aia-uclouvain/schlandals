@@ -29,7 +29,7 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::heuristics::BranchingDecision;
+use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use super::statistics::Statistics;
@@ -69,6 +69,7 @@ where
     epsilon: f64,
     backtrack_level: isize,
     nodes_explored: usize,
+    bounds: Vec<Bounds>,
 }
 
 impl<'b, B, const S: bool> LDSSolver<'b, B, S>
@@ -99,6 +100,7 @@ where
             epsilon,
             backtrack_level: 0,
             nodes_explored: 0,
+            bounds: vec![],
         }
     }
     
@@ -198,7 +200,7 @@ where
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err(backtrack_level) => {
+                    Err((backtrack_level, reason)) => {
                         self.statistics.unsat();
                         if backtrack_level != level {
                             debug_assert!(p_in == 0.0);
@@ -287,7 +289,7 @@ where
         if preproc.is_none() {
             return ProblemSolution::Err(Unsat);
         }
-        let mut p_in = preproc.unwrap();
+        let p_in = preproc.unwrap();
         let mut p_out = f128!(1.0);
         
         for distribution in self.graph.distributions_iter() {
@@ -295,7 +297,6 @@ where
             for variable in self.graph[distribution].iter_variables() {
                 if let Some(v) = self.graph[variable].value(&self.state) {
                     if v {
-                        p_in *= self.graph[variable].weight().unwrap();
                         sum_neg = 0.0;
                         break;
                     } else {
@@ -313,10 +314,11 @@ where
         for discrepency in 1..11 {
             let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt(), discrepency);
             let ub: Float = 1.0 - solution.1*(1.0 - p_out.clone());
-            println!("{} {} {} {}", discrepency, solution.0, ub, self.nodes_explored);
+            self.bounds.push((p_in.clone() * solution.0.clone(),ub.clone()*p_in.clone()));
             proba = Some(p_in.clone() * (solution.0 * &ub).sqrt());
             
         }
+        print!("{}", self.bounds.iter().map(|b| format!("{} {}", b.0, b.1)).collect::<Vec<String>>().join(" "));
         self.statistics.print();
         ProblemSolution::Ok(proba.unwrap())
     }

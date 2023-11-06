@@ -56,7 +56,7 @@ use super::core::literal::Literal;
 use super::core::variable::Reason;
 use super::core::flags::*;
 
-pub type PropagationResult = Result<(), isize>;
+pub type PropagationResult = Result<(), (isize, Option<Reason>)>;
 
 pub struct Propagator {
     propagation_stack: Vec<(VariableIndex, bool, Option<Reason>)>,
@@ -144,7 +144,8 @@ impl Propagator {
     
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
-    fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &StateManager) {
+    fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &mut StateManager) {
+        g[distribution].set_unconstrained(state);
         if g[distribution].number_false(state) != 0 {
             self.unconstrained_distributions.push(distribution);
             let mut p = f128!(0.0);
@@ -211,14 +212,14 @@ impl Propagator {
                 }
                 self.clear();
                 if reason.is_none() {
-                    return PropagationResult::Err(level);
+                    return PropagationResult::Err((level, reason));
                 }
                 debug_assert!(reason.is_some());
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
                 let head = learned_clause.iter().copied().find(|l| l.is_positive());
                 let clause = g.add_clause(learned_clause, head, state, true);
                 extractor.add_clause_to_component(component, clause);
-                return PropagationResult::Err(backjump);
+                return PropagationResult::Err((backjump, reason));
             }
             g[variable].set_assignment_position(self.assignments.len(), state);
             self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
@@ -254,6 +255,8 @@ impl Propagator {
             if is_p {
                 let distribution = g[variable].distribution().unwrap();
                 if value {
+                    g[distribution].set_unconstrained(state);
+
                     self.propagation_prob *= g[variable].weight().unwrap();
                     for v in g[distribution].iter_variables().filter(|va| *va != variable) {
                         self.add_to_propagation_stack(v, false, Some(Reason::Distribution(distribution)));

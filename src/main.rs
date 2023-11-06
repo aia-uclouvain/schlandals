@@ -17,6 +17,24 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+#[derive(Debug, Subcommand)]
+pub enum BounderType {
+    LDS,
+    Sampler,
+}
+
+impl std::str::FromStr for BounderType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<BounderType, Self::Err> {
+        if s == "lds" {
+            return Ok(BounderType::LDS);
+        } else if s == "sampler" {
+            return Ok(BounderType::Sampler);
+        }
+        Err(String::from("Bad bounder type. Available type are [lds, sampler]"))
+    }
+}
+
 
 #[derive(Debug, Parser)]
 #[clap(name="Schlandals", version, author, about)]
@@ -63,6 +81,19 @@ enum Command {
         #[clap(short, long)]
         read: Option<bool>,
     },
+    Bounder {
+        /// The input file
+        #[clap(short, long, value_parser)]
+        input: PathBuf,
+        /// How to branch
+        #[clap(short, long, value_enum)]
+        branching: schlandals::Branching,
+        /// The memory limit, in mega-bytes
+        #[clap(short, long)]
+        memory: Option<u64>,
+        #[clap(short, long)]
+        typ: BounderType,
+    }
 }
 
 fn main() {
@@ -86,5 +117,11 @@ fn main() {
                 schlandals::read_compiled(input, dotfile);
             }
         },
+        Command::Bounder { input, branching, memory , typ} => {
+            match typ {
+                BounderType::LDS => schlandals::lds(input, branching, false, memory, 0.0),
+                BounderType::Sampler => schlandals::sampler(input, branching, false, memory),
+            };
+        }
     }
 }

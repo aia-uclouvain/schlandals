@@ -22,7 +22,8 @@ use search_trail::{StateManager, SaveAndRestore};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::core::literal::Literal;
-use crate::heuristics::BranchingDecision;
+use crate::core::variable::Reason;
+use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use super::statistics::Statistics;
@@ -65,7 +66,6 @@ where
         branching_heuristic: &'b mut B,
         propagator: Propagator,
         mlimit: u64,
-        epsilon: f64,
     ) -> Self {
         let cache = FxHashMap::default();
         Self {
@@ -100,7 +100,7 @@ where
             }
         }
         // Should never happen
-        panic!("No suitable variable found for sampling")
+        panic!("No suitable variable found for sampling (target p {} budget {})", target_p, proba_budget);
     }
     
     pub fn sample(&mut self) -> ProblemSolution {
@@ -117,7 +117,7 @@ where
         let mut sample: Vec<Literal> = vec![];
         let mut p_in = f128!(0.0);
         let mut p_out = f128!(0.0);
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let mut sample_p = w_factor.clone();
             let mut trail_size = 0;
             let mut is_model = true;
@@ -128,9 +128,21 @@ where
                     self.state.save_state();
                     trail_size += 1;
                     match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
-                        Err(_) => {
+                        Err((_, reason)) => {
                             is_model = false;
                             sample_p *= v_weight;
+                            if let Some(r) = reason {
+                                match r {
+                                    Reason::Clause(c) => {
+                                        if !self.graph[c].is_learned() {
+                                            p_out += sample_p.clone();
+                                        }
+                                    },
+                                    Reason::Distribution(_) => {
+                                        p_out += sample_p.clone();
+                                    }
+                                };
+                            }
                             break;
                         },
                         Ok(_) => {
@@ -145,7 +157,6 @@ where
                 }
             }
             
-            
             for _ in 0..trail_size {
                 self.restore();
             }
@@ -157,8 +168,6 @@ where
                 let blocking_clause = sample.iter().map(|l| l.opposite()).collect::<Vec<Literal>>();
                 let clause = self.graph.add_clause(blocking_clause, None, &mut self.state, true);
                 self.component_extractor.add_clause_to_component(ComponentIndex(0), clause);
-            } else {
-                p_out += sample_p;
             }
             sample.clear();
             if p_in == 1.0 - p_out.clone() {

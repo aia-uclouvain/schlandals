@@ -17,15 +17,13 @@
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::Write;
-use solvers::QuietLDSSolver;
-use solvers::StatLDSSolver;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
 
 use crate::core::components::ComponentExtractor;
 use crate::branching::*;
-use solvers::{QuietSearchSolver, StatSearchSolver};
+use solvers::{QuietSearchSolver, StatSearchSolver, SamplerSolver, StatLDSSolver, QuietLDSSolver};
 use solvers::ProblemSolution;
 
 use propagator::Propagator;
@@ -156,6 +154,7 @@ pub fn lds(input: PathBuf, branching: Branching, statistics: bool, memory: Optio
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::VSIDS => Box::<VSIDS>::default(),
     };
     let mlimit = if let Some(m) = memory {
         m
@@ -186,4 +185,25 @@ pub fn lds(input: PathBuf, branching: Branching, statistics: bool, memory: Optio
         );
         solver.solve()
     }
+}
+
+pub fn sampler(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>) -> ProblemSolution {
+    let mut state = StateManager::default();
+    let propagator = Propagator::new(&mut state);
+    let graph = parser::graph_from_ppidimacs(&input, &mut state);
+    let component_extractor = ComponentExtractor::new(&graph, &mut state);
+    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+        Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+        Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::VSIDS => Box::<VSIDS>::default(),
+    };
+    let mlimit = if let Some(m) = memory {
+        m
+    } else {
+        let sys = System::new_all();
+        sys.total_memory() / 1000000
+    };
+    let mut sampler: SamplerSolver<'_, dyn BranchingDecision, false> = SamplerSolver::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator, mlimit);
+    sampler.sample()
 }

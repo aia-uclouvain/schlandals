@@ -153,7 +153,7 @@ where
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err(backtrack_level) => {
+                    Err((backtrack_level, reason)) => {
                         self.statistics.unsat();
                         self.branching_heuristic.update_distribution_score(distribution);
                         self.branching_heuristic.decay_scores();
