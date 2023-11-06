@@ -28,6 +28,7 @@ pub type Bounds = (Float, Float);
 pub mod search;
 pub mod compiler;
 pub mod lds;
+pub mod sampler;
 mod statistics;
 
 use search::SearchSolver;

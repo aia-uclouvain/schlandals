@@ -320,9 +320,4 @@ where
         self.statistics.print();
         ProblemSolution::Ok(proba.unwrap())
     }
-    
-    #[inline]
-    fn are_bounds_tight_enough(&self, lb: Float, ub: Float, bound_factor: f64) -> bool {
-        ub <= lb.clone()*bound_factor
-    }
 }
