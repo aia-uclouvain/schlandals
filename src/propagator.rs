@@ -436,8 +436,16 @@ impl Propagator {
                 }
             },
             Reason::Distribution(d) => {
-                for variable in g[d].iter_variables() {
-                    self.lit_flags[g[variable].get_assignment_position(state)].set(LitFlag::IsMarked);
+                let number_true = g[d].iter_variables().filter(|v| g[*v].is_fixed(state) && g[*v].value(state).unwrap()).count();
+                if number_true > 1 {
+                    for variable in g[d].iter_variables().filter(|v| g[*v].is_fixed(state) && g[*v].value(state).unwrap()) {
+                        self.lit_flags[g[variable].get_assignment_position(state)].set(LitFlag::IsMarked);
+                    }
+                } else {
+                    debug_assert!(number_true == 0);
+                    for variable in g[d].iter_variables() {
+                        self.lit_flags[g[variable].get_assignment_position(state)].set(LitFlag::IsMarked);
+                    }
                 }
             }
         };
@@ -468,15 +476,15 @@ impl Propagator {
                     }
                 },
                 Reason::Distribution(distribution) => {
-                    if g[variable].value(state).unwrap() {
-                        for pos in g[distribution].iter_variables().map(|v| g[v].get_assignment_position(state)) {
-                            self.lit_flags[pos].set(LitFlag::IsMarked);
+                    let number_true = g[distribution].iter_variables().filter(|v| g[*v].is_fixed(state) && g[*v].value(state).unwrap()).count();
+                    if number_true > 1 {
+                        for variable in g[distribution].iter_variables().filter(|v| g[*v].is_fixed(state) && g[*v].value(state).unwrap()) {
+                            self.lit_flags[g[variable].get_assignment_position(state)].set(LitFlag::IsMarked);
                         }
                     } else {
-
-                        debug_assert!(g[distribution].iter_variables().filter(|v| g[*v].value(state).unwrap()).count() == 1);
-                        let pos = g[g[distribution].iter_variables().find(|v| g[*v].value(state).unwrap()).unwrap()].get_assignment_position(state);
-                        self.lit_flags[pos].set(LitFlag::IsMarked);
+                        for variable in g[distribution].iter_variables() {
+                            self.lit_flags[g[variable].get_assignment_position(state)].set(LitFlag::IsMarked);
+                        }
                     }
                 }
             };
