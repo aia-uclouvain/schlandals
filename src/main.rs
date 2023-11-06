@@ -41,24 +41,9 @@ enum Command {
         /// The memory limit, in mega-bytes
         #[clap(short, long)]
         memory: Option<u64>,
-    },
-    /// Approximate DPLL-style solver providing epsilon guarantees on the approximation
-    ApproximateSearch {
-        /// The input file
-        #[clap(short, long, value_parser)]
-        input: PathBuf,
-        /// How to branch
-        #[clap(short, long, value_enum)]
-        branching: schlandals::Branching,
-        /// Collect stats during the search, default yes
-        #[clap(short, long, action)]
-        statistics: bool,
-        /// The memory limit, in mega-bytes
+        /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
         #[clap(short, long)]
-        memory: Option<u64>,
-        /// Epsilon, the quality of the approximation (must be between 0 and 1, inclusive)
-        #[clap(short, long)]
-        epsilon: f64,
+        epsilon: Option<f64>,
     },
     /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
@@ -74,38 +59,32 @@ enum Command {
         /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
+        /// Should the DAC be read from the given input
+        #[clap(short, long)]
+        read: Option<bool>,
     },
-    /// Read and evaluate an arithmetic circuits that was previously created with the compile sub-command
-    ReadCompiled {
-        /// Reads a circuit from an input file
-        #[clap(short, long, value_parser)]
-        input: PathBuf,
-        /// If present, store a DOT representation of the compiled circuit
-        #[clap(long)]
-        dotfile: Option<PathBuf>,
-    }
 }
 
 fn main() {
     let app = App::parse();
     match app.command {
-        Command::Search { input, branching, statistics, memory } => {
-            match schlandals::search(input, branching, statistics, memory, 0.0) {
+        Command::Search { input, branching, statistics, memory , epsilon} => {
+            let e = match epsilon {
+                Some(v) => v,
+                None => 0.0,
+            };
+            match schlandals::search(input, branching, statistics, memory, e) {
                 Err(_) => println!("Model UNSAT"),
                 Ok(p) => println!("{}", p),
             };
         },
-        Command::Compile { input, branching, fdac, dotfile } => {
-            schlandals::compile(input, branching, fdac, dotfile);
+        Command::Compile { input, branching, fdac, dotfile, read} => {
+            let should_read = read.is_some() && read.unwrap();
+            if should_read {
+                schlandals::compile(input, branching, fdac, dotfile);
+            } else {
+                schlandals::read_compiled(input, dotfile);
+            }
         },
-        Command::ReadCompiled { input, dotfile } => {
-            schlandals::read_compiled(input, dotfile);
-        },
-        Command::ApproximateSearch { input, branching, statistics, memory, epsilon }  => {
-            match schlandals::search(input, branching, statistics, memory, epsilon) {
-                Err(_) => println!("Model UNSAT"),
-                Ok(p) => println!("{}", p),
-            };
-        }
     }
 }
