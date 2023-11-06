@@ -55,6 +55,7 @@ impl <const S: bool> Learner<S> {
         };
 
         for input in &inputs {
+            println!("Compiling {}", input.display());
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
             let graph = parser::graph_from_ppidimacs(&input, &mut state);
@@ -68,6 +69,9 @@ impl <const S: bool> Learner<S> {
             let res = compiler.compile(timeout);
             if let Some(dac) = res {
                 learner.add_dac(dac);
+            }
+            else {
+                println!("Skipped");
             }
         }
         learner
