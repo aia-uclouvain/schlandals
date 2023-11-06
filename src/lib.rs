@@ -78,10 +78,7 @@ pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, 
     let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
     let mut distributions: Vec<Vec<f64>> = vec![];
     for distribution in graph.distributions_iter() {
-        let mut probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
-        for el in &mut probabilities {
-            *el = el.log10();
-        }
+        let probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
         distributions.push(probabilities);
     }
     if log { 
