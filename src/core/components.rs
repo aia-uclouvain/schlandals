@@ -70,6 +70,8 @@ pub struct ComponentExtractor {
     distributions: Vec<DistributionIndex>,
     /// Vector to store the position of each distribution in the vector
     distribution_positions: Vec<usize>,
+    /// Stack for clause to process during exploration
+    exploration_stack: Vec<ClauseIndex>,
 }
 
 /// A Component is identified by two integers. The first is the index in the vector of clauses at
@@ -129,6 +131,7 @@ impl ComponentExtractor {
             seen_var: vec![false; g.number_variables()],
             distributions,
             distribution_positions,
+            exploration_stack: vec![],
         }
     }
 
@@ -161,7 +164,6 @@ impl ComponentExtractor {
     fn explore_component(
         &mut self,
         g: &Graph,
-        clause: ClauseIndex,
         comp_start: usize,
         comp_size: &mut usize,
         comp_distribution_start: usize,
@@ -169,68 +171,70 @@ impl ComponentExtractor {
         hash: &mut u64,
         state: &mut StateManager,
     ) {
-        if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
-            if !g[clause].is_learned() {
-                *hash ^= g[clause].hash();
-            }
-            // The clause is swap with the clause at position comp_sart + comp_size
-            let current_pos = self.clause_positions[clause.0];
-            let new_pos = comp_start + *comp_size;
-            // Only move the nodes if it is not already in position
-            // Not sure if this optimization is worth in practice
-            if new_pos != current_pos {
-                let moved_node = self.clauses[new_pos];
-                self.clauses.as_mut_slice().swap(new_pos, current_pos);
-                self.clause_positions[clause.0] = new_pos;
-                self.clause_positions[moved_node.0] = current_pos;
-            }
-            *comp_size += 1;
-            
-            // Adds the variable to the hash if they have not yet been seen
-            for variable in g[clause].iter_variables() {
-                if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
-                    self.seen_var[variable.0] = true;
-                    *hash ^= g[variable].hash()
+        while let Some(clause) = self.exploration_stack.pop() {
+            if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
+                if !g[clause].is_learned() {
+                    *hash ^= g[clause].hash();
                 }
-            }
+                // The clause is swap with the clause at position comp_sart + comp_size
+                let current_pos = self.clause_positions[clause.0];
+                let new_pos = comp_start + *comp_size;
+                // Only move the nodes if it is not already in position
+                // Not sure if this optimization is worth in practice
+                if new_pos != current_pos {
+                    let moved_node = self.clauses[new_pos];
+                    self.clauses.as_mut_slice().swap(new_pos, current_pos);
+                    self.clause_positions[clause.0] = new_pos;
+                    self.clause_positions[moved_node.0] = current_pos;
+                }
+                *comp_size += 1;
+                
+                // Adds the variable to the hash if they have not yet been seen
+                for variable in g[clause].iter_variables() {
+                    if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
+                        self.seen_var[variable.0] = true;
+                        *hash ^= g[variable].hash()
+                    }
+                }
 
-            // Explores the clauses that share a distribution with the current clause
-            if g[clause].has_probabilistic(state) {
-                for variable in g[clause].iter_probabilistic_variables() {
-                    if !g[variable].is_fixed(state) {
-                        let distribution = g[variable].distribution().unwrap();
-                        if self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
-                            let current_d_pos = self.distribution_positions[distribution.0];
-                            let new_d_pos = comp_distribution_start + *comp_number_distribution;
-                            if current_d_pos != new_d_pos {
-                                let moved_d = self.distributions[new_d_pos];
-                                self.distributions.as_mut_slice().swap(new_d_pos, current_d_pos);
-                                self.distribution_positions[distribution.0] = new_d_pos;
-                                self.distribution_positions[moved_d.0] = current_d_pos;
-                            }
-                            *comp_number_distribution += 1;
-                            for v in g[distribution].iter_variables() {
-                                if !g[v].is_fixed(state) {
-                                    for c in g[v].iter_clauses_negative_occurence() {      
-                                        self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
-                                    }
-                                    for c in g[v].iter_clauses_positive_occurence() {
-                                        self.explore_component(g, c, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
+                // Explores the clauses that share a distribution with the current clause
+                if g[clause].has_probabilistic(state) {
+                    for variable in g[clause].iter_probabilistic_variables() {
+                        if !g[variable].is_fixed(state) {
+                            let distribution = g[variable].distribution().unwrap();
+                            if self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
+                                let current_d_pos = self.distribution_positions[distribution.0];
+                                let new_d_pos = comp_distribution_start + *comp_number_distribution;
+                                if current_d_pos != new_d_pos {
+                                    let moved_d = self.distributions[new_d_pos];
+                                    self.distributions.as_mut_slice().swap(new_d_pos, current_d_pos);
+                                    self.distribution_positions[distribution.0] = new_d_pos;
+                                    self.distribution_positions[moved_d.0] = current_d_pos;
+                                }
+                                *comp_number_distribution += 1;
+                                for v in g[distribution].iter_variables() {
+                                    if !g[v].is_fixed(state) {
+                                        for c in g[v].iter_clauses_negative_occurence() {      
+                                            self.exploration_stack.push(c);
+                                        }
+                                        for c in g[v].iter_clauses_positive_occurence() {
+                                            self.exploration_stack.push(c);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
-            
-            // Recursively explore the nodes in the connected components
-            for parent in g[clause].iter_parents(state) {
-                self.explore_component(g, parent, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
-            }
-            
-            for child in g[clause].iter_children(state) {
-                self.explore_component(g, child, comp_start, comp_size, comp_distribution_start, comp_number_distribution, hash, state);
+                
+                // Recursively explore the nodes in the connected components
+                for parent in g[clause].iter_parents(state) {
+                    self.exploration_stack.push(parent);
+                }
+                
+                for child in g[clause].iter_children(state) {
+                    self.exploration_stack.push(child);
+                }
             }
         }
     }
@@ -250,6 +254,7 @@ impl ComponentExtractor {
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
         self.components.truncate(end);
+        self.exploration_stack.clear();
         // Reset the set of seen variables. This can be done here and not before each component detection as
         // they do not share variables
         self.seen_var.fill(false);
@@ -267,9 +272,9 @@ impl ComponentExtractor {
                 let mut size = 0;
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
+                self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
-                    clause,
                     start,
                     &mut size,
                     distribution_start,
