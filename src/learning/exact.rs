@@ -123,7 +123,8 @@ where
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
                     let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
-                    dac.add_node_output(dac.get_distribution_value_node_index(distribution, value_id), node);
+                    let disti_index = dac.get_distribution_value_node_index(distribution, value_id);
+                    dac.add_node_output(disti_index, node);
                 }
             }
         
@@ -133,7 +134,8 @@ where
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
-                            dac.add_node_output(dac.get_distribution_value_node_index(distribution, value_id), sum_node);
+                            let distri_index = dac.get_distribution_value_node_index(distribution, value_id);
+                            dac.add_node_output(distri_index, sum_node);
                         }
                     }
                     dac.add_node_output(sum_node, node);
@@ -197,18 +199,18 @@ where
 
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
-        let mut probabilities: Vec<Vec<f64>>= vec![];
+        /* let mut probabilities: Vec<Vec<f64>>= vec![];
         for distribution in self.graph.distributions_iter() {
             let proba: Vec<f64>= self.graph[distribution].iter_variables().map(|v|self.graph[v].weight().unwrap()).collect();
             probabilities.push(proba);
-        }
+        } */
         self.propagator.init(self.graph.number_clauses());
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
             return None;
         }
         self.branching_heuristic.init(&self.graph, &self.state);
-        let mut dac = Dac::new(&probabilities);
+        let mut dac = Dac::new();
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, start, timeout) {
             None => None,
             Some(_) => {

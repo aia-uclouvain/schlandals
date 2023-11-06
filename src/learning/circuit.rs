@@ -24,6 +24,7 @@
 //! As of now, the circuit structure has been designed to be optimized when lots of queries are done on it.
 //! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
 
+use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
@@ -146,18 +147,6 @@ impl Node{
 
 }
 
-/// Calculates the softmax (the normalized exponential) function, which is a generalization of the
-/// logistic function to multiple dimensions.
-///
-/// Takes in a vector of real numbers and normalizes it to a probability distribution such that
-/// each of the components are in the interval (0, 1) and the components add up to 1. Larger input
-/// components correspond to larger probabilities.
-/// From https://docs.rs/compute/latest/src/compute/functions/statistical.rs.html#43-46
-pub fn softmax(x: &[f64]) -> Vec<f64> {
-    let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
-    x.iter().map(|i| i.exp() / sum_exp).collect()
-}
-
 /// Structure representing the Distribution awared Arithmetic Circuit (DAC).
 /// The structure only has three vector for the distributions, the internal nodes and the output of each internal node.
 /// Currently the structure is reorganized after its creation to optimize the cache locality and simplify the evaluation.
@@ -182,34 +171,12 @@ pub struct Dac {
 impl Dac {
 
     /// Creates a new empty DAC. An input node is created for each distribution in the graph.
-    pub fn new(distributions: &Vec<Vec<f64>>) -> Self {
-        let mut distribution_nodes: Vec<Node> = vec![];
-        let mut index: usize = 0;
-        let mut distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex> = FxHashMap::default();
-        for (i, distribution) in distributions.iter().enumerate(){
-            for (j, value) in distribution.iter().enumerate(){
-                distribution_nodes.push(Node {
-                    value: f128!(*value),
-                    outputs: vec![],
-                    inputs: FxHashSet::default(),
-                    typenode: TypeNode::Distribution{d: i, v: j},
-                    output_start: 0,
-                    number_outputs: 0,
-                    input_start: 0,
-                    number_inputs: 0,
-                    layer: 0,
-                    to_remove: true,
-                    path_value: f128!(1.0),
-                });
-                distribution_mapping.insert((DistributionIndex(i), j), NodeIndex(index));
-                index += 1;
-            }
-        }
+    pub fn new() -> Self {
         Self {
-            nodes: distribution_nodes,
+            nodes: vec![],
             outputs: vec![],
             inputs: vec![],
-            distribution_mapping: distribution_mapping,
+            distribution_mapping: FxHashMap::default(),
         }
     }
     
@@ -573,8 +540,27 @@ impl Dac {
     }
     
     // Retruns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn get_distribution_value_node_index(&self, distribution: DistributionIndex, value: usize) -> NodeIndex {
-        self.distribution_mapping[&(distribution, value)]
+    pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize) -> NodeIndex {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            *x
+        }
+        else {
+            self.nodes.push(Node {
+                value: f128!(0.5),
+                outputs: vec![],
+                inputs: FxHashSet::default(),
+                typenode: TypeNode::Distribution {d: distribution.0, v: value},
+                output_start: 0,
+                number_outputs: 0,
+                input_start: 0,
+                number_inputs: 0,
+                layer: 0,
+                to_remove: true,
+                path_value: f128!(1.0),
+            });
+            self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
+            NodeIndex(self.nodes.len()-1)
+        }
     }
 
     /// Returns, for a given node and an index in its distributions input vector, the distribution index of the input and the value
@@ -692,10 +678,7 @@ impl Dac {
         
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let from = self.sp_node_id(node);
-            let start = self.nodes[node.0].output_start;
-            let end = start + self.nodes[node.0].number_outputs;
-            //for output in self.outputs[start..end].iter().copied() {
-            for output in self.nodes[node.0].outputs.iter().copied() {
+                for output in self.nodes[node.0].outputs.iter().copied() {
                 let to = self.sp_node_id(output);
                 out.push_str(&Dac::edge(from, to, None));
             }
@@ -720,21 +703,8 @@ impl Dac {
 
 // Custom text format for the network
 
-/* impl fmt::Display for Dac {
+impl fmt::Display for Dac {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "dac {} {}", self.distribution_nodes.len(), self.nodes.len())?;
-        for node_i in 0..self.distribution_nodes.len(){
-            let dom_size = self.get_distribution_domain_size(NodeIndex(node_i));
-            write!(f, "d {}", dom_size)?;
-            for p_i in 0..dom_size{
-                write!(f, " {:.8}", self.get_distribution_probability_at(NodeIndex(node_i), p_i))?;
-            }
-            let node = &self.distribution_nodes[node_i];
-            for (output, value) in node.outputs.iter().copied() {
-                write!(f, " {} {}", output.0, value)?;
-            }
-            writeln!(f)?;
-        }
         write!(f, "outputs")?;
         for output in self.outputs.iter().copied() {
             write!(f, " {}", output.0)?;
@@ -746,10 +716,10 @@ impl Dac {
         }
         writeln!(f)?;
         for node in self.nodes.iter() {
-            if matches!(node.typenode, TypeNode::Product) {
-                write!(f, "x")?;       
-            } else {
-                write!(f, "+")?;
+            match node.typenode {
+                TypeNode::Product => write!(f, "x")?,
+                TypeNode::Sum => write!(f, "+")?,
+                TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
             writeln!(f, " {} {} {} {}", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
         }
@@ -764,50 +734,23 @@ impl Dac {
             nodes: vec![],
             outputs: vec![],
             inputs: vec![],
+            distribution_mapping: FxHashMap::default(),
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);
-        let mut input_distributions_node: Vec<Vec<(DistributionIndex, usize)>> = vec![];
         for line in reader.lines() {
             let l = line.unwrap();
             let split = l.split_whitespace().collect::<Vec<&str>>();
-            if l.starts_with("dac") {
-                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
-                let number_nodes = values[1];
-                for _ in 0..number_nodes {
-                    input_distributions_node.push(vec![]);
-                }
-            } else if l.starts_with('d') {
-                let dom_size = split[1].parse::<usize>().unwrap();
-                let mut probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
-                let mut outputs: Vec<(CircuitNodeIndex, usize)> = vec![];
-                for i in ((2+dom_size)..split.len()).step_by(2) {
-                    let output_node = CircuitNodeIndex(split[i].parse::<usize>().unwrap());
-                    let value = split[i+1].parse::<usize>().unwrap();
-                    outputs.push((output_node, value));
-                    input_distributions_node[output_node.0].push((DistributionIndex(dac.distribution_nodes.len()), value));
-                }
-                for el in &mut probabilities {
-                    *el = el.log10();
-                }
-                let prob_len = probabilities.len();
-                dac.distribution_nodes.push(DistributionNode {
-                    unsoftmaxed_probabilities: probabilities,
-                    outputs,
-                    grad_value: vec![f128!(0.0); prob_len],
-                });
-            } else if l.starts_with("inputs") {
-                dac.inputs = split.iter().skip(1).map(|i| CircuitNodeIndex(i.parse::<usize>().unwrap())).collect();
+            if l.starts_with("inputs") {
+                dac.inputs = split.iter().skip(1).map(|i| NodeIndex(i.parse::<usize>().unwrap())).collect();
             } else if l.starts_with("outputs") {
-                dac.outputs = split.iter().skip(1).map(|i| CircuitNodeIndex(i.parse::<usize>().unwrap())).collect();
+                dac.outputs = split.iter().skip(1).map(|i| NodeIndex(i.parse::<usize>().unwrap())).collect();
             } else if l.starts_with('x') || l.starts_with('+') {
                 let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
-                dac.nodes.push(CircuitNode {
+                dac.nodes.push(Node {
                     value: if l.starts_with('x') { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
                     inputs: FxHashSet::default(),
-                    input_distributions: input_distributions_node[dac.nodes.len()].clone(),
-                    is_mul: l.starts_with('x'),
                     output_start: values[0],
                     number_outputs: values[1],
                     input_start: values[2],
@@ -815,11 +758,30 @@ impl Dac {
                     layer: 0,
                     to_remove: false,
                     path_value: f128!(1.0),
+                    typenode: if l.starts_with('x') { TypeNode::Product } else { TypeNode::Sum },
                 })
+            } else if l.starts_with('d') {
+                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
+                let d = values[0];
+                let v = values[1];
+                dac.nodes.push(Node {
+                    value: f128!(0.5),
+                    outputs: vec![],
+                    inputs: FxHashSet::default(),
+                    output_start: values[2],
+                    number_outputs: values[3],
+                    input_start: values[4],
+                    number_inputs: values[5],
+                    layer: 0,
+                    to_remove: false,
+                    path_value: f128!(1.0),
+                    typenode: TypeNode::Distribution {d, v},
+                });
+                dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
             } else if !l.is_empty() {
                 panic!("Bad line format: {}", l);
             }
         }
         dac
     }
-} */
+}
