@@ -115,7 +115,7 @@ where
         if start.elapsed().unwrap().as_secs() > timeout {
             return None;
         }
-
+        
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for literal in self.propagator.assignments_iter(&self.state) {
@@ -123,7 +123,7 @@ where
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
                     let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
-                    let disti_index = dac.get_distribution_value_node_index(distribution, value_id);
+                    let disti_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                     dac.add_node_output(disti_index, node);
                 }
             }
@@ -134,7 +134,7 @@ where
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
-                            let distri_index = dac.get_distribution_value_node_index(distribution, value_id);
+                            let distri_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                             dac.add_node_output(distri_index, sum_node);
                         }
                     }

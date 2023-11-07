@@ -540,13 +540,13 @@ impl Dac {
     }
     
     // Retruns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize) -> NodeIndex {
+    pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
         }
         else {
             self.nodes.push(Node {
-                value: f128!(0.5),
+                value: f128!(probability),
                 outputs: vec![],
                 inputs: FxHashSet::default(),
                 typenode: TypeNode::Distribution {d: distribution.0, v: value},
