@@ -723,6 +723,7 @@ impl fmt::Display for Dac {
             }
             writeln!(f, " {} {} {} {}", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
         }
+        writeln!(f, "evaluate {:.8}", self.get_circuit_probability())?;
         fmt::Result::Ok(())
     }
 }
@@ -778,7 +779,10 @@ impl Dac {
                     typenode: TypeNode::Distribution {d, v},
                 });
                 dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
-            } else if !l.is_empty() {
+            } else if l.starts_with("evaluate") {
+                continue;
+            }
+            else if !l.is_empty() {
                 panic!("Bad line format: {}", l);
             }
         }

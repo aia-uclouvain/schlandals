@@ -107,6 +107,13 @@ enum Command {
         /// If present, define the compilation timeout
         #[clap(long, short, default_value_t=u64::MAX)]
         timeout: u64,
+        /// If present, store a textual representation of the compiled circuits 
+        /// and distributions in the given folder
+        #[clap(long)]
+        folderdac: Option<PathBuf>,
+        /// Should the DAC be read from the given input
+        #[clap(short, long, action)]
+        read: bool,
     }
 }
 
@@ -131,8 +138,8 @@ fn main() {
                 Ok(p) => println!("{}", p),
             };
         }
-        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout} => {
-            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout);
+        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout, folderdac, read} => {
+            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout, folderdac, read);
         }
     }
 }
