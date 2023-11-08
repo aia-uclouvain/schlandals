@@ -13,8 +13,8 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
+use std::{path::PathBuf, fs::File, io::Write};
 
-use std::path::PathBuf;
 use learning::LogLearner;
 use learning::QuietLearner;
 use learning::exact::DACCompiler;
@@ -71,24 +71,33 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     let mut res = compiler.compile(u64::MAX);
     if let Some(dac) = res.as_mut() {
         dac.evaluate();
+        if let Some(f) = dotfile {
+            let out = dac.as_graphviz();
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write(out.as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+            }
+        }
+        if let Some(f) = fdac {
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write(format!("{}", dac).as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+            }
+            
+        }
     }
     res
 }
 
-pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, log:bool, timeout:u64) {    
-    let mut state = StateManager::default();
-    let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
-    let mut distributions: Vec<Vec<f64>> = vec![];
-    for distribution in graph.distributions_iter() {
-        let probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
-        distributions.push(probabilities);
-    }
+pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, 
+            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool) {    
     if log { 
-        let mut learner = LogLearner::new(distributions, inputs, branching, timeout);
+        let mut learner = LogLearner::new(inputs, branching, timeout, folderdac, read);
         learner.train(nepochs, lr, fout);
-    }
-    else {
-        let mut learner = QuietLearner::new(distributions, inputs, branching, timeout);
+    } else {
+        let mut learner = QuietLearner::new(inputs, branching, timeout, folderdac, read);
         learner.train(nepochs, lr, fout);
     }
 }

@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
+use std::{fmt, path::PathBuf, fs,fs::{File}, io::{BufRead, BufReader}};
 
 use std::io::{self, Write};
 use rug::{Assign, Float};
@@ -16,7 +16,7 @@ use super::exact::DACCompiler;
 
 
 pub struct Learner<const S: bool> {
-    dacs: Vec<Dac>,
+    pub dacs: Vec<Dac>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     lr: f64,
@@ -40,59 +40,112 @@ pub fn softmax(x: &[f64]) -> Vec<f64> {
 impl <const S: bool> Learner<S> {
 
     /// Creates a new learner from the given graphs.
-    pub fn new(distributions:Vec<Vec<f64>>, inputs: Vec<PathBuf>, branching: Branching, timeout:u64) -> Self {
-        let mut grads: Vec<Vec<Float>> = vec![];
-        let mut rng = rand::thread_rng();
-        let mut rand_init: Vec<Vec<f64>> = vec![];
-        let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
-        for i in 0..distributions.len() {
-            let mut vector: Vec<f64> = vec![0.0; distributions[i].len()];
-            let mut unsoftmaxed_vector: Vec<f64> = vec![0.0; distributions[i].len()];
-            for j in 0..distributions[i].len() {
-                vector[j] = rng.gen_range(0.0..1.0);
-                vector[j] = vector[j].log(std::f64::consts::E);
-                unsoftmaxed_vector[j] = distributions[i][j].log(std::f64::consts::E);
-            }
-            rand_init.push(vector);
-            unsoftmaxed_distributions.push(unsoftmaxed_vector);
-            grads.push(vec![f128!(0.0); distributions[i].len()]);
-        }
+    pub fn new(inputs: Vec<PathBuf>, branching: Branching, timeout:u64, folderdac: Option<PathBuf>, read:bool) -> Self {
+        if !read {
+            let mut distributions: Vec<Vec<f64>> = vec![];
+            let mut grads: Vec<Vec<Float>> = vec![];
+            let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
 
-        let mut learner = Self { 
-            dacs: vec![], 
-            unsoftmaxed_distributions: unsoftmaxed_distributions, 
-            gradients: grads,
-            lr: 0.0,
-            expected_distribution: distributions,
-            expected_outputs: vec![],
-            log: Logger::default(),
-        };
+            let mut rng = rand::thread_rng();
+            let mut rand_init: Vec<Vec<f64>> = vec![];
 
-        for input in &inputs {
-            println!("Compiling {}", input.display());
             let mut state = StateManager::default();
-            let propagator = Propagator::new(&mut state);
-            let graph = parser::graph_from_ppidimacs(&input, &mut state);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
-            let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-                Branching::MinInDegree => Box::<MinInDegree>::default(),
-                Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-                Branching::MaxDegree => Box::<MaxDegree>::default(),
-                Branching::VSIDS => Box::<VSIDS>::default(),
+            let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
+            for (i, distribution) in graph.distributions_iter().enumerate() {
+                let probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
+                distributions.push(probabilities);
+
+                let mut vector: Vec<f64> = vec![0.0; distributions[i].len()];
+                let mut unsoftmaxed_vector: Vec<f64> = vec![0.0; distributions[i].len()];
+                for j in 0..distributions[i].len() {
+                    vector[j] = rng.gen_range(0.0..1.0);
+                    vector[j] = vector[j].log(std::f64::consts::E);
+                    unsoftmaxed_vector[j] = distributions[i][j].log(std::f64::consts::E);
+                }
+                rand_init.push(vector);
+                unsoftmaxed_distributions.push(unsoftmaxed_vector);
+                grads.push(vec![f128!(0.0); distributions[i].len()]);
+            }
+
+            let mut learner = Self { 
+                dacs: vec![], 
+                unsoftmaxed_distributions: unsoftmaxed_distributions, 
+                gradients: grads,
+                lr: 0.0,
+                expected_distribution: distributions,
+                expected_outputs: vec![],
+                log: Logger::default(),
             };
-            let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-            let res = compiler.compile(timeout);
-            if let Some(dac) = res {
-                learner.add_dac(dac);
+
+            for input in &inputs {
+                println!("Compiling {}", input.display());
+                let mut state = StateManager::default();
+                let propagator = Propagator::new(&mut state);
+                let graph = parser::graph_from_ppidimacs(&input, &mut state);
+                let component_extractor = ComponentExtractor::new(&graph, &mut state);
+                let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+                    Branching::MinInDegree => Box::<MinInDegree>::default(),
+                    Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+                    Branching::MaxDegree => Box::<MaxDegree>::default(),
+                    Branching::VSIDS => Box::<VSIDS>::default(),
+                };
+                let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
+                let res = compiler.compile(timeout);
+                if let Some(dac) = res {
+                    learner.add_dac(dac);
+                }
+                else {
+                    println!("Skipped");
+                }
+            }
+            let expected_outputs = learner.evaluate();
+            learner.expected_outputs = expected_outputs;
+            learner.unsoftmaxed_distributions = rand_init;
+
+            if let Some(f) = folderdac {
+                println!("{:?}", f.join("distributions.fdist"));
+                let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
+                match outfile.write(format!("{}", learner).as_bytes()) {
+                    Ok(_) => (),
+                    Err(e) => println!("Could not write the distributions into the fdist file: {:?}", e),
+                }
+                for (i, dac) in learner.dacs.iter().enumerate() {
+                    let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
+                    match outfile.write(format!("{}", dac).as_bytes()) {
+                        Ok(_) => (),
+                        Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+                    }
+                }
+            }
+            learner
+
+        } else {
+            println!("Reading the distributions from the given folder");
+            if let Some(f) = folderdac{
+                let mut learner = Self::from_file(&f.join("distributions.fdist"));
+                let paths = fs::read_dir(f).unwrap();
+                for path in paths {
+                    let path = path.unwrap().path();
+                    if path.is_file() && path.extension().unwrap() == "fdac" {
+                        learner.add_dac(Dac::from_file(&path));
+                        let file = File::open(path).unwrap();
+                        let reader = BufReader::new(file);
+                        for line in reader.lines() {
+                            let l = line.unwrap();
+                            let split = l.split_whitespace().collect::<Vec<&str>>();
+                            if l.starts_with("evaluate"){
+                                learner.expected_outputs.push(split[1].parse::<f64>().unwrap());
+                            }
+                        }
+                    }
+                }
+                println!("grads: {:?}", learner.gradients);
+                learner
             }
             else {
-                println!("Skipped");
-            }
+                panic!("No folder given to read the distributions from");
+            }  
         }
-        let expected_outputs = learner.evaluate();
-        learner.expected_outputs = expected_outputs;
-        learner.unsoftmaxed_distributions = rand_init;
-        learner
     }
 
     // --- Getters --- //
@@ -290,12 +343,9 @@ impl <const S: bool> fmt::Display for Learner<S> {
         for i in 0..self.expected_distribution.len() {
             write!(f, "d {}", self.expected_distribution[i].len())?;
             for p_i in 0..self.expected_distribution[i].len(){
-                write!(f, " {:.8}", self.expected_distribution[i][p_i])?;
+                write!(f, " {:.5}", self.expected_distribution[i][p_i])?;
             }
             writeln!(f)?;
-        }
-        for dac in self.dacs.iter() {
-            writeln!(f, "{}", dac)?;
         }
         fmt::Result::Ok(())
     }
@@ -303,19 +353,15 @@ impl <const S: bool> fmt::Display for Learner<S> {
 
 impl <const S: bool> Learner<S> {
     pub fn from_file(filepath: &PathBuf) -> Self {
-        let mut learner = Self {
-            dacs: vec![],
-            unsoftmaxed_distributions: vec![],
-            gradients: vec![],
-            lr: 0.0,
-            expected_distribution: vec![],
-            expected_outputs: vec![],
-            log: Logger::default(),
-        };
-        let file = File::open(filepath).unwrap();
-        let reader = BufReader::new(file);
         let mut expected_probabilities: Vec<Vec<f64>> = vec![];
         let mut unsoftmaxed_probabilities: Vec<Vec<f64>> = vec![];
+        let mut gradients: Vec<Vec<Float>> = vec![];
+
+        let mut rand_init: Vec<Vec<f64>> = vec![];
+        let mut rng = rand::thread_rng();
+
+        let file = File::open(filepath).unwrap();
+        let reader = BufReader::new(file);
         for line in reader.lines() {
             let l = line.unwrap();
             let split = l.split_whitespace().collect::<Vec<&str>>();
@@ -323,16 +369,27 @@ impl <const S: bool> Learner<S> {
                 let dom_size = split[1].parse::<usize>().unwrap();
                 let probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
                 let mut unsoftmaxed_vector = probabilities.clone();
+                let mut vector: Vec<f64> = vec![];
                 for el in &mut unsoftmaxed_vector {
                     *el = el.log(std::f64::consts::E);
+                    let rnd: f64 = rng.gen_range(0.0..1.0);
+                    vector.push(rnd.log(std::f64::consts::E));
                 }
+                rand_init.push(vector);
+                gradients.push(vec![f128!(0.0); dom_size]);
                 unsoftmaxed_probabilities.push(unsoftmaxed_vector);
                 expected_probabilities.push(probabilities);
             }
         }
-        learner.expected_distribution = expected_probabilities;
-        learner.unsoftmaxed_distributions = unsoftmaxed_probabilities;
-        learner
 
+        Self {
+            dacs: vec![],
+            unsoftmaxed_distributions: rand_init,
+            gradients: gradients,
+            lr: 0.0,
+            expected_distribution: expected_probabilities,
+            expected_outputs: vec![],
+            log: Logger::default(),
+        }
     }
 }
