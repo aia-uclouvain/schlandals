@@ -60,8 +60,13 @@ where
         let mut p = f128!(1.0);
 
         for variable in self.graph.variables_iter() {
-            if self.graph[variable].is_probabilitic() && self.graph[variable].weight().unwrap() == 1.0 {
-                self.propagator.add_to_propagation_stack(variable, true, None);
+            if self.graph[variable].is_probabilitic() {
+                if self.graph[variable].weight().unwrap() == 1.0 {
+                    self.propagator.add_to_propagation_stack(variable, true, None);
+                } else if self.graph[variable].weight().unwrap() == 0.0 {
+                    //self.propagator.add_to_propagation_stack(variable, false, None);
+                }
+                    
             }
         }
         

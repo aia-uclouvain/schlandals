@@ -14,11 +14,17 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 use std::hash::Hash;
+use rug::Float;
 
 macro_rules! f128 {
     ($v:expr) => {
         Float::with_val(113, $v)
     };
+}
+
+#[inline]
+pub fn is_float_one(f: &Float) -> bool {
+    (f128!(1.0) - f).abs() <= 0.00001
 }
 
 pub(crate) use f128;

@@ -23,7 +23,7 @@ use clap::ValueEnum;
 
 use crate::core::components::ComponentExtractor;
 use crate::branching::*;
-use solvers::{QuietSearchSolver, StatSearchSolver, SamplerSolver, StatLDSSolver, QuietLDSSolver};
+use solvers::{QuietSearchSolver, StatSearchSolver, SamplerSolver, LDSSolver};
 use solvers::ProblemSolution;
 
 use propagator::Propagator;
@@ -145,7 +145,7 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
     }
 }
 
-pub fn lds(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
+pub fn lds(input: PathBuf, branching: Branching, memory: Option<u64>) -> ProblemSolution {
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let graph = parser::graph_from_ppidimacs(&input, &mut state);
@@ -162,32 +162,18 @@ pub fn lds(input: PathBuf, branching: Branching, statistics: bool, memory: Optio
         let sys = System::new_all();
         sys.total_memory() / 1000000
     };
-    if statistics {
-        let mut solver = StatLDSSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-            epsilon,
-        );
-        solver.solve()
-    } else {
-        let mut solver = QuietLDSSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-            epsilon,
-        );
-        solver.solve()
-    }
+    let mut solver = LDSSolver::new(
+        graph,
+        state,
+        component_extractor,
+        branching_heuristic.as_mut(),
+        propagator,
+        mlimit,
+    );
+    solver.solve()
 }
 
-pub fn sampler(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>) -> ProblemSolution {
+pub fn sampler(input: PathBuf, branching: Branching) -> ProblemSolution {
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let graph = parser::graph_from_ppidimacs(&input, &mut state);
@@ -198,12 +184,6 @@ pub fn sampler(input: PathBuf, branching: Branching, statistics: bool, memory: O
         Branching::MaxDegree => Box::<MaxDegree>::default(),
         Branching::VSIDS => Box::<VSIDS>::default(),
     };
-    let mlimit = if let Some(m) = memory {
-        m
-    } else {
-        let sys = System::new_all();
-        sys.total_memory() / 1000000
-    };
-    let mut sampler: SamplerSolver<'_, dyn BranchingDecision, false> = SamplerSolver::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator, mlimit);
+    let mut sampler: SamplerSolver<'_, dyn BranchingDecision, false> = SamplerSolver::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator, u64::MAX, 0.0);
     sampler.sample()
 }

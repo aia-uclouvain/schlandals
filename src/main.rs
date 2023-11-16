@@ -118,9 +118,13 @@ fn main() {
             }
         },
         Command::Bounder { input, branching, memory , typ} => {
-            match typ {
-                BounderType::LDS => schlandals::lds(input, branching, false, memory, 0.0),
-                BounderType::Sampler => schlandals::sampler(input, branching, false, memory),
+            let r = match typ {
+                BounderType::LDS => schlandals::lds(input, branching, memory),
+                BounderType::Sampler => schlandals::sampler(input, branching),
+            };
+            match r {
+                Err(_) => println!("Model UNSAT"),
+                Ok(p) => println!("{}", p)
             };
         }
     }

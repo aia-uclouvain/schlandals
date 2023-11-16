@@ -32,10 +32,7 @@ pub mod sampler;
 mod statistics;
 
 use search::SearchSolver;
-use lds::LDSSolver;
+pub use lds::LDSSolver;
 pub use sampler::SamplerSolver;
-
 pub type StatSearchSolver<'b, B> = SearchSolver<'b, B, true>;
 pub type QuietSearchSolver<'b, B> = SearchSolver<'b, B, false>;
-pub type StatLDSSolver<'b, B> = LDSSolver<'b, B, true>;
-pub type QuietLDSSolver<'b, B> = LDSSolver<'b, B, false>;

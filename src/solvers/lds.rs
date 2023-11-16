@@ -32,7 +32,6 @@ use crate::core::graph::*;
 use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
-use super::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
 
@@ -42,9 +41,7 @@ use super::*;
 
 type DiscrepencyChoice = (DistributionIndex, usize);
 
-/// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
-/// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct LDSSolver<'b, B, const S: bool>
+pub struct LDSSolver<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -60,19 +57,15 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, (Bounds, DiscrepencyChoice)>,
-    /// Statistics collectors
-    statistics: Statistics<S>,
     /// Memory limit allowed for the solver. This is a global memory limit, not a cache-size limit
     mlimit: u64,
     /// Vector used to store probability mass out of the distribution in each node
     distribution_out_vec: Vec<f64>,
-    epsilon: f64,
-    backtrack_level: isize,
     nodes_explored: usize,
-    bounds: Vec<Bounds>,
+    nunsat :usize,
 }
 
-impl<'b, B, const S: bool> LDSSolver<'b, B, S>
+impl<'b, B> LDSSolver<'b, B>
 where
     B: BranchingDecision + ?Sized,
 {
@@ -83,7 +76,6 @@ where
         branching_heuristic: &'b mut B,
         propagator: Propagator,
         mlimit: u64,
-        epsilon: f64,
     ) -> Self {
         let cache = FxHashMap::default();
         let distribution_out_vec = vec![0.0; graph.number_distributions()];
@@ -94,13 +86,10 @@ where
             branching_heuristic,
             propagator,
             cache,
-            statistics: Statistics::default(),
             mlimit,
             distribution_out_vec,
-            epsilon,
-            backtrack_level: 0,
             nodes_explored: 0,
-            bounds: vec![],
+            nunsat: 0,
         }
     }
     
@@ -111,20 +100,18 @@ where
 
     /// Returns the solution for the sub-problem identified by the component. If the solution is in
     /// the cache, it is not computed. Otherwise it is solved and stored in the cache.
-    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepency: usize) -> (Bounds, usize) {
-        self.statistics.cache_access();
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, discrepency: usize) -> (Bounds, usize) {
         let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
         match self.cache.get(&bit_repr) {
             None => {
-                self.statistics.cache_miss();
                 self.nodes_explored += 1;
-                let (f, d) = self.choose_and_branch(component, level, bound_factor, discrepency, None);
+                let (f, d) = self.choose_and_branch(component, level, discrepency, None);
                 self.cache.insert(bit_repr, (f.clone(), d));
                 (f, d.1)
             },
             Some((f, d)) => {
-                if d.1 < discrepency {
-                    let (new_f, new_d) = self.choose_and_branch(component, level, bound_factor, discrepency, None);
+                if d.1 <= discrepency {
+                    let (new_f, new_d) = self.choose_and_branch(component, level, discrepency, Some(d.0));
                     self.cache.insert(bit_repr, (new_f.clone(), new_d));
                     (new_f, new_d.1)
                 } else {
@@ -164,7 +151,6 @@ where
     fn choose_and_branch(&mut self,
         component: ComponentIndex,
         level: isize,
-        bound_factor: f64,
         discrepency: usize,
         forced_choice: Option<DistributionIndex>) -> (Bounds, DiscrepencyChoice) {
         let decision = match forced_choice {
@@ -179,7 +165,6 @@ where
             Some(d) => Some(d),
         };
         if let Some(distribution) = decision {
-            self.statistics.or_node();
             let mut p_in = f128!(0.0);
             let mut p_out = f128!(0.0);
             let mut branches = self.graph[distribution].iter_variables().collect::<Vec<VariableIndex>>();
@@ -189,64 +174,60 @@ where
                 f1.total_cmp(&f2)
             });
             let mut visited = 0;
+            let mut unvalid_branches = 0;
             let mut node_discrepency = usize::MAX;
-            for (branch_idx, variable) in branches.iter().copied().enumerate() {
-                if branch_idx == discrepency {
-                    break;
-                }
+            for variable in branches.iter().copied() {
+                if visited == discrepency { break; }
                 if self.graph[variable].is_fixed(&self.state) {
+                    unvalid_branches += 1;
                     continue;
                 }
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err((backtrack_level, reason)) => {
-                        self.statistics.unsat();
-                        if backtrack_level != level {
-                            debug_assert!(p_in == 0.0);
-                            self.restore();
-                            self.backtrack_level = backtrack_level;
-                            return ((f128!(0.0), f128!(1.0)), (distribution, usize::MAX)); 
-                        }
+                    Err((_, _)) => {
+                        self.nunsat += 1;
+                        unvalid_branches += 1;
                         p_out += v_weight;
+                        if is_float_one(&p_out) {
+                            self.restore();
+                            return ((f128!(0.0), f128!(1.0)), (distribution, usize::MAX));
+                        }
                     },
                     Ok(_) => {
                         let (in_mass, out_mass) = self.probability_mass_from_assignments(distribution);
                         p_out += v_weight * (1.0 - out_mass);
-                        let new_discrepency = discrepency - branch_idx;
-                        let (child_sol, child_discrepency) = self._solve(component, level+1, bound_factor, new_discrepency);
-                        if self.backtrack_level != level {
-                            println!("Here?");
+                        let new_discrepency = discrepency - visited;
+                        let (child_sol, child_discrepency) = self._solve(component, level+1, new_discrepency);
+                        p_in += child_sol.0 * &in_mass;
+                        p_out += child_sol.1 * &in_mass;
+                        if is_float_one(&p_out) {
                             self.restore();
                             return ((f128!(0.0), f128!(1.0)), (distribution, usize::MAX));
                         }
-                        p_in += child_sol.0 * &in_mass;
-                        p_out += child_sol.1 * &in_mass;
                         node_discrepency = node_discrepency.min(child_discrepency);
+                        visited += 1;
                     }
                 };
-                visited += 1;
                 self.restore();
             }
-            if visited != branches.len() {
+            if visited + unvalid_branches != branches.len() {
                 node_discrepency = node_discrepency.min(visited);
             }
-            self.backtrack_level = level;
             ((p_in, p_out), (distribution, node_discrepency))
         } else {
-            debug_assert!(false);
+            //debug_assert!(false);
             // The sub-formula is SAT, by definition return 1. In practice should not happen since in that case no components are returned in the detection
-            self.backtrack_level = level;
             ((f128!(1.0), f128!(0.0)), (DistributionIndex(0), usize::MAX))
         }
     }
 
     /// Solves the problem for the sub-graph identified by component.
-    pub fn _solve(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepency: usize) -> (Bounds, usize) {
+    pub fn _solve(&mut self, component: ComponentIndex, level: isize, discrepency: usize) -> (Bounds, usize) {
         // If the memory limit is reached, clear the cache.
-        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
-            self.cache.clear();
-        }
+        //if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
+            //self.cache.clear();
+        //}
         self.state.save_state();
         // Default solution with a probability/count of 1
         // Since the probability are multiplied between the sub-components, it is neutral. And if
@@ -259,30 +240,21 @@ where
             .component_extractor
             .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
         {
-            self.statistics.and_node();
-            let number_component = self.component_extractor.number_components(&self.state);
-            let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
-            self.statistics.decomposition(number_component);
-            self.backtrack_level = level;
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let (cache_solution, node_discrepency) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor, discrepency);
-                if self.backtrack_level != level {
-                    self.state.restore_state();
-                    return ((f128!(0.0), f128!(1.0)), usize::MAX);
-                }
+                let (cache_solution, node_discrepency) = self.get_cached_component_or_compute(sub_component, level, discrepency);
                 children_discrepency = children_discrepency.min(node_discrepency);
                 p_in *= &cache_solution.0;
                 p_out *= 1.0 - cache_solution.1;
-                if p_in == 0.0 {
-                    break;
+                if is_float_one(&p_out) {
+                    self.restore();
+                    return ((f128!(0.0), f128!(1.0)),  usize::MAX);
                 }
             }
         }
-        self.state.restore_state();
-        self.backtrack_level = level - 1;
+        self.restore();
         ((p_in, 1.0 - p_out), children_discrepency)
     }
-    
+
     pub fn solve(&mut self) -> ProblemSolution {
         self.propagator.init(self.graph.number_clauses());
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
@@ -291,7 +263,7 @@ where
         }
         let p_in = preproc.unwrap();
         let mut p_out = f128!(1.0);
-        
+
         for distribution in self.graph.distributions_iter() {
             let mut sum_neg = 0.0;
             for variable in self.graph[distribution].iter_variables() {
@@ -309,17 +281,23 @@ where
         p_out = 1.0 - p_out;
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        
-        let mut proba: Option<Float> = None;
-        for discrepency in 1..11 {
-            let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).sqrt(), discrepency);
-            let ub: Float = 1.0 - solution.1*(1.0 - p_out.clone());
-            self.bounds.push((p_in.clone() * solution.0.clone(),ub.clone()*p_in.clone()));
-            proba = Some(p_in.clone() * (solution.0 * &ub).sqrt());
-            
+
+        let mut bounds: Option<Bounds> = None;
+        for discrepency in 1..101 {
+            let (mut solution, tree_discrepency) = self._solve(ComponentIndex(0), 1,  discrepency);
+            solution.0 *= p_in.clone();
+            solution.1 *= 1.0 - p_out.clone();
+            let b = (solution.0, 1.0 - solution.1);
+            println!("{} {} {} {}", discrepency, self.nodes_explored, b.0, b.1);
+            bounds = Some(b);
+            if tree_discrepency == usize::MAX {
+                break;
+            }
         }
-        print!("{}", self.bounds.iter().map(|b| format!("{} {}", b.0, b.1)).collect::<Vec<String>>().join(" "));
-        self.statistics.print();
-        ProblemSolution::Ok(proba.unwrap())
+        let b = bounds.unwrap();
+        let lb: Float = b.0;
+        //let ub: Float = 1.0 - b.1;
+        //let proba = (lb * ub).sqrt();
+        ProblemSolution::Ok(lb)
     }
 }

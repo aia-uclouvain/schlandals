@@ -115,15 +115,39 @@ where
                 f
             },
             Some(f) => {
-                if self.are_bounds_tight_enough(f.0.clone(), f.1.clone(), bound_factor) {
+                if self.are_bounds_tight_enough(f.0.clone(), 1.0 - f.1.clone(), bound_factor) {
                     (f.clone(), level)
                 } else {
-                    let f = self.choose_and_branch(component, level, bound_factor);
-                    self.cache.insert(bit_repr, f.0.clone());
-                    f
+                    let new_f = self.choose_and_branch(component, level, bound_factor);
+                    self.cache.insert(bit_repr, new_f.0.clone());
+                    new_f
                 }
             }
         }
+    }
+
+    fn get_probability_mass_from_assignment(&mut self, distribution: DistributionIndex) -> (Float, Float) {
+        let mut added_proba = f128!(1.0);
+        let mut removed_proba = f128!(1.0);
+        let mut has_removed = false;
+        self.distribution_out_vec.fill(0.0);
+        for v in self.propagator.assignments_iter(&self.state).map(|l| l.to_variable()) {
+            if self.graph[v].is_probabilitic() {
+                let d = self.graph[v].distribution().unwrap();
+                if self.graph[v].value(&self.state).unwrap() {
+                    added_proba *= self.graph[v].weight().unwrap();
+                } else if distribution != d {
+                    has_removed = true;
+                    self.distribution_out_vec[d.0] += self.graph[v].weight().unwrap();
+                }
+            }
+        }
+        if has_removed {
+            for v in self.distribution_out_vec.iter().copied() {
+                removed_proba *= 1.0 - v;
+            }
+        }
+        (added_proba, removed_proba)
     }
 
     /// Chooses a distribution to branch on using the heuristics of the solver and returns the
@@ -153,51 +177,33 @@ where
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err((backtrack_level, reason)) => {
+                    Err((backtrack_level, _)) => {
                         self.statistics.unsat();
                         self.branching_heuristic.update_distribution_score(distribution);
                         self.branching_heuristic.decay_scores();
                         if backtrack_level != level {
                             debug_assert!(p_in == 0.0);
                             self.restore();
-                            return ((f128!(0.0), f128!(1.0)), backtrack_level);
+                            return ((p_in, p_out), backtrack_level);
                         }
-                        p_out += v_weight;
                     },
                     Ok(_) => {
-                        let mut added_proba = f128!(1.0);
-                        let mut removed_proba = f128!(1.0);
-                        let mut has_removed = false;
-                        self.distribution_out_vec.fill(0.0);
-                        for v in self.propagator.assignments_iter(&self.state).map(|l| l.to_variable()) {
-                            if self.graph[v].is_probabilitic() {
-                                let d = self.graph[v].distribution().unwrap();
-                                if self.graph[v].value(&self.state).unwrap() {
-                                    added_proba *= self.graph[v].weight().unwrap();
-                                } else if distribution != d {
-                                    has_removed = true;
-                                    self.distribution_out_vec[d.0] += self.graph[v].weight().unwrap();
-                                }
+                        let (m_in, m_out) = self.get_probability_mass_from_assignment(distribution);
+                        p_out += v_weight * (1.0 - m_out);
+                        if m_in != 0.0 {
+                            let (child_sol, backtrack_level) = self._solve(component, level+1, bound_factor);
+                            p_in += child_sol.0 * &m_in;
+                            p_out += child_sol.1 * &m_in;
+                            if backtrack_level != level || is_float_one(&p_out) {
+                                self.restore();
+                                return ((f128!(0.0), f128!(1.0)), backtrack_level);
                             }
-                        }
-                        if has_removed {
-                            for v in self.distribution_out_vec.iter().copied() {
-                                removed_proba *= 1.0 - v;
+                            let lb = p_in.clone();
+                            let ub = 1.0 - p_out.clone();
+                            if self.are_bounds_tight_enough(lb, ub, bound_factor) {
+                                self.restore();
+                                return ((p_in, p_out), level);
                             }
-                        }
-                        p_out += v_weight * (1.0 - removed_proba);
-                        let (child_sol, backtrack_level) = self._solve(component, level+1, bound_factor);
-                        if backtrack_level != level {
-                            self.restore();
-                            return ((f128!(0.0), f128!(1.0)), backtrack_level);
-                        }
-                        p_in += child_sol.0 * &added_proba;
-                        p_out += child_sol.1 * &added_proba;
-                        let lb = p_in.clone();
-                        let ub = 1.0 - p_out.clone();
-                        if self.are_bounds_tight_enough(lb, ub, bound_factor) {
-                            self.restore();
-                            return ((p_in, p_out), level);
                         }
                     }
                 };
@@ -233,18 +239,11 @@ where
             self.statistics.decomposition(number_component);
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 let (cache_solution, backtrack_level) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor);
-                if backtrack_level != level {
-                    self.state.restore_state();
-                    return ((f128!(0.0), f128!(1.0)), backtrack_level);
-                }
                 p_in *= &cache_solution.0;
                 p_out *= 1.0 - cache_solution.1;
-                if p_in == 0.0 {
-                    break;
-                }
             }
         }
-        self.state.restore_state();
+        self.restore();
         ((p_in, 1.0 - p_out), level - 1)
     }
     
@@ -275,14 +274,16 @@ where
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
+        println!("{} {}", solution.0, 1.0 - solution.1.clone());
         self.statistics.print();
         let ub: Float = 1.0 - solution.1*(1.0 - p_out);
+        println!("{} {}", p_in.clone()*solution.0.clone(), ub.clone()*p_in.clone());
         let proba = p_in * (solution.0 * &ub).sqrt();
         ProblemSolution::Ok(proba)
     }
     
     #[inline]
     fn are_bounds_tight_enough(&self, lb: Float, ub: Float, bound_factor: f64) -> bool {
-        ub <= lb.clone()/bound_factor
+        ub <= lb.clone()*bound_factor
     }
 }
