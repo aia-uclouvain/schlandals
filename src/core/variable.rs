@@ -186,7 +186,6 @@ impl Variable {
     pub fn iter_clauses_negative_occurence(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.clauses_negative.iter().copied()
     }
-
 }
 
 impl std::fmt::Display for Variable {

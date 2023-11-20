@@ -14,28 +14,16 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module provides several branching heuristics for our solver.
-//! The branching heuristics work a bit differently than in classical search-based solvers.
-//! Remember that we are solving a _projected weighted model counting_ problems, in which the
-//! probabilistic variables are the decision variables (on which the number of models must be counted).
-//! In addition to that, we impose that the probabilistic variables are partitionned in distributions, in
-//! which the variables are mutually exclusive.
-//! This means that the branching decision is reduced to choosing a distribution and then assigning each of its
-//! variable to true.
-//! Hence, the heuristics provided here returns a distribution (if any are present in the component) instead of a
-//! variable.
-
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{ClauseIndex, DistributionIndex, Graph};
-use crate::heuristics::BranchingDecision;
-
+use crate::core::graph::{DistributionIndex, Graph, ClauseIndex};
+use super::BranchingDecision;
 
 /// This heuristic selects the clause with the minimum in degree. In case of tie, it selects the clause
 /// for which the less number of parents have been removed.
 /// Then, it selects the first unfixed distribution from the clause.
 #[derive(Default)]
-pub struct MinInDegree;
+pub struct MinInDegree {}
 
 impl BranchingDecision for MinInDegree {
     fn branch_on(
@@ -69,6 +57,12 @@ impl BranchingDecision for MinInDegree {
     }
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+
+    fn update_distribution_score(&mut self, _distribution: DistributionIndex) {
+    }
+
+    fn decay_scores(&mut self) {
+    }
     
 }
 
@@ -110,7 +104,8 @@ impl BranchingDecision for MinOutDegree {
     }
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
-    
+    fn update_distribution_score(&mut self, _distribution: DistributionIndex) {}
+    fn decay_scores(&mut self) {}
 }
 
 /// This heuristic selects the clause with the maximum degreee.
@@ -148,79 +143,6 @@ impl BranchingDecision for MaxDegree {
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
     
+    fn update_distribution_score(&mut self, _distribution: DistributionIndex) {}
+    fn decay_scores(&mut self) {}
 }
-
-/*
-#[cfg(test)]
-mod test_heuristics {
-    
-    use crate::core::graph::{Graph, VariableIndex, DistributionIndex};
-    use crate::core::components::ComponentExtractor;
-    use crate::core::components::ComponentIndex;
-    use crate::heuristics::branching_exact::*;
-    use search_trail::StateManager;
-
-    // Graph used for the tests:
-    //
-    //          C0 -> C1 ---> C2
-    //                 \       |
-    //                  \      v 
-    //                   \--> C3 --> C4 --> C5
-    fn get_graph(state: &mut StateManager) -> Graph {
-        let mut g = Graph::new(state);
-        let mut ps: Vec<VariableIndex> = vec![];
-        for i in 0..6 {
-            g.add_distribution(&vec![1.0], state);
-            ps.push(VariableIndex(i))
-        }
-        let ds = (0..6).map(|_| g.add_variable(false, None, None, state)).collect::<Vec<VariableIndex>>();
-        // C0
-        g.add_clause(ds[0], vec![ps[0]], state);
-        // C1
-        g.add_clause(ds[1], vec![ds[0], ps[1]], state);
-        // C2
-        g.add_clause(ds[2], vec![ds[1], ps[2]], state);
-        // C3
-        g.add_clause(ds[3], vec![ds[1], ds[2], ps[3]], state);
-        // C4
-        g.add_clause(ds[4], vec![ds[3], ps[4]], state);
-        // C5
-        g.add_clause(ds[5], vec![ds[4], ps[5]], state);
-        g.set_variable(ds[5], false, 0, None, state);
-        g
-    }
-
-    #[test]
-    fn test_min_in_degree() {
-        let mut state = StateManager::default();
-        let g = get_graph(&mut state);
-        let extractor = ComponentExtractor::new(&g, &mut state);
-        let mut branching = MinInDegree::default();
-        let decision = branching.branch_on(&g, &state, &extractor, ComponentIndex(0));
-        assert!(decision.is_some());
-        assert_eq!(DistributionIndex(0), decision.unwrap());
-    }
-    
-    #[test]
-    fn test_min_out_degree() {
-        let mut state = StateManager::default();
-        let g = get_graph(&mut state);
-        let extractor = ComponentExtractor::new(&g, &mut state);
-        let mut branching = MinOutDegree::default();
-        let decision = branching.branch_on(&g, &state, &extractor, ComponentIndex(0));
-        assert!(decision.is_some());
-        assert_eq!(DistributionIndex(5), decision.unwrap());
-    }
-    
-    #[test]
-    fn test_max_degree() {
-        let mut state = StateManager::default();
-        let g = get_graph(&mut state);
-        let extractor = ComponentExtractor::new(&g, &mut state);
-        let mut branching = MaxDegree::default();
-        let decision = branching.branch_on(&g, &state, &extractor, ComponentIndex(0));
-        assert!(decision.is_some());
-        assert_eq!(DistributionIndex(1), decision.unwrap());
-    }
-}
-*/

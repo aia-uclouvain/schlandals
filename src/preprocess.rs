@@ -18,7 +18,7 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::heuristics::BranchingDecision;
+use crate::branching::*;
 use crate::propagator::Propagator;
 use rug::Float;
 use crate::common::f128;

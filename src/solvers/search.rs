@@ -29,7 +29,7 @@ use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
-use crate::heuristics::BranchingDecision;
+use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use super::statistics::Statistics;
@@ -155,6 +155,8 @@ where
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(backtrack_level) => {
                         self.statistics.unsat();
+                        self.branching_heuristic.update_distribution_score(distribution);
+                        self.branching_heuristic.decay_scores();
                         if backtrack_level != level {
                             debug_assert!(p_in == 0.0);
                             self.restore();

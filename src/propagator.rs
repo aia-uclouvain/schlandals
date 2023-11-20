@@ -412,7 +412,7 @@ impl Propagator {
                             self.lit_flags[pos].set(LitFlag::IsImplied);
                             return true;
                         } else {
-                            let assigned = g[d].iter_variables().find(|v| g[*v].value(state).unwrap()).unwrap();
+                            let assigned = g[d].iter_variables().find(|v| g[*v].value(state).is_some() && g[*v].value(state).unwrap()).unwrap();
                             let p = g[assigned].get_assignment_position(state);
                             let l = self.assignments[p];
                             if !self.lit_flags[p].is_set(LitFlag::IsMarked) && !self.is_implied(l, g, state) {

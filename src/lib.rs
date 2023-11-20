@@ -22,8 +22,7 @@ use search_trail::StateManager;
 use clap::ValueEnum;
 
 use crate::core::components::ComponentExtractor;
-use heuristics::BranchingDecision;
-use heuristics::branching_exact::*;
+use crate::branching::*;
 use solvers::{QuietSearchSolver, StatSearchSolver};
 use solvers::ProblemSolution;
 
@@ -33,8 +32,8 @@ use crate::core::circuit::*;
 
 // Re-export the modules
 mod common;
+mod branching;
 pub mod core;
-mod heuristics;
 mod solvers;
 mod parser;
 mod propagator;
@@ -52,6 +51,8 @@ pub enum Branching {
     MinOutDegree,
     /// Maximum degree of a clause in the implication-graph
     MaxDegree,
+    /// Variable State Independent Decaying Sum
+    VSIDS,
 }
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac> {
@@ -63,6 +64,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::VSIDS => Box::<VSIDS>::default(),
     };
     let mut compiler = ExactDACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
     let mut res = compiler.compile();
@@ -110,6 +112,7 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::MaxDegree => Box::<MaxDegree>::default(),
+        Branching::VSIDS => Box::<VSIDS>::default(),
     };
     let mlimit = if let Some(m) = memory {
         m
