@@ -249,6 +249,7 @@ where
     }
     
     pub fn solve(&mut self) -> ProblemSolution {
+        self.state.save_state();
         self.propagator.init(self.graph.number_clauses());
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
@@ -278,7 +279,14 @@ where
         self.statistics.print();
         let ub: Float = 1.0 - solution.1*(1.0 - p_out);
         let proba = p_in * (solution.0 * &ub).sqrt();
+        self.restore();
         ProblemSolution::Ok(proba)
+    }
+
+    pub fn add_to_propagation_stack(&mut self, propagation: Vec<(VariableIndex, bool)>) {
+        for (variable, value) in propagation {
+            self.propagator.add_to_propagation_stack(variable, value, None);
+        }
     }
     
     #[inline]

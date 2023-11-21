@@ -15,8 +15,7 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 use std::{path::PathBuf, fs::File, io::Write};
 
-use learning::LogLearner;
-use learning::QuietLearner;
+use learning::{LogLearner, QuietLearner, LogApproximateLearner, QuietApproximateLearner};
 use learning::exact::DACCompiler;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
@@ -92,13 +91,23 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
 }
 
 pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool) {    
-    if log { 
-        let mut learner = LogLearner::new(inputs, branching, timeout, folderdac, read);
-        learner.train(nepochs, lr, fout);
+            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool, nb_approx: Option<usize>, epsilon: f64) {    
+    if let Some(nb) = nb_approx {
+        if log { 
+            let mut learner = LogApproximateLearner::new(inputs, epsilon, branching, timeout, folderdac, read, nb);
+            learner.train(nepochs, lr, fout);
+        } else {
+            let mut learner = QuietApproximateLearner::new(inputs, epsilon, branching, timeout, folderdac, read, nb);
+            learner.train(nepochs, lr, fout);
+        }
     } else {
-        let mut learner = QuietLearner::new(inputs, branching, timeout, folderdac, read);
-        learner.train(nepochs, lr, fout);
+        if log { 
+            let mut learner = LogLearner::new(inputs, branching, timeout, folderdac, read);
+            learner.train(nepochs, lr, fout);
+        } else {
+            let mut learner = QuietLearner::new(inputs, branching, timeout, folderdac, read);
+            learner.train(nepochs, lr, fout);
+        }
     }
 }
 

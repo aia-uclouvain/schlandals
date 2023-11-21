@@ -16,14 +16,15 @@
 
 use std::fmt;
 use chrono;
+use rug::Float;
 
 /// Implements a bunch of statistics that are collected during the search
 #[derive(Default)]
 #[cfg(not(tarpaulin_include))]
 pub struct Logger<const B: bool> {
-    epoch_duration: Vec<i64>,
-    epoch_error: Vec<f64>,
-    epoch_distance: Vec<f64>,
+    epoch_duration: Vec<i64>, // [N_epochs]
+    epoch_error: Vec<Vec<f64>>, //[N_epochs, N_dacs]
+    epoch_distance: Vec<Vec<Vec<f64>>>, //[N_epochs, N_distributions, N_values]
     epoch_lr: Vec<f64>,
     global_timestamp: chrono::DateTime<chrono::Local>,
 }
@@ -36,24 +37,28 @@ impl<const B: bool> Logger<B> {
             }
         }
     }
-    pub fn add_epoch(&mut self, loss:f64, expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, lr: f64) {
+    pub fn add_epoch(&mut self, loss:Vec<f64>, expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>, lr: f64) {
         if B {
             self.epoch_duration.push((chrono::Local::now() - self.global_timestamp).num_seconds());
             self.epoch_error.push(loss);
-            self.epoch_distance.push(Self::distance(&expected_distribution, &predicted_distribution));
+            self.epoch_distance.push(Self::distance(&expected_distribution, &predicted_distribution, &gradients));
             self.epoch_lr.push(lr);
         }
     }
-    fn distance(expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>) -> f64 {
-        let mut total = 0.0;
-        let mut nb_var = 0;
+    fn distance(expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>) -> Vec<Vec<f64>> {
+        let mut total: Vec<Vec<f64>> = vec![];
         for i in 0..expected_distribution.len() {
-            nb_var += expected_distribution[i].len();
+            let mut tmp: Vec<f64> = vec![];
             for j in 0..expected_distribution[i].len() {
-                total += (expected_distribution[i][j] - predicted_distribution[i][j]).abs();
+                if gradients[i][j] != 0.0 {
+                    tmp.push((expected_distribution[i][j] - predicted_distribution[i][j]).abs());
+                }
+                else{
+                    tmp.push(0.0);
+                }
             }
+            total.push(tmp);
         }
-        total /= nb_var as f64;
         total
     }
 }
@@ -61,9 +66,27 @@ impl<const B: bool> Logger<B> {
 impl<const B: bool> fmt::Display for Logger<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if B {
-            let mut output= "epoch_error, epoch_distance, epoch_lr, epochs_total_duration, date\n".to_string();
+            let mut output= "".to_string();
+            for i in 0..self.epoch_error[0].len() {
+                output.push_str(&format!("dac{} epoch_error,", i));
+            }
+            for i in 0..self.epoch_distance[0].len() {
+                for j in 0..self.epoch_distance[0][i].len() {
+                    output.push_str(&format!("distribution{}_{} epoch_distance,",i, j));
+                }
+            }
+            output.push_str("epoch_lr, epochs_total_duration, date\n");
+
             for i in 0..self.epoch_error.len() {
-                output.push_str(&format!("{}, {}, {}, {}, {}\n", self.epoch_error[i], self.epoch_distance[i], self.epoch_lr[i], self.epoch_duration[i], self.global_timestamp.format("%Y%m%d-%H%M%S")));
+                for j in 0..self.epoch_error[i].len() {
+                    output.push_str(&format!("{},", self.epoch_error[i][j]));
+                }
+                for j in 0..self.epoch_distance[i].len() {
+                    for k in 0..self.epoch_distance[i][j].len() {
+                        output.push_str(&format!("{},", self.epoch_distance[i][j][k]));
+                    }
+                }
+                output.push_str(&format!("{}, {}, {}\n", self.epoch_lr[i], self.epoch_duration[i], self.global_timestamp.format("%Y%m%d-%H%M%S")));
             }
             writeln!(f, "{}", output)
         } else {
