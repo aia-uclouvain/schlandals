@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf, fs,fs::{File}, io::{BufRead, BufReader}};
+use std::{fmt, path::PathBuf, fs,fs::File, io::{BufRead, BufReader}};
 
 use std::io::{self, Write};
 use rug::{Assign, Float};
@@ -9,6 +9,7 @@ use super::logger::Logger;
 use search_trail::StateManager;
 use crate::heuristics::BranchingDecision;
 use crate::heuristics::branching_exact::*;
+use crate::heuristics::branching_limited::*;
 use crate::parser;
 use crate::propagator::Propagator;
 use crate::core::components::ComponentExtractor;
@@ -70,7 +71,7 @@ impl <const S: bool> Learner<S> {
 
             let mut learner = Self { 
                 dacs: vec![], 
-                unsoftmaxed_distributions: unsoftmaxed_distributions, 
+                unsoftmaxed_distributions, 
                 gradients: grads,
                 lr: 0.0,
                 expected_distribution: distributions,
@@ -303,16 +304,16 @@ impl <const S: bool> Learner<S> {
             let do_print = e % 500 == 0;
             let predictions = self.evaluate();
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
-            let mut loss = 0.0;
+            let mut loss = vec![0.0; self.dacs.len()];
             let mut loss_grad = vec![0.0; self.dacs.len()];
             for dac_i in 0..self.dacs.len() {
-                loss += (predictions[dac_i] - self.expected_outputs[dac_i]).powi(2);
+                loss[dac_i] = (predictions[dac_i] - self.expected_outputs[dac_i]).powi(2);
                 loss_grad[dac_i] = 2.0 * (predictions[dac_i] - self.expected_outputs[dac_i]);
             }
-            loss /= self.dacs.len() as f64;
+            //loss /= self.dacs.len() as f64;
             self.compute_gradients(loss_grad);
             self.update_distributions();
-            self.log.add_epoch(loss, &self.expected_distribution, &self.get_softmaxed_array(), self.lr);
+            self.log.add_epoch(loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
         }
 
         self.training_to_file(fout);

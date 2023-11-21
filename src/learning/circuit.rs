@@ -30,7 +30,8 @@ use rustc_hash::FxHashSet;
 
 //use crate::core::graph::{DistributionIndex, Graph};
 use rug::{Assign, Float};
-use crate::{common::f128, core::graph::DistributionIndex};
+use crate::common::f128;
+use crate::core::graph::{DistributionIndex, VariableIndex};
 
 //#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 //pub struct CircuitNodeIndex(pub usize);
@@ -86,6 +87,8 @@ pub struct Node {
     to_remove: bool,
     // Gradient computation, the value of the path from the root
     path_value: Float,
+    // Propagation path
+    propagation: Vec<(VariableIndex, bool)>,
 }
 impl Node{
     // --- Getters --- //
@@ -115,6 +118,9 @@ impl Node{
     }
     pub fn get_to_remove(&self) -> bool{
         self.to_remove
+    }
+    pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)>{
+        &self.propagation
     }
     // --- Setters --- /
     pub fn set_value(&mut self, value: f64){
@@ -195,6 +201,7 @@ impl Dac {
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            propagation: vec![],
         });
         id
     }
@@ -214,6 +221,7 @@ impl Dac {
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            propagation: vec![],
         });
         id
     }
@@ -457,7 +465,7 @@ impl Dac {
         }
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             match self.nodes[node.0].typenode {
                 TypeNode::Product => self.nodes[node.0].value.assign(1.0),
@@ -469,7 +477,7 @@ impl Dac {
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
     pub fn evaluate(&mut self) -> Float {
-        self.reset();
+        //self.reset();
         for node in (0..self.nodes.len()).map(NodeIndex) {
             self.send_value(node, self.nodes[node.0].value.clone())
         }
@@ -557,6 +565,7 @@ impl Dac {
                 layer: 0,
                 to_remove: true,
                 path_value: f128!(1.0),
+                propagation: vec![],
             });
             self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
@@ -721,7 +730,8 @@ impl fmt::Display for Dac {
                 TypeNode::Sum => write!(f, "+")?,
                 TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
-            writeln!(f, " {} {} {} {}", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
+            write!(f, " {} {} {} {} ", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
+            writeln!(f, "{}", node.propagation.iter().map(|l| format!("{} {}", l.0.0, l.1)).collect::<Vec<String>>().join(" "))?;
         }
         writeln!(f, "evaluate {:.8}", self.get_circuit_probability())?;
         fmt::Result::Ok(())
@@ -747,7 +757,15 @@ impl Dac {
             } else if l.starts_with("outputs") {
                 dac.outputs = split.iter().skip(1).map(|i| NodeIndex(i.parse::<usize>().unwrap())).collect();
             } else if l.starts_with('x') || l.starts_with('+') {
-                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
+                let values = split.iter().skip(1).take(4).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
+                let mut propagation = vec![];
+                let mut i = 5;
+                while i < split.len() {
+                    let var = VariableIndex(split[i].parse::<usize>().unwrap());
+                    let value = split[i+1].parse::<bool>().unwrap();
+                    propagation.push((var, value));
+                    i += 2;
+                }
                 dac.nodes.push(Node {
                     value: if l.starts_with('x') { f128!(1.0) } else { f128!(0.0) },
                     outputs: vec![],
@@ -760,6 +778,7 @@ impl Dac {
                     to_remove: false,
                     path_value: f128!(1.0),
                     typenode: if l.starts_with('x') { TypeNode::Product } else { TypeNode::Sum },
+                    propagation,
                 })
             } else if l.starts_with('d') {
                 let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
@@ -777,6 +796,7 @@ impl Dac {
                     to_remove: false,
                     path_value: f128!(1.0),
                     typenode: TypeNode::Distribution {d, v},
+                    propagation: vec![],
                 });
                 dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
             } else if l.starts_with("evaluate") {

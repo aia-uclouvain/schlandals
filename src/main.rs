@@ -114,6 +114,13 @@ enum Command {
         /// Should the DAC be read from the given input
         #[clap(short, long, action)]
         read: bool,
+        /// If present, indicates the proportion of the number of batch of distribution that will be used
+        /// for the learning using approximate search. If not present, the learning is done using exact search
+        #[clap(short, long)]
+        nb_approx: Option<usize>,
+        /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
+        #[clap(short, long, default_value="0.0")]
+        epsilon: f64,
     }
 }
 
@@ -138,8 +145,8 @@ fn main() {
                 Ok(p) => println!("{}", p),
             };
         }
-        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout, folderdac, read} => {
-            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout, folderdac, read);
+        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout, folderdac, read, nb_approx, epsilon} => {
+            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout, folderdac, read, nb_approx, epsilon);
         }
     }
 }
