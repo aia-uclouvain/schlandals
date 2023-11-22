@@ -19,6 +19,8 @@
 
 use search_trail::*;
 use crate::core::graph::{ClauseIndex, DistributionIndex};
+use rug::Float;
+use crate::common::f128;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Reason {

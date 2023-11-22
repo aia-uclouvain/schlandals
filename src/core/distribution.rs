@@ -20,8 +20,10 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::graph::VariableIndex;
+use super::graph::{Graph, VariableIndex};
 use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager};
+use rug::Float;
+use crate::common::f128;
 
 /// A distribution of the input problem
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,6 +102,14 @@ impl Distribution {
     
     pub fn is_constrained(&self, state: &StateManager) -> bool {
         state.get_bool(self.constrained)
+    }
+
+    pub fn sum_unfixed(&self, g: &Graph, state: &StateManager) -> Float {
+        let mut s = f128!(0.0);
+        for v in self.iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()) {
+            s += v;
+        }
+        s
     }
     
     // --- ITERATOR --- //

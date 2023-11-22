@@ -181,6 +181,11 @@ where
                         self.statistics.unsat();
                         self.branching_heuristic.update_distribution_score(distribution);
                         self.branching_heuristic.decay_scores();
+                        let mut factor = f128!(1.0);
+                        for distribution in self.component_extractor.component_distribution_iter(component).filter(|d| self.graph[*d].is_constrained(&self.state)) {
+                            factor *= self.graph[distribution].sum_unfixed(&self.graph, &self.state);
+                        }
+                        p_out += v_weight*factor;
                         if backtrack_level != level {
                             debug_assert!(p_in == 0.0);
                             self.restore();
@@ -193,7 +198,7 @@ where
                         if m_in != 0.0 {
                             let (child_sol, backtrack_level) = self._solve(component, level+1, bound_factor);
                             p_in += child_sol.0 * &m_in;
-                            p_out += child_sol.1 * &m_in;
+                            p_out += child_sol.1.clone() * &m_in;
                             if backtrack_level != level || is_float_one(&p_out) {
                                 self.restore();
                                 return ((f128!(0.0), f128!(1.0)), backtrack_level);
@@ -238,9 +243,9 @@ where
             let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
             self.statistics.decomposition(number_component);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let (cache_solution, backtrack_level) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor);
+                let (cache_solution, _) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor);
                 p_in *= &cache_solution.0;
-                p_out *= 1.0 - cache_solution.1;
+                p_out *= 1.0 - cache_solution.1.clone();
             }
         }
         self.restore();
@@ -260,10 +265,7 @@ where
             let mut sum_neg = 0.0;
             for variable in self.graph[distribution].iter_variables() {
                 if let Some(v) = self.graph[variable].value(&self.state) {
-                    if v {
-                        sum_neg = 0.0;
-                        break;
-                    } else {
+                    if !v {
                         sum_neg += self.graph[variable].weight().unwrap();
                     }
                 }
@@ -274,11 +276,12 @@ where
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
-        println!("{} {}", solution.0, 1.0 - solution.1.clone());
+        p_out += solution.1*&p_in;
         self.statistics.print();
-        let ub: Float = 1.0 - solution.1*(1.0 - p_out);
-        println!("{} {}", p_in.clone()*solution.0.clone(), ub.clone()*p_in.clone());
-        let proba = p_in * (solution.0 * &ub).sqrt();
+        let ub: Float = 1.0 - p_out;
+        let lb = p_in * solution.0;
+        println!("{} {}", lb, ub);
+        let proba = (lb * ub).sqrt();
         ProblemSolution::Ok(proba)
     }
     

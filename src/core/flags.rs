@@ -30,7 +30,7 @@ pub enum ClauseFlag {
     FalseReachable = 2,    
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ClauseFlags(u8);
 
 impl ClauseFlags {
