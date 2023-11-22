@@ -54,7 +54,7 @@ impl Counting {
 impl BranchingDecision for Counting {
     fn branch_on(
         &mut self,
-        _g: &Graph,
+        g: &Graph,
         state: &mut StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
@@ -63,7 +63,7 @@ impl BranchingDecision for Counting {
         let distrib_set = component_extractor.component_distribution_iter(component).collect::<FxHashSet<DistributionIndex>>();
         while curr < self.stop_i {
             let distrib = DistributionIndex(curr);
-            if distrib_set.contains(&distrib) {
+            if distrib_set.contains(&distrib) && g[distrib].is_constrained(state) {
                 state.set_usize(self.current_i, curr + 1);
                 return Some(distrib);
             }

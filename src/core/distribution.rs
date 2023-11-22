@@ -21,7 +21,7 @@
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
 use super::graph::VariableIndex;
-use search_trail::{StateManager, ReversibleUsize, UsizeManager};
+use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager};
 
 /// A distribution of the input problem
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,6 +38,8 @@ pub struct Distribution {
     number_clause: usize,
     /// Number of variables assigned to F in the distribution
     pub number_false: ReversibleUsize,
+    /// 
+    constrained: ReversibleBool,
 }
 
 impl Distribution {
@@ -50,6 +52,7 @@ impl Distribution {
             number_clause_unconstrained: state.manage_usize(0),
             number_clause: 0,
             number_false: state.manage_usize(0),
+            constrained: state.manage_bool(true),
         }
     }
     
@@ -87,6 +90,13 @@ impl Distribution {
         self.first
     }
     
+    pub fn is_constrained(&self, state: &StateManager) -> bool {
+        state.get_bool(self.constrained)
+    }
+
+    pub fn set_unconstrained(&self, state: &mut StateManager) {
+        state.set_bool(self.constrained, false);
+    }
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
