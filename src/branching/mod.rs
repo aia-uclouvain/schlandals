@@ -30,7 +30,7 @@ use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::{ DistributionIndex, Graph};
 
 pub trait BranchingDecision {
-    fn branch_on(&mut self, g: &Graph, state: &StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex>;
+    fn branch_on(&mut self, g: &Graph, state: &mut StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex>;
     fn init(&mut self, g: &Graph, state: &StateManager);
     fn update_distribution_score(&mut self, distribution: DistributionIndex);
     fn decay_scores(&mut self);

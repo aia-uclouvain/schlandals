@@ -151,7 +151,7 @@ where
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 match self.cache.get(&bit_repr) {
                     None => {
-                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &self.state, &self.component_extractor, sub_component) {
+                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
                             if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, start, timeout) {
                                 sum_children.push(child);
                                 self.cache.insert(bit_repr, Some(child));

@@ -133,7 +133,7 @@ where
     fn sat(&mut self) -> bool {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
-            &self.state,
+            &mut self.state,
             &self.component_extractor,
             ComponentIndex(0),
         );

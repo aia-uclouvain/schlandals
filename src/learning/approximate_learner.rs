@@ -14,7 +14,7 @@ use crate::propagator::Propagator;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
 use super::exact::DACCompiler;
-use crate::solvers::{QuietSearchSolver, StatSearchSolver};
+use crate::solvers::QuietSearchSolver;
 use sysinfo::{SystemExt, System};
 
 pub struct ApproximateLearner<const S: bool> {
@@ -97,7 +97,7 @@ impl <const S: bool> ApproximateLearner<S> {
                     let propagator = Propagator::new(&mut state);
                     let graph = parser::graph_from_ppidimacs(&input, &mut state);
                     let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                    let mut branching_heuristic = Box::from(Counting::new(i, min(distributions_len/nb_approx,distributions_len-i)));
+                    let mut branching_heuristic = Box::from(Counting::new(i, min(distributions_len/nb_approx,distributions_len-i), &mut state));
                     let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
                     let res = compiler.compile(timeout);
                     if let Some(dac) = res {
