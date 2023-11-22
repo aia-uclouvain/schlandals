@@ -25,7 +25,7 @@ pub trait BranchingDecision {
     fn branch_on(
         &mut self,
         g: &Graph,
-        state: &StateManager,
+        state: &mut StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
     ) -> Option<DistributionIndex>;

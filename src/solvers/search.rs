@@ -132,7 +132,7 @@ where
     fn choose_and_branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64)-> (Bounds, isize) {
         let decision = self.branching_heuristic.branch_on(
             &self.graph,
-            &self.state,
+            &mut self.state,
             &self.component_extractor,
             component,
         );
