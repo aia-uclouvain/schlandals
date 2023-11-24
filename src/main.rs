@@ -65,9 +65,9 @@ enum Command {
     },
     /// Learn a circuit from a set of queries
     Learn {
-        /// The input files
-        #[clap(short, long, value_parser, num_args=1.., value_delimiter=' ')]
-        inputs: Vec<PathBuf>,
+        /// The csv file containing the cnf filenames and the associated expected output
+        #[clap(long, value_parser, num_args=1.., value_delimiter=' ')]
+        trainfile: PathBuf,
         /// How to branch
         #[clap(short, long, value_enum)]
         branching: schlandals::Branching,
@@ -78,13 +78,13 @@ enum Command {
         #[clap(short, long)]
         lr: f64,
         /// Number of epochs
-        #[clap(short, long)]
+        #[clap(long)]
         nepochs: usize,
         /// If present, save a detailled csv of the training and use a codified output filename
         #[clap(long, short, action)]
         do_log: bool,
         /// If present, define the compilation timeout
-        #[clap(long, short, default_value_t=u64::MAX)]
+        #[clap(long, default_value_t=u64::MAX)]
         timeout: u64,
         /// If present, store a textual representation of the compiled circuits 
         /// and distributions in the given folder
@@ -95,7 +95,7 @@ enum Command {
         read: bool,
         /// If present, indicates the proportion of the number of batch of distribution that will be used
         /// for the learning using approximate search. If not present, the learning is done using exact search
-        #[clap(short, long)]
+        #[clap(long)]
         nb_approx: Option<usize>,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
         #[clap(short, long, default_value="0.0")]
@@ -124,8 +124,8 @@ fn main() {
                 //schlandals::read_compiled(input, dotfile);
             }
         },
-        Command::Learn { inputs, branching, fout, lr, nepochs, do_log , timeout, folderdac, read, nb_approx, epsilon} => {
-            schlandals::learn(inputs, branching, fout, lr, nepochs, do_log, timeout, folderdac, read, nb_approx, epsilon);
+        Command::Learn { trainfile, branching, fout, lr, nepochs, do_log , timeout, folderdac, read, nb_approx, epsilon} => {
+            schlandals::learn(trainfile, branching, fout, lr, nepochs, do_log, timeout, folderdac, read, nb_approx, epsilon);
         }
     }
 }

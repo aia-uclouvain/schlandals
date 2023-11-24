@@ -40,13 +40,16 @@ pub struct Counting{
     stop_i: usize,
     /// The current distribution index
     current_i: ReversibleUsize,
+    /// The constrained distributions
+    constrained_distributions: Vec<DistributionIndex>,
 }
 
 impl Counting {
-    pub fn new(start_i: usize, len: usize, state:&mut StateManager) -> Self {
+    pub fn new(start_i: usize, len: usize, state:&mut StateManager, constrained_distributions: Vec<DistributionIndex>) -> Self {
         Self {
             current_i: state.manage_usize(start_i),
             stop_i: start_i + len,
+            constrained_distributions,
         }
     }
 }
@@ -62,7 +65,7 @@ impl BranchingDecision for Counting {
         let mut curr = state.get_usize(self.current_i);
         let distrib_set = component_extractor.component_distribution_iter(component).collect::<FxHashSet<DistributionIndex>>();
         while curr < self.stop_i {
-            let distrib = DistributionIndex(curr);
+            let distrib = self.constrained_distributions[curr];
             if distrib_set.contains(&distrib) && g[distrib].is_constrained(state) {
                 state.set_usize(self.current_i, curr + 1);
                 return Some(distrib);

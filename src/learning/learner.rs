@@ -76,7 +76,6 @@ impl <const S: bool> Learner<S> {
                 expected_outputs: vec![],
                 log: Logger::default(),
             };
-
             for input in &inputs {
                 println!("Compiling {}", input.display());
                 let mut state = StateManager::default();
@@ -111,7 +110,7 @@ impl <const S: bool> Learner<S> {
                 }
                 for (i, dac) in learner.dacs.iter().enumerate() {
                     let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
-                    match outfile.write(format!("{}", dac).as_bytes()) {
+                    match outfile.write(format!("{}evaluate {:.8}", dac, learner.expected_outputs[i]).as_bytes()) {
                         Ok(_) => (),
                         Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
                     }
@@ -317,26 +316,6 @@ impl <const S: bool> Learner<S> {
 
         self.training_to_file(fout);
     }
-    /*  else if l.starts_with('d') {
-                let dom_size = split[1].parse::<usize>().unwrap();
-                let mut probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
-                let mut outputs: Vec<(CircuitNodeIndex, usize)> = vec![];
-                for i in ((2+dom_size)..split.len()).step_by(2) {
-                    let output_node = CircuitNodeIndex(split[i].parse::<usize>().unwrap());
-                    let value = split[i+1].parse::<usize>().unwrap();
-                    outputs.push((output_node, value));
-                    input_distributions_node[output_node.0].push((DistributionIndex(dac.distribution_nodes.len()), value));
-                }
-                for el in &mut probabilities {
-                    *el = el.log(std::f64::consts::E);
-                }
-                let prob_len = probabilities.len();
-                dac.distribution_nodes.push(DistributionNode {
-                    unsoftmaxed_probabilities: probabilities,
-                    outputs,
-                    grad_value: vec![f128!(0.0); prob_len],
-                });
-            } */
 }
 impl <const S: bool> fmt::Display for Learner<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

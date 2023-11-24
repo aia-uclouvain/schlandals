@@ -517,6 +517,10 @@ impl Propagator {
         
         (learned, g[self.assignments[backjump].to_variable()].decision_level() as isize)
     }
+
+    pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
+        self.assignments.iter().copied()
+    }
 }
 
 #[cfg(test)]

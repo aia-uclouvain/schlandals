@@ -26,7 +26,7 @@
 
 
 use rustc_hash::FxHashMap;
-use search_trail::{StateManager, SaveAndRestore};
+use search_trail::{StateManager, SaveAndRestore, ReversibleUsize, UsizeManager};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
@@ -55,6 +55,10 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
+    /// limit on the number of distributions in all branches
+    limit: usize,
+    /// Current number of distributions in the branch
+    distribution_count: ReversibleUsize,
 }
 
 impl<'b, B> DACCompiler<'b, B>
@@ -63,12 +67,14 @@ where
 {
     pub fn new(
         graph: Graph,
-        state: StateManager,
+        mut state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: &'b mut B,
         propagator: Propagator,
+        limit: usize,
     ) -> Self {
         let cache = FxHashMap::default();
+        let distribution_count = state.manage_usize(0);
         Self {
             graph,
             state,
@@ -76,6 +82,8 @@ where
             branching_heuristic,
             propagator,
             cache,
+            limit,
+            distribution_count,
         }
     }
 
@@ -125,12 +133,14 @@ where
                     let value_id = variable.0 - self.graph[distribution].start().0;
                     let disti_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                     dac.add_node_output(disti_index, node);
+                    self.state.increment_usize(self.distribution_count);
                 }
             }
         
             for distribution in self.propagator.unconstrained_distributions_iter() {
                 if self.graph[distribution].number_false(&self.state) != 0 {
                     let sum_node = dac.add_sum_node();
+                    self.state.increment_usize(self.distribution_count);
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
@@ -151,18 +161,28 @@ where
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 match self.cache.get(&bit_repr) {
                     None => {
-                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
-                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, start, timeout) {
-                                sum_children.push(child);
-                                self.cache.insert(bit_repr, Some(child));
-                            } else {
-                                self.cache.insert(bit_repr, None);
-                                prod_node = None;
-                                sum_children.clear();
-                                break;
+                        if self.state.get_usize(self.distribution_count) < self.limit {
+                            if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
+                                self.state.increment_usize(self.distribution_count);
+                                if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, start, timeout) {
+                                    sum_children.push(child);
+                                    self.cache.insert(bit_repr, Some(child));
+                                } else {
+                                    self.cache.insert(bit_repr, None);
+                                    prod_node = None;
+                                    sum_children.clear();
+                                    break;
+                                }
+                                if start.elapsed().unwrap().as_secs() > timeout {
+                                    return None;
+                                }
                             }
-                            if start.elapsed().unwrap().as_secs() > timeout {
-                                return None;
+                        } else {
+                            if self.component_extractor.component_distribution_iter(sub_component).find(|d| self.graph[*d].is_constrained(&self.state)).is_some() {
+                                let child = dac.add_sum_node();
+                                let propagated = self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).collect::<Vec<(VariableIndex, bool)>>();
+                                dac.set_node_propagations(child, propagated);
+                                sum_children.push(child);
                             }
                         }
                     },

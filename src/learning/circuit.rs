@@ -171,7 +171,7 @@ pub struct Dac {
     /// Inputs of the internal nodes
     inputs: Vec<NodeIndex>,
     // Mapping between the (distribution, value) and the node index for distribution nodes
-    distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
+    pub distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
 }
 
 impl Dac {
@@ -253,6 +253,9 @@ impl Dac {
                 // The distribution nodes are at layer 0
                 to_process.push((NodeIndex(i), 0));
             }
+            if self.is_node_incomplete(NodeIndex(i)){
+                to_process.push((NodeIndex(i), 0));
+            }
         }
         let mut number_layers = 1;
         while let Some((node, layer)) = to_process.pop() {
@@ -309,6 +312,7 @@ impl Dac {
         for node in 0..self.nodes.len() {
             // Drop all nodes that have been removed
             if let TypeNode::Distribution {..} = self.nodes[node].get_type(){self.nodes[node].outputs.retain(|&x| new_indexes[x.0] < end);}
+            if self.is_node_incomplete(NodeIndex(node)){self.nodes[node].outputs.retain(|&x| new_indexes[x.0] < end);}
             // Update the outputs with the new indexes
             self.nodes[node].output_start = self.outputs.len();
             self.nodes[node].number_outputs = 0;
@@ -335,10 +339,11 @@ impl Dac {
     }
     
     /// Tag all nodes that are not on a path from an input to the root of the DAC as to be removed
+    /// except for incomplete nodes in case of approximation
     pub fn remove_dead_ends(&mut self) {
         let mut to_process: Vec<NodeIndex> = vec![];
         for node in 0..self.nodes.len() {
-            if matches!(self.nodes[node].typenode, TypeNode::Distribution{..}){
+            if matches!(self.nodes[node].typenode, TypeNode::Distribution{..}) || self.is_node_incomplete(NodeIndex(node)){
                 for output_i in 0..self.nodes[node].outputs.len() {
                     let output = self.nodes[node].outputs[output_i];
                     self.nodes[node].to_remove = false;
@@ -572,6 +577,14 @@ impl Dac {
         }
     }
 
+    pub fn is_node_incomplete(&self, node: NodeIndex) -> bool {
+        !self.nodes[node.0].propagation.is_empty()
+    }
+
+    pub fn set_node_propagations(&mut self, node: NodeIndex, propagation: Vec<(VariableIndex, bool)>) {
+        self.nodes[node.0].propagation = propagation;
+    }
+
     /// Returns, for a given node and an index in its distributions input vector, the distribution index of the input and the value
     /// index send from the probability
     /* pub fn get_circuit_node_input_distribution_at(&self, node: NodeIndex, index: usize) -> (NodeIndex, usize) {
@@ -733,7 +746,6 @@ impl fmt::Display for Dac {
             write!(f, " {} {} {} {} ", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
             writeln!(f, "{}", node.propagation.iter().map(|l| format!("{} {}", l.0.0, l.1)).collect::<Vec<String>>().join(" "))?;
         }
-        writeln!(f, "evaluate {:.8}", self.get_circuit_probability())?;
         fmt::Result::Ok(())
     }
 }

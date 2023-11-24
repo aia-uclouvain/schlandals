@@ -13,7 +13,7 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-use std::{path::PathBuf, fs::File, io::Write};
+use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::{LogLearner, QuietLearner, LogApproximateLearner, QuietApproximateLearner};
 use learning::exact::DACCompiler;
@@ -90,14 +90,25 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     res
 }
 
-pub fn learn(inputs: Vec<PathBuf>, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool, nb_approx: Option<usize>, epsilon: f64) {    
+pub fn learn(trainfile: PathBuf, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, 
+            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool, nb_approx: Option<usize>, 
+            epsilon: f64) {    
+    let mut inputs = vec![];
+    let mut expected: Vec<f64> = vec![];
+    let file = File::open(&trainfile).unwrap();
+    let reader = BufReader::new(file);
+    for line in reader.lines().skip(1) {
+        let l = line.unwrap();
+        let mut split = l.split(",");
+        inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
+        expected.push(split.next().unwrap().parse::<f64>().unwrap());
+    }
     if let Some(nb) = nb_approx {
         if log { 
-            let mut learner = LogApproximateLearner::new(inputs, epsilon, branching, timeout, folderdac, read, nb);
+            let mut learner = LogApproximateLearner::new(inputs, expected, epsilon, branching, timeout, folderdac, read, nb);
             learner.train(nepochs, lr, fout);
         } else {
-            let mut learner = QuietApproximateLearner::new(inputs, epsilon, branching, timeout, folderdac, read, nb);
+            let mut learner = QuietApproximateLearner::new(inputs, expected, epsilon, branching, timeout, folderdac, read, nb);
             learner.train(nepochs, lr, fout);
         }
     } else {
