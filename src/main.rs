@@ -53,15 +53,16 @@ enum Command {
         /// How to branch
         #[clap(short, long, value_enum)]
         branching: schlandals::Branching,
+        /// The ratio of distribution to branch on before stopping the compilation of a branch.
+        /// By default make a full compilation
+        #[clap(long, default_value_t=1.0)]
+        ratio: f64,
         /// If present, store a textual representation of the compiled circuit
         #[clap(long)]
         fdac: Option<PathBuf>,
         /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
-        /// Should the DAC be read from the given input
-        #[clap(short, long)]
-        read: Option<bool>,
     },
     /// Learn a circuit from a set of queries
     Learn {
@@ -71,14 +72,14 @@ enum Command {
         /// How to branch
         #[clap(short, long, value_enum)]
         branching: schlandals::Branching,
-        /// If present, file to store the learned distributions
+        /// If present, folder in which to store the output files
         #[clap(long)]
-        fout: Option<PathBuf>,
+        outfolder: Option<PathBuf>,
         /// Learning rate
-        #[clap(short, long)]
+        #[clap(short, long, default_value_t=0.3)]
         lr: f64,
         /// Number of epochs
-        #[clap(long)]
+        #[clap(long, default_value_t=2000)]
         nepochs: usize,
         /// If present, save a detailled csv of the training and use a codified output filename
         #[clap(long, short, action)]
@@ -86,19 +87,11 @@ enum Command {
         /// If present, define the compilation timeout
         #[clap(long, default_value_t=u64::MAX)]
         timeout: u64,
-        /// If present, store a textual representation of the compiled circuits 
-        /// and distributions in the given folder
+        /// If present, do an approximate learner on the given ratio of distributions.
         #[clap(long)]
-        folderdac: Option<PathBuf>,
-        /// Should the DAC be read from the given input
-        #[clap(short, long, action)]
-        read: bool,
-        /// If present, indicates the proportion of the number of batch of distribution that will be used
-        /// for the learning using approximate search. If not present, the learning is done using exact search
-        #[clap(long)]
-        nb_approx: Option<usize>,
+        rlearned: Option<f64>,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
-        #[clap(short, long, default_value="0.0")]
+        #[clap(short, long, default_value_t=0.0)]
         epsilon: f64,
     }
 }
@@ -116,16 +109,11 @@ fn main() {
                 Ok(p) => println!("{}", p),
             };
         },
-        Command::Compile { input, branching, fdac, dotfile, read} => {
-            let should_read = read.is_some() && read.unwrap();
-            if should_read {
-                schlandals::compile(input, branching, fdac, dotfile);
-            } else {
-                //schlandals::read_compiled(input, dotfile);
-            }
+        Command::Compile { input, branching, ratio, fdac, dotfile} => {
+            schlandals::compile(input, branching, ratio, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, fout, lr, nepochs, do_log , timeout, folderdac, read, nb_approx, epsilon} => {
-            schlandals::learn(trainfile, branching, fout, lr, nepochs, do_log, timeout, folderdac, read, nb_approx, epsilon);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon);
         }
     }
 }

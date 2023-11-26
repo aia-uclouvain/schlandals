@@ -1,5 +1,5 @@
 //Schlandals
-//Copyright (C) 2022 A. Dubray
+//Copyright (C) 2022 A. Dubray, L. Dierckx
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
@@ -90,63 +90,110 @@ pub struct Node {
     // Propagation path
     propagation: Vec<(VariableIndex, bool)>,
 }
+
 impl Node{
-    // --- Getters --- //
+
+    // Returns the value of the node
     pub fn get_value(&self) -> Float{
         self.value.clone()
     }
+
+    // Return the path value of the node. The path value of a node is the accumulated product of
+    // the value of the nodes from the root of the circuit to the node.
     pub fn get_path_value(&self) -> Float{
         self.path_value.clone()
     }
+
+    /// Returns the type of the node.
     pub fn get_type(&self) -> TypeNode{
         self.typenode
     }
+
+    /// Returns the start of the outputs of the nodes
     pub fn get_output_start(&self) -> usize{
         self.output_start
     }
+    
+    /// Returns the number of output the node has
     pub fn get_number_outputs(&self) -> usize{
         self.number_outputs
     }
+
+    /// Returns the start of the input of the node
     pub fn get_input_start(&self) -> usize{
         self.input_start
     }
+
+    /// Returns the number of input the node has
     pub fn get_number_inputs(&self) -> usize{
         self.number_inputs
     }
+
+    /// Returns the layer of the node
     pub fn get_layer(&self) -> usize{
         self.layer
     }
-    pub fn get_to_remove(&self) -> bool{
+
+    /// Returns true if the node must be removed
+    pub fn is_to_remove(&self) -> bool{
         self.to_remove
     }
+
+    /// Returns the propagations that need to be done to reach the node
     pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)>{
         &self.propagation
     }
+
+    /// Returns true iff the node is incomplete. A node is incomplete if the compilation has been
+    /// stopped while the sub-problem represented by the node was not solved. In that case, the
+    /// propagations to reach the node are stored in the `propagation field`.
+    pub fn is_node_incomplete(&self) -> bool {
+        self.propagation.is_empty()
+    }
+
     // --- Setters --- /
+
+    /// Sets the value of the node to the given float
     pub fn set_value(&mut self, value: f64){
         self.value.assign(value);
     }
+
+    /// Sets the path value of the node to the given float
     pub fn set_path_value(&mut self, value: Float){
         self.path_value = value;
     }
+
+    /// Sets the type of the node
     pub fn set_type(&mut self, typenode: TypeNode){
         self.typenode = typenode;
     }
+
+    /// Sets the start of the output of the node
     pub fn set_output_start(&mut self, output_start: usize){
         self.output_start = output_start;
     }
+
+    /// Sets the number of output of the node
     pub fn set_number_outputs(&mut self, number_outputs: usize){
         self.number_outputs = number_outputs;
     }
+
+    /// Sets the start of the input of the node
     pub fn set_input_start(&mut self, input_start: usize){
         self.input_start = input_start;
     }
+
+    /// Sets the number of input of the node
     pub fn set_number_inputs(&mut self, number_inputs: usize){
         self.number_inputs = number_inputs;
     }
+
+    /// Sets the layer of the node
     pub fn set_layer(&mut self, layer: usize){
         self.layer = layer;
     }
+
+    /// Sets the node to be removed
     pub fn set_to_remove(&mut self, to_remove: bool){
         self.to_remove = to_remove;
     }
@@ -646,6 +693,41 @@ impl Dac {
         cnt
     }
 
+    /// Returns true iff the circuit has some nodes that have been cut-of during expansion.
+    /// These node contains the propagations that have been done
+    pub fn has_cutoff_nodes(&self) -> bool {
+        self.nodes.iter().find(|n| !n.propagation.is_empty()).is_some()
+    }
+
+}
+
+// --- ITERATOR ---
+
+impl Dac {
+    pub fn iter(&self) -> impl Iterator<Item = NodeIndex> {
+        (0..self.nodes.len()).map(NodeIndex)
+    }
+
+    pub fn iter_rev(&self) -> impl Iterator<Item = NodeIndex> {
+        (0..self.nodes.len()).rev().map(NodeIndex)
+    }
+}
+
+
+// --- Indexing the circuit --- 
+
+impl std::ops::Index<NodeIndex> for Dac {
+    type Output = Node;
+
+    fn index(&self, index: NodeIndex) -> &Self::Output {
+        &self.nodes[index.0]
+    }
+}
+
+impl std::ops::IndexMut<NodeIndex> for Dac {
+    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
+        &mut self.nodes[index.0]
+    }
 }
 
 // Various methods for dumping the compiled diagram, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )

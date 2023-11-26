@@ -49,10 +49,17 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+pub enum FileType {
+    CNF,
+    FDAC,
+}
+
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
 ) -> Graph {
+    // First pass to get the distributions
+    let distributions = distributions_from_cnf(filepath);
     let file = File::open(filepath).unwrap();
     let mut reader = BufReader::new(&file);
     let mut header = String::new();
@@ -68,20 +75,9 @@ pub fn graph_from_ppidimacs(
     
     let mut g = Graph::new(state, number_var, number_clauses);
     
-    let mut distributions: Vec<Vec<f64>> = vec![];
-    for l in reader.lines() {
-        match l {
-            Err(e) => panic!("Problem while reading file: {}", e),
-            Ok(line) => {
-                if line.starts_with("c p distribution") {
-                    let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
-                    number_probabilistic += weights.len();
-                    distributions.push(weights);
-                }
-            }
-        }
+    for d in distributions.iter() {
+        number_probabilistic += d.len();
     }
-    
     g.add_distributions(&distributions, state);
     
     // Second pass to parse the clauses
@@ -120,6 +116,43 @@ pub fn graph_from_ppidimacs(
         }
     }
     g
+}
+
+pub fn distributions_from_cnf(filepath: &PathBuf) -> Vec<Vec<f64>> {
+    let mut distributions: Vec<Vec<f64>> = vec![];
+    let file = File::open(filepath).unwrap();
+    let reader = BufReader::new(&file);
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Problem while parsing the distributions: {}", e),
+            Ok(line) => {
+                if line.starts_with("c p distribution") {
+                    let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
+                    distributions.push(weights);
+                }
+            }
+        }
+    }
+    distributions
+}
+
+pub fn type_of_input(filepath: &PathBuf) -> FileType {
+    let mut header = String::new();
+    {
+        let file = File::open(filepath).unwrap();
+        let mut reader = BufReader::new(&file);
+        match reader.read_line(&mut header) {
+            Ok(_) => {},
+            Err(e) => panic!("Error while getting the header: {}",e),
+        };
+    }
+    if header.starts_with("p cnf") {
+        FileType::CNF
+    } else if header.starts_with("outputs") {
+        FileType::FDAC
+    } else {
+        panic!("Unexpected file format to read from. Header does not match .cnf or .fdac file: {}", header);
+    }
 }
 /*
 #[cfg(test)]

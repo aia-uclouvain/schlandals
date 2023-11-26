@@ -43,9 +43,9 @@ use super::*;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct SearchSolver<'b, B, const S: bool>
+pub struct SearchSolver<B, const S: bool>
 where
-    B: BranchingDecision + ?Sized,
+    B: BranchingDecision,
 {
     /// Implication graph of the input CNF formula
     graph: Graph,
@@ -54,7 +54,7 @@ where
     /// Extracts the connected components in the graph
     component_extractor: ComponentExtractor,
     /// Heuristics that decide on which distribution to branch next
-    branching_heuristic: &'b mut B,
+    branching_heuristic: Box<B>,
     /// The propagator
     propagator: Propagator,
     /// Cache used to store results of sub-problems
@@ -68,15 +68,15 @@ where
     epsilon: f64,
 }
 
-impl<'b, B, const S: bool> SearchSolver<'b, B, S>
+impl<B, const S: bool> SearchSolver<B, S>
 where
-    B: BranchingDecision + ?Sized,
+    B: BranchingDecision,
 {
     pub fn new(
         graph: Graph,
         state: StateManager,
         component_extractor: ComponentExtractor,
-        branching_heuristic: &'b mut B,
+        branching_heuristic: Box<B>,
         propagator: Propagator,
         mlimit: u64,
         epsilon: f64,
@@ -251,7 +251,7 @@ where
     pub fn solve(&mut self) -> ProblemSolution {
         self.state.save_state();
         self.propagator.init(self.graph.number_clauses());
-        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
+        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
             return ProblemSolution::Err(Unsat);
         }
@@ -283,10 +283,14 @@ where
         ProblemSolution::Ok(proba)
     }
 
-    pub fn add_to_propagation_stack(&mut self, propagation: Vec<(VariableIndex, bool)>) {
-        for (variable, value) in propagation {
+    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) {
+        for (variable, value) in propagation.iter().copied() {
             self.propagator.add_to_propagation_stack(variable, value, None);
         }
+    }
+
+    pub fn reset_cache(&mut self) {
+        self.cache.clear();
     }
     
     #[inline]

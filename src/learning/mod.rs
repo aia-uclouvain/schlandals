@@ -1,5 +1,5 @@
 //Schlandals
-//Copyright (C) 2022 A. Dubray
+//Copyright (C) 2022 A. Dubray, L. Dierckx
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
@@ -15,16 +15,11 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use self::learner::Learner;
-use self::approximate_learner::ApproximateLearner;
 
 pub mod circuit;
 pub mod learner;
-pub mod approximate_learner;
 pub mod exact;
 mod logger;
 
 pub type LogLearner = Learner<true>;
 pub type QuietLearner = Learner<false>;
-
-pub type LogApproximateLearner = ApproximateLearner<true>;
-pub type QuietApproximateLearner = ApproximateLearner<false>;

@@ -38,8 +38,6 @@ pub trait BranchingDecision {
 
 mod cgraph;
 mod vsids;
-mod limited;
 
 pub use cgraph::{MaxDegree, MinInDegree, MinOutDegree};
 pub use vsids::VSIDS;
-pub use limited::Counting;

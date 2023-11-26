@@ -28,7 +28,130 @@ pub type Bounds = (Float, Float);
 pub mod search;
 mod statistics;
 
-use search::SearchSolver;
+pub use search::SearchSolver;
+use crate::branching::*;
+pub use sysinfo::{SystemExt, System};
 
-pub type StatSearchSolver<'b, B> = SearchSolver<'b, B, true>;
-pub type QuietSearchSolver<'b, B> = SearchSolver<'b, B, false>;
+pub enum Solver {
+    SMinInDegree(SearchSolver<MinInDegree, true>),
+    SMinOutDegree(SearchSolver<MinOutDegree, true>),
+    SMaxDegree(SearchSolver<MaxDegree, true>),
+    SVSIDS(SearchSolver<VSIDS, true>),
+    QMinInDegree(SearchSolver<MinInDegree, false>),
+    QMinOutDegree(SearchSolver<MinOutDegree, false>),
+    QMaxDegree(SearchSolver<MaxDegree, false>),
+    QVSIDS(SearchSolver<VSIDS, false>),
+}
+
+macro_rules! make_solver {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr) => {
+        {
+            let mut state = StateManager::default();
+            let propagator = Propagator::new(&mut state);
+            let graph = graph_from_ppidimacs($i, &mut state);
+            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let mlimit = if let Some(m) = $m {
+                m
+            } else {
+                let sys = System::new_all();
+                sys.total_memory() / 1000000
+            };
+            if $s {
+                match $b {
+                    Branching::MinInDegree => {
+                        Solver::SMinInDegree(SearchSolver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::MinOutDegree => {
+                        Solver::SMinOutDegree(SearchSolver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::MaxDegree => {
+                        Solver::SMaxDegree(SearchSolver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::VSIDS => {
+                        Solver::SVSIDS(SearchSolver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e))
+                    },
+                }
+            } else {
+                match $b {
+                    Branching::MinInDegree => {
+                        Solver::QMinInDegree(SearchSolver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::MinOutDegree => {
+                        Solver::QMinOutDegree(SearchSolver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::MaxDegree => {
+                        Solver::QMaxDegree(SearchSolver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e))
+                    },
+                    Branching::VSIDS => {
+                        Solver::QVSIDS(SearchSolver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e))
+                    },
+                }
+            }
+        }
+    };
+}
+
+macro_rules! solve_search {
+    ($s:expr) => {
+        match $s {
+            Solver::SMinInDegree(mut solver) => solver.solve(),
+            Solver::SMinOutDegree(mut solver) => solver.solve(),
+            Solver::SMaxDegree(mut solver) => solver.solve(),
+            Solver::SVSIDS(mut solver) => solver.solve(),
+            Solver::QMinInDegree(mut solver) => solver.solve(),
+            Solver::QMinOutDegree(mut solver) => solver.solve(),
+            Solver::QMaxDegree(mut solver) => solver.solve(),
+            Solver::QVSIDS(mut solver) => solver.solve(),
+        }
+    }
+}
+
+pub use crate::learning::exact::DACCompiler;
+
+pub enum Compiler {
+    MinInDegree(DACCompiler<MinInDegree>),
+    MinOutDegree(DACCompiler<MinOutDegree>),
+    MaxDegree(DACCompiler<MaxDegree>),
+    VSIDS(DACCompiler<VSIDS>),
+}
+
+macro_rules! make_compiler {
+    ($i:expr, $b:expr, $r:expr) => {
+        {
+            let mut state = StateManager::default();
+            let propagator = Propagator::new(&mut state);
+            let graph = graph_from_ppidimacs($i, &mut state);
+            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            match $b {
+                Branching::MinInDegree => {
+                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, $r))
+                },
+                Branching::MinOutDegree => {
+                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, $r))
+                },
+                Branching::MaxDegree => {
+                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, $r))
+                },
+                Branching::VSIDS => {
+                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, $r))
+                },
+            }
+        }
+    };
+}
+
+macro_rules! compile {
+    ($c:expr, $t:expr) => {
+        match $c {
+            Compiler::MinInDegree(mut c) => c.compile($t),
+            Compiler::MinOutDegree(mut c) => c.compile($t),
+            Compiler::MaxDegree(mut c) => c.compile($t),
+            Compiler::VSIDS(mut c) => c.compile($t),
+        }
+    }
+}
+
+pub(crate) use make_solver;
+pub(crate) use make_compiler;
+pub(crate) use compile;
+pub(crate) use solve_search;

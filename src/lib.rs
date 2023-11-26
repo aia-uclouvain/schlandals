@@ -15,7 +15,7 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
-use learning::{LogLearner, QuietLearner, LogApproximateLearner, QuietApproximateLearner};
+use learning::{LogLearner, QuietLearner, circuit::Dac};
 use learning::exact::DACCompiler;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
@@ -23,11 +23,11 @@ use clap::ValueEnum;
 
 use crate::core::components::ComponentExtractor;
 use crate::branching::*;
-use solvers::{QuietSearchSolver, StatSearchSolver};
 use solvers::ProblemSolution;
+use crate::solvers::*;
+use crate::parser::*;
 
 use propagator::Propagator;
-use crate::learning::circuit::*;
 
 // Re-export the modules
 mod common;
@@ -55,44 +55,42 @@ pub enum Branching {
     VSIDS,
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac> {
-    let mut state = StateManager::default();
-    let propagator = Propagator::new(&mut state);
-    let graph = parser::graph_from_ppidimacs(&input, &mut state);
-    let component_extractor = ComponentExtractor::new(&graph, &mut state);
-    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-        Branching::MinInDegree => Box::<MinInDegree>::default(),
-        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-        Branching::MaxDegree => Box::<MaxDegree>::default(),
-        Branching::VSIDS => Box::<VSIDS>::default(),
-    };
-    let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-    let mut res = compiler.compile(u64::MAX);
-    if let Some(dac) = res.as_mut() {
-        dac.evaluate();
-        if let Some(f) = dotfile {
-            let out = dac.as_graphviz();
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(out.as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) {
+    match type_of_input(&input) {
+        FileType::CNF => {
+            let number_distribution = distributions_from_cnf(&input).len();
+            let limit = (ratio * number_distribution as f64).floor() as usize;
+            let compiler = make_compiler!(&input, branching, limit);
+            if let Some(mut dac) = compile!(compiler, u64::MAX) {
+                dac.evaluate();
+                if let Some(f) = dotfile {
+                    let out = dac.as_graphviz();
+                    let mut outfile = File::create(f).unwrap();
+                    match outfile.write(out.as_bytes()) {
+                        Ok(_) => (),
+                        Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+                    }
+                }
+                if let Some(f) = fdac {
+                    let mut outfile = File::create(f).unwrap();
+                    match outfile.write(format!("{}", dac).as_bytes()) {
+                        Ok(_) => (),
+                        Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+                    }
+                    
+                }
             }
-        }
-        if let Some(f) = fdac {
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(format!("{}", dac).as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
-            }
-            
-        }
+        },
+        FileType::FDAC => {
+            let mut dac = Dac::from_file(&input);
+            dac.evaluate();
+            println!("{}", dac.get_circuit_probability());
+        },
     }
-    res
 }
 
-pub fn learn(trainfile: PathBuf, branching: Branching, fout: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, folderdac: Option<PathBuf>, read: bool, nb_approx: Option<usize>, 
-            epsilon: f64) {    
+pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
+            log:bool, timeout:u64, rlearned: Option<f64>, epsilon: f64) {    
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
     let file = File::open(&trainfile).unwrap();
@@ -103,76 +101,20 @@ pub fn learn(trainfile: PathBuf, branching: Branching, fout: Option<PathBuf>, lr
         inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    if let Some(nb) = nb_approx {
-        if log { 
-            let mut learner = LogApproximateLearner::new(inputs, expected, epsilon, branching, timeout, folderdac, read, nb);
-            learner.train(nepochs, lr, fout);
-        } else {
-            let mut learner = QuietApproximateLearner::new(inputs, expected, epsilon, branching, timeout, folderdac, read, nb);
-            learner.train(nepochs, lr, fout);
-        }
+    let ratio_learned = match rlearned {
+        None => 1.0,
+        Some(r) => r,
+    };
+    if log { 
+        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, ratio_learned);
+        learner.train(nepochs, lr);
     } else {
-        if log { 
-            let mut learner = LogLearner::new(inputs, branching, timeout, folderdac, read);
-            learner.train(nepochs, lr, fout);
-        } else {
-            let mut learner = QuietLearner::new(inputs, branching, timeout, folderdac, read);
-            learner.train(nepochs, lr, fout);
-        }
+        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, ratio_learned);
+        learner.train(nepochs, lr);
     }
 }
 
-/* pub fn read_compiled(input: PathBuf, dotfile: Option<PathBuf>) -> Dac {
-    let dac = Dac::from_file(&input);
-    if let Some(f) = dotfile {
-        let out = dac.as_graphviz();
-        let mut outfile = File::create(f).unwrap();
-        match outfile.write(out.as_bytes()) {
-            Ok(_) => (),
-            Err(e) => println!("Could not write the PC into the file: {:?}", e),
-        }
-    }
-    dac
-} */
-
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
-    let mut state = StateManager::default();
-    let propagator = Propagator::new(&mut state);
-    let graph = parser::graph_from_ppidimacs(&input, &mut state);
-    let component_extractor = ComponentExtractor::new(&graph, &mut state);
-    let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-        Branching::MinInDegree => Box::<MinInDegree>::default(),
-        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-        Branching::MaxDegree => Box::<MaxDegree>::default(),
-        Branching::VSIDS => Box::<VSIDS>::default(),
-    };
-    let mlimit = if let Some(m) = memory {
-        m
-    } else {
-        let sys = System::new_all();
-        sys.total_memory() / 1000000
-    };
-    if statistics {
-        let mut solver = StatSearchSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-            epsilon,
-        );
-        solver.solve()
-    } else {
-        let mut solver = QuietSearchSolver::new(
-            graph,
-            state,
-            component_extractor,
-            branching_heuristic.as_mut(),
-            propagator,
-            mlimit,
-            epsilon,
-        );
-        solver.solve()
-    }
+    let solver = make_solver!(&input, branching, epsilon, memory, statistics);
+    solve_search!(solver)
 }

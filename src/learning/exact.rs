@@ -1,5 +1,5 @@
 //Schlandal
-//Copyright (C) 2022 A. Dubray
+//Copyright (C) 2022 A. Dubray, L. Dierckx
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU Affero General Public License as published by
@@ -39,9 +39,9 @@ use std::time::SystemTime;
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
-pub struct DACCompiler<'b, B>
+pub struct DACCompiler<B>
 where
-    B: BranchingDecision + ?Sized,
+    B: BranchingDecision,
 {
     /// Implication graph of the input CNF formula
     graph: Graph,
@@ -50,7 +50,7 @@ where
     /// Extracts the connected components in the graph
     component_extractor: ComponentExtractor,
     /// Heuristics that decide on which distribution to branch next
-    branching_heuristic: &'b mut B,
+    branching_heuristic: Box<B>,
     /// The propagator
     propagator: Propagator,
     /// Cache used to store results of sub-problems
@@ -61,15 +61,15 @@ where
     distribution_count: ReversibleUsize,
 }
 
-impl<'b, B> DACCompiler<'b, B>
+impl<B> DACCompiler<B>
 where
-    B: BranchingDecision + ?Sized,
+    B: BranchingDecision,
 {
     pub fn new(
         graph: Graph,
         mut state: StateManager,
         component_extractor: ComponentExtractor,
-        branching_heuristic: &'b mut B,
+        branching_heuristic: Box<B>,
         propagator: Propagator,
         limit: usize,
     ) -> Self {
@@ -225,7 +225,7 @@ where
             probabilities.push(proba);
         } */
         self.propagator.init(self.graph.number_clauses());
-        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
+        let preproc = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
             return None;
         }

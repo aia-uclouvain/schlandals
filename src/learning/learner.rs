@@ -1,28 +1,49 @@
-use std::{fmt, path::PathBuf, fs,fs::File, io::{BufRead, BufReader}};
+//Schlandals
+//Copyright (C) 2022 A. Dubray, L. Dierckx
+//
+//This program is free software: you can redistribute it and/or modify
+//it under the terms of the GNU Affero General Public License as published by
+//the Free Software Foundation, either version 3 of the License, or
+//(at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU Affero General Public License for more details.
+//
+//You should have received a copy of the GNU Affero General Public License
+//along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use std::fmt;
+use std::path::PathBuf;
+use std::fs::File;
 
 use std::io::{self, Write};
 use rug::{Assign, Float};
 use crate::common::*;
 use crate::learning::circuit::*;
-use rand::Rng;
 use super::logger::Logger;
 use search_trail::StateManager;
 use crate::branching::*;
-use crate::parser;
+use crate::parser::*;
 use crate::propagator::Propagator;
+use crate::preprocess::Preprocessor;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
 use super::exact::DACCompiler;
+use crate::solvers::*;
 
-
-pub struct Learner<const S: bool> {
-    pub dacs: Vec<Dac>,
+pub struct Learner<const S: bool>
+{
+    dacs: Vec<Dac>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     lr: f64,
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
     log: Logger<S>,
+    solvers: Vec<Option<Solver>>,
+    outfolder: Option<PathBuf>,
 }
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
@@ -37,114 +58,92 @@ pub fn softmax(x: &[f64]) -> Vec<f64> {
     x.iter().map(|i| i.exp() / sum_exp).collect()
 }
 
-impl <const S: bool> Learner<S> {
+impl <const S: bool> Learner<S>
+{
 
-    /// Creates a new learner from the given graphs.
-    pub fn new(inputs: Vec<PathBuf>, branching: Branching, timeout:u64, folderdac: Option<PathBuf>, read:bool) -> Self {
-        if !read {
-            let mut distributions: Vec<Vec<f64>> = vec![];
-            let mut grads: Vec<Vec<Float>> = vec![];
-            let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
+    fn get_number_needed_distributions(input: &PathBuf, branching: Branching) -> usize {
+        let mut state = StateManager::default();
+        let mut propagator = Propagator::new(&mut state);
+        let mut graph = graph_from_ppidimacs(&input, &mut state);
+        let mut component_extractor = ComponentExtractor::new(&graph, &mut state);
+        propagator.init(graph.number_clauses());
+        let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
+            Branching::MinInDegree => Box::<MinInDegree>::default(),
+            Branching::MinOutDegree => Box::<MinOutDegree>::default(),
+            Branching::MaxDegree => Box::<MaxDegree>::default(),
+            Branching::VSIDS => Box::<VSIDS>::default(),
+        };
+        Preprocessor::new(&mut graph, &mut state, branching_heuristic.as_mut(), &mut propagator, &mut component_extractor).preprocess(false);
+        graph.distributions_iter().filter(|d| graph[*d].is_constrained(&state)).count()
+    }
 
-            let mut rng = rand::thread_rng();
-            let mut rand_init: Vec<Vec<f64>> = vec![];
-
-            let mut state = StateManager::default();
-            let graph = parser::graph_from_ppidimacs(&inputs[0], &mut state);
-            for (i, distribution) in graph.distributions_iter().enumerate() {
-                let probabilities: Vec<f64>= graph[distribution].iter_variables().map(|v| graph[v].weight().unwrap()).collect();
-                distributions.push(probabilities);
-
-                let mut vector: Vec<f64> = vec![0.0; distributions[i].len()];
-                let mut unsoftmaxed_vector: Vec<f64> = vec![0.0; distributions[i].len()];
-                for j in 0..distributions[i].len() {
-                    vector[j] = rng.gen_range(0.0..1.0);
-                    vector[j] = vector[j].log(std::f64::consts::E);
-                    unsoftmaxed_vector[j] = distributions[i][j].log(std::f64::consts::E);
-                }
-                rand_init.push(vector);
-                unsoftmaxed_distributions.push(unsoftmaxed_vector);
-                grads.push(vec![f128!(0.0); distributions[i].len()]);
-            }
-
-            let mut learner = Self { 
-                dacs: vec![], 
-                unsoftmaxed_distributions, 
-                gradients: grads,
-                lr: 0.0,
-                expected_distribution: distributions,
-                expected_outputs: vec![],
-                log: Logger::default(),
-            };
-            for input in &inputs {
-                println!("Compiling {}", input.display());
-                let mut state = StateManager::default();
-                let propagator = Propagator::new(&mut state);
-                let graph = parser::graph_from_ppidimacs(&input, &mut state);
-                let component_extractor = ComponentExtractor::new(&graph, &mut state);
-                let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-                    Branching::MinInDegree => Box::<MinInDegree>::default(),
-                    Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-                    Branching::MaxDegree => Box::<MaxDegree>::default(),
-                    Branching::VSIDS => Box::<VSIDS>::default(),
-                };
-                let mut compiler = DACCompiler::new(graph, state, component_extractor, branching_heuristic.as_mut(), propagator);
-                let res = compiler.compile(timeout);
-                if let Some(dac) = res {
-                    learner.add_dac(dac);
-                }
-                else {
-                    println!("Skipped");
-                }
-            }
-            let expected_outputs = learner.evaluate();
-            learner.expected_outputs = expected_outputs;
-            learner.unsoftmaxed_distributions = rand_init;
-
-            if let Some(f) = folderdac {
-                println!("{:?}", f.join("distributions.fdist"));
-                let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
-                match outfile.write(format!("{}", learner).as_bytes()) {
-                    Ok(_) => (),
-                    Err(e) => println!("Could not write the distributions into the fdist file: {:?}", e),
-                }
-                for (i, dac) in learner.dacs.iter().enumerate() {
-                    let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
-                    match outfile.write(format!("{}evaluate {:.8}", dac, learner.expected_outputs[i]).as_bytes()) {
-                        Ok(_) => (),
-                        Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
-                    }
-                }
-            }
-            learner
-
-        } else {
-            println!("Reading the distributions from the given folder");
-            if let Some(f) = folderdac{
-                let mut learner = Self::from_file(&f.join("distributions.fdist"));
-                let paths = fs::read_dir(f).unwrap();
-                for path in paths {
-                    let path = path.unwrap().path();
-                    if path.is_file() && path.extension().unwrap() == "fdac" {
-                        learner.add_dac(Dac::from_file(&path));
-                        let file = File::open(path).unwrap();
-                        let reader = BufReader::new(file);
-                        for line in reader.lines() {
-                            let l = line.unwrap();
-                            let split = l.split_whitespace().collect::<Vec<&str>>();
-                            if l.starts_with("evaluate"){
-                                learner.expected_outputs.push(split[1].parse::<f64>().unwrap());
-                            }
-                        }
-                    }
-                }
-                println!("grads: {:?}", learner.gradients);
-                learner
-            }
-            else {
-                panic!("No folder given to read the distributions from");
-            }  
+    /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
+    /// solved, and the expected_outputs contains, for each query, its expected probability.
+    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, timeout:u64, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
+        let distributions = distributions_from_cnf(&inputs[0]);
+        let mut grads: Vec<Vec<Float>> = vec![];
+        let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
+        let mut rand_init: Vec<Vec<f64>> = vec![];
+        for distribution in distributions.iter() {
+            // Computing a random initial value in case the distribution must be learned
+            let random_probabilities = (0..distribution.len()).map(|_| rand::random::<f64>().log(std::f64::consts::E)).collect::<Vec<f64>>();
+            let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
+            rand_init.push(random_probabilities);
+            unsoftmaxed_distributions.push(unsoftmaxed_vector);
+            grads.push(vec![f128!(0.0); distribution.len()]);
         }
+
+        let mut learner = Self { 
+            dacs: vec![], 
+            unsoftmaxed_distributions, 
+            gradients: grads,
+            lr: 0.0,
+            expected_distribution: distributions,
+            expected_outputs: vec![],
+            log: Logger::default(),
+            solvers: vec![],
+            outfolder,
+        };
+        for (i , input) in inputs.iter().enumerate() {
+            // We compile the input. This can either be a .cnf file or a fdac file.
+            // If the file is a fdac file, then we read directly from it
+            let d = match type_of_input(input) {
+                FileType::CNF => {
+                    println!("Compiling {}", input.to_str().unwrap());
+                    // The input is a CNF file, we need to compile it from scratch
+                    // First, we need to know how much distributions are needed to compute the
+                    // query.
+                    let number_distribution = Self::get_number_needed_distributions(input, branching);
+                    // TODO: Maybe use a fixed threshold for easy instance
+                    let learned = (ratio_learn * number_distribution as f64).floor() as usize;
+                    let compiler = make_compiler!(input, branching, learned);
+                    compile!(compiler, timeout)
+                },
+                FileType::FDAC => {
+                    println!("Reading {}", input.to_str().unwrap());
+                    // The query has already been compiled, we just read from the file.
+                    Some(Dac::from_file(input))
+                }
+            };
+            // We handle the compiled circuit, if present.
+            if let Some(dac) = d {
+                if dac.has_cutoff_nodes() {
+                    // The circuit has some nodes that have been cut-off. This means that, when
+                    // evaluating the circuit, they need to be solved. Hence we stock a solver
+                    // for this query.
+                    let solver = make_solver!(input, branching, epsilon, None, false);
+                    learner.solvers.push(Some(solver));
+                } else {
+                    learner.solvers.push(None);
+                }
+                learner.dacs.push(dac);
+                learner.expected_outputs.push(expected_outputs[i]);
+            }
+        }
+        learner.unsoftmaxed_distributions = rand_init;
+
+        learner.to_folder();
+        learner
     }
 
     // --- Getters --- //
@@ -173,89 +172,159 @@ impl <const S: bool> Learner<S> {
         }
     }
 
-    pub fn add_dac(&mut self, dac: Dac) {
-        self.dacs.push(dac);
-    }
-
     // --- Evaluation --- //
 
-    fn reset_dacs(&mut self) {
-        for dac_i in 0..self.dacs.len() {
-            for node_i in 0..self.dacs[dac_i].nodes.len() {
-                match self.dacs[dac_i].nodes[node_i].get_type() {
+    fn reset_dac(&mut self, dac_id: usize) {
+        for node in self.dacs[dac_id].iter() {
+            if self.dacs[dac_id][node].is_node_incomplete() {
+                let solver = self.solvers[dac_id].as_mut().unwrap();
+                match solver {
+                    Solver::SMinInDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::SMinOutDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::SMaxDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::SVSIDS(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::QMinInDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::QMinOutDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::QMaxDegree(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                    Solver::QVSIDS(ref mut s) => {
+                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        match s.solve() {
+                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                                          // This should break the learning
+                        };
+                    },
+                };
+            } else {
+                match self.dacs[dac_id][node].get_type() {
                     TypeNode::Sum => {
-                        self.dacs[dac_i].nodes[node_i].set_value(0.0);
+                        self.dacs[dac_id][node].set_value(0.0);
                     },
                     TypeNode::Product => {
-                        self.dacs[dac_i].nodes[node_i].set_value(1.0);
+                        self.dacs[dac_id][node].set_value(1.0);
                     },
-                    TypeNode::Distribution{d,v} => {
+                    TypeNode::Distribution{d, v} => {
                         let proba = self.get_probability(d, v);
-                        self.dacs[dac_i].nodes[node_i].set_value(proba);
+                        self.dacs[dac_id][node].set_value(proba);
                     },
                 }
-                self.dacs[dac_i].nodes[node_i].set_path_value(f128!(1.0));
             }
+        }
+        if let Some(solver) = &mut self.solvers[dac_id] {
+            match solver {
+                Solver::SMinInDegree(ref mut s) => s.reset_cache(),
+                Solver::SMinOutDegree(ref mut s) => s.reset_cache(),
+                Solver::SMaxDegree(ref mut s) => s.reset_cache(),
+                Solver::SVSIDS(ref mut s) => s.reset_cache(),
+                Solver::QMinInDegree(ref mut s) => s.reset_cache(),
+                Solver::QMinOutDegree(ref mut s) => s.reset_cache(),
+                Solver::QMaxDegree(ref mut s) => s.reset_cache(),
+                Solver::QVSIDS(ref mut s) => s.reset_cache(),
+            };
         }
     }
 
     // Evaluate the different DACs and return the results
     pub fn evaluate(&mut self) -> Vec<f64> {
-        self.reset_dacs();
-        let mut evals: Vec<f64> = vec![];
-        for dac in self.dacs.iter_mut() {
-            evals.push(dac.evaluate().to_f64());
+        let mut probas: Vec<f64> = vec![];
+        for i in 0..self.dacs.len() {
+            self.reset_dac(i);
+            let p = self.dacs[i].evaluate().to_f64();
+            probas.push(p);
         }
-        evals
+        probas
     }
 
     // --- Gradient computation --- //
 
     // Compute the gradient of the distributions, from the different DAC queries
-    pub fn compute_gradients(&mut self, gradient_loss: Vec<f64>){
+    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
-        for dac_i in 0..self.dacs.len() {
-            // Iterate on the different DAC queries
-            for node in (0..self.dacs[dac_i].nodes.len()).map(NodeIndex).rev(){
-                // Iterate on all nodes from the DAC, top-down way
-                let start = self.dacs[dac_i].nodes[node.0].get_input_start();
-                let end = start + self.dacs[dac_i].nodes[node.0].get_number_inputs();
-                let value = self.dacs[dac_i].nodes[node.0].get_value();
-                let path_val = self.dacs[dac_i].nodes[node.0].get_path_value();
+        for dac_id in 0..self.dacs.len() {
+            // Iterate on all nodes from the DAC, top-down way
+            for node in self.dacs[dac_id].iter_rev() {
+                let start = self.dacs[dac_id][node].get_input_start();
+                let end = start + self.dacs[dac_id][node].get_number_inputs();
+                let value = self.dacs[dac_id][node].get_value();
+                let path_val = self.dacs[dac_id][node].get_path_value();
+
                 // Update the path value for the children sum, product nodes 
                 // and compute the gradient for the children leaf distributions
-                for i in start..end {
-                    let child = self.dacs[dac_i].get_input_at(i);
-                    match self.dacs[dac_i].nodes[child.0].get_type() {
+                for child_index in start..end {
+                    let child = self.dacs[dac_id].get_input_at(child_index);
+                    match self.dacs[dac_id][child].get_type() {
                         TypeNode::Sum => {
-                            let mut val = path_val.clone() * &value;
-                            val /= self.dacs[dac_i].nodes[child.0].get_value();
-                            self.dacs[dac_i].nodes[child.0].set_path_value(val);
+                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value();
+                            self.dacs[dac_id][child].set_path_value(val)
                         },
                         TypeNode::Product => {
-                            self.dacs[dac_i].nodes[child.0].set_path_value(path_val.clone());
+                            self.dacs[dac_id][child].set_path_value(path_val.clone());
                         },
-                        TypeNode::Distribution{d,v} => {
+                        TypeNode::Distribution { d, v } => {
                             // Compute the gradient for children that are leaf distributions
-                            let mut factor = path_val.clone() * gradient_loss[dac_i];
-                            if matches!(self.dacs[dac_i].nodes[node.0].get_type(), TypeNode::Product) {
+                            let mut factor = path_val.clone() * gradient_loss[dac_id];
+                            if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
                                 factor *= &value;
                                 factor /= self.get_probability(d, v);
                             }
-                            
                             // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
                             let mut sum_other_w = f128!(0.0);
                             let child_w = self.get_probability(d, v);
-                            for params in 0..self.unsoftmaxed_distributions[d].len() {
+                            for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
                                 let weight = self.get_probability(d, params);
-                                if params != v {
-                                    // For the other possible values of the distribution, the gradient contribution
-                                    // is simply the dactor and the product of both weights
-                                    self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
-                                    sum_other_w += weight.clone();
-                                }
+                                self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
+                                sum_other_w += weight.clone();
                             }
-                            self.gradients[d][v] += factor.clone() * child_w.clone() * sum_other_w.clone();
+                            self.gradients[d][v] += factor * child_w * sum_other_w;
                         },
                     }
                 }
@@ -272,10 +341,10 @@ impl <const S: bool> Learner<S> {
     }
 
     // --- Training --- //
-    fn training_to_file(& self, fout: Option<PathBuf>) {
-        let mut out_writer = match &fout {
+    fn training_to_file(& self) {
+        let mut out_writer = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(&x).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join("learn.out")).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -284,9 +353,9 @@ impl <const S: bool> Learner<S> {
             writeln!(out_writer, "Distribution {}: {:?}", i, self.get_softmaxed(i)).unwrap();
         }
 
-        let mut csv_file = match &fout {
+        let mut csv_file = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(x.with_extension("csv")).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join("log").with_extension("csv")).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -294,81 +363,64 @@ impl <const S: bool> Learner<S> {
         
     }
 
-    pub fn train(&mut self, nepochs:usize, lr:f64, fout: Option<PathBuf>) {
+    pub fn train(&mut self, nepochs:usize, lr:f64) {
         self.lr = lr;
         self.log.start();
 
+        let mut loss = vec![0.0; self.dacs.len()];
+        let mut loss_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             let do_print = e % 500 == 0;
             let predictions = self.evaluate();
+            // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
-            let mut loss = vec![0.0; self.dacs.len()];
-            let mut loss_grad = vec![0.0; self.dacs.len()];
-            for dac_i in 0..self.dacs.len() {
-                loss[dac_i] = (predictions[dac_i] - self.expected_outputs[dac_i]).powi(2);
-                loss_grad[dac_i] = 2.0 * (predictions[dac_i] - self.expected_outputs[dac_i]);
+            for dac_id in 0..self.dacs.len() {
+                loss[dac_id] = (predictions[dac_id] - self.expected_outputs[dac_id]).powi(2);
+                loss_grad[dac_id] = 2.0 * (predictions[dac_id] - self.expected_outputs[dac_id]);
             }
-            //loss /= self.dacs.len() as f64;
-            self.compute_gradients(loss_grad);
+            self.compute_gradients(&loss_grad);
+            println!("Gradients: {:?}", self.gradients);
             self.update_distributions();
-            self.log.add_epoch(loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
+            // TODO Log here
+            //self.log.add_epoch(loss, expected_distribution, predicted_distribution, gradients, lr)
+            loss.fill(0.0);
+            loss_grad.fill(0.0);
         }
 
-        self.training_to_file(fout);
+        self.training_to_file();
     }
 }
-impl <const S: bool> fmt::Display for Learner<S> {
+
+
+// --- Display/Output methods ---- 
+
+// TODO: Implementing Display for outputting the distributions is maybe not adequate, but need to
+// think about that
+impl <const S: bool> fmt::Display for Learner<S>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for i in 0..self.expected_distribution.len() {
-            write!(f, "d {}", self.expected_distribution[i].len())?;
-            for p_i in 0..self.expected_distribution[i].len(){
-                write!(f, " {:.5}", self.expected_distribution[i][p_i])?;
-            }
-            writeln!(f)?;
+        for distribution in self.expected_distribution.iter() {
+            writeln!(f, "d {} {}", distribution.len(), distribution.iter().map(|p| format!("{:.5}", p)).collect::<Vec<String>>().join(" "))?;
         }
         fmt::Result::Ok(())
     }
 }
 
-impl <const S: bool> Learner<S> {
-    pub fn from_file(filepath: &PathBuf) -> Self {
-        let mut expected_probabilities: Vec<Vec<f64>> = vec![];
-        let mut unsoftmaxed_probabilities: Vec<Vec<f64>> = vec![];
-        let mut gradients: Vec<Vec<Float>> = vec![];
-
-        let mut rand_init: Vec<Vec<f64>> = vec![];
-        let mut rng = rand::thread_rng();
-
-        let file = File::open(filepath).unwrap();
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let l = line.unwrap();
-            let split = l.split_whitespace().collect::<Vec<&str>>();
-            if l.starts_with('d') {
-                let dom_size = split[1].parse::<usize>().unwrap();
-                let probabilities = split[2..(2+dom_size)].iter().map(|s| s.parse::<f64>().unwrap()).collect::<Vec<f64>>();
-                let mut unsoftmaxed_vector = probabilities.clone();
-                let mut vector: Vec<f64> = vec![];
-                for el in &mut unsoftmaxed_vector {
-                    *el = el.log(std::f64::consts::E);
-                    let rnd: f64 = rng.gen_range(0.0..1.0);
-                    vector.push(rnd.log(std::f64::consts::E));
-                }
-                rand_init.push(vector);
-                gradients.push(vec![f128!(0.0); dom_size]);
-                unsoftmaxed_probabilities.push(unsoftmaxed_vector);
-                expected_probabilities.push(probabilities);
+impl <const S: bool> Learner<S>
+{
+    pub fn to_folder(&self) {
+        if let Some(f) = &self.outfolder {
+            let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
+            match outfile.write(format!("{}", self).as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the distributions into the fdist file: {:?}", e),
             }
-        }
-
-        Self {
-            dacs: vec![],
-            unsoftmaxed_distributions: rand_init,
-            gradients: gradients,
-            lr: 0.0,
-            expected_distribution: expected_probabilities,
-            expected_outputs: vec![],
-            log: Logger::default(),
+            for (i, dac) in self.dacs.iter().enumerate() {
+                let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
+                if let Err(e) = outfile.write(format!("{}", dac).as_bytes()) {
+                    panic!("Could not write dac {} into file: {}", i, e);
+                }
+            }
         }
     }
 }
