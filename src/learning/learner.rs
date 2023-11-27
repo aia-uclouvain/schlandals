@@ -381,8 +381,7 @@ impl <const S: bool> Learner<S>
             self.compute_gradients(&loss_grad);
             println!("Gradients: {:?}", self.gradients);
             self.update_distributions();
-            // TODO Log here
-            //self.log.add_epoch(loss, expected_distribution, predicted_distribution, gradients, lr)
+            self.log.add_epoch(&loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
             loss.fill(0.0);
             loss_grad.fill(0.0);
         }

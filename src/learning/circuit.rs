@@ -148,7 +148,7 @@ impl Node{
     /// stopped while the sub-problem represented by the node was not solved. In that case, the
     /// propagations to reach the node are stored in the `propagation field`.
     pub fn is_node_incomplete(&self) -> bool {
-        self.propagation.is_empty()
+        !self.propagation.is_empty()
     }
 
     // --- Setters --- /

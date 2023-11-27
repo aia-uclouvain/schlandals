@@ -37,10 +37,10 @@ impl<const B: bool> Logger<B> {
             }
         }
     }
-    pub fn add_epoch(&mut self, loss:Vec<f64>, expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>, lr: f64) {
+    pub fn add_epoch(&mut self, loss:&Vec<f64>, expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>, lr: f64) {
         if B {
             self.epoch_duration.push((chrono::Local::now() - self.global_timestamp).num_seconds());
-            self.epoch_error.push(loss);
+            self.epoch_error.push(loss.clone());
             self.epoch_distance.push(Self::distance(&expected_distribution, &predicted_distribution, &gradients));
             self.epoch_lr.push(lr);
         }
