@@ -23,7 +23,7 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut dac = compile(PathBuf::from(filename), $b, None, None).unwrap();
+                let mut dac = compile(PathBuf::from(filename), $b, 1.0, None, None).unwrap();
                 dac.reset();
                 let sol = dac.evaluate();
                 let expected = Float::with_val(113, $value);

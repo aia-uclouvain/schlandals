@@ -133,14 +133,12 @@ where
                     let value_id = variable.0 - self.graph[distribution].start().0;
                     let disti_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                     dac.add_node_output(disti_index, node);
-                    self.state.increment_usize(self.distribution_count);
                 }
             }
         
             for distribution in self.propagator.unconstrained_distributions_iter() {
                 if self.graph[distribution].number_false(&self.state) != 0 {
                     let sum_node = dac.add_sum_node();
-                    self.state.increment_usize(self.distribution_count);
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;

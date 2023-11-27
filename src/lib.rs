@@ -55,13 +55,14 @@ pub enum Branching {
     VSIDS,
 }
 
-pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) {
+pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac>{
     match type_of_input(&input) {
         FileType::CNF => {
             let number_distribution = distributions_from_cnf(&input).len();
             let limit = (ratio * number_distribution as f64).floor() as usize;
             let compiler = make_compiler!(&input, branching, limit);
-            if let Some(mut dac) = compile!(compiler, u64::MAX) {
+            let mut res = compile!(compiler, u64::MAX);
+            if let Some(ref mut dac) = &mut res {
                 dac.evaluate();
                 if let Some(f) = dotfile {
                     let out = dac.as_graphviz();
@@ -80,11 +81,13 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
                     
                 }
             }
+            res
         },
         FileType::FDAC => {
             let mut dac = Dac::from_file(&input);
             dac.evaluate();
             println!("{}", dac.get_circuit_probability());
+            Some(dac)
         },
     }
 }
