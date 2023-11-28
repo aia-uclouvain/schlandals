@@ -38,6 +38,7 @@ pub struct Learner<const S: bool>
     dacs: Vec<Dac>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
+    is_distribution_learned: Vec<bool>,
     lr: f64,
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
@@ -81,6 +82,7 @@ impl <const S: bool> Learner<S>
     /// solved, and the expected_outputs contains, for each query, its expected probability.
     pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, timeout:u64, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
         let distributions = distributions_from_cnf(&inputs[0]);
+        // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
         let mut rand_init: Vec<Vec<f64>> = vec![];
@@ -97,6 +99,7 @@ impl <const S: bool> Learner<S>
             dacs: vec![], 
             unsoftmaxed_distributions, 
             gradients: grads,
+            is_distribution_learned: vec![true; distributions.len()],
             lr: 0.0,
             expected_distribution: distributions,
             expected_outputs: vec![],
@@ -140,7 +143,19 @@ impl <const S: bool> Learner<S>
                 learner.expected_outputs.push(expected_outputs[i]);
             }
         }
-        learner.unsoftmaxed_distributions = rand_init;
+        if ratio_learn < 1.0 {
+            learner.is_distribution_learned = vec![false; learner.expected_distribution.len()];
+            for dac_i in 0..learner.dacs.len() {
+                for (d, _) in learner.dacs[dac_i].distribution_mapping.keys(){
+                    learner.is_distribution_learned[d.0] = true;
+                    learner.unsoftmaxed_distributions[d.0] = rand_init[d.0].clone();
+                }
+            }
+        }
+        else {
+            learner.unsoftmaxed_distributions = rand_init;
+        }
+        println!("is_distrib_learned {:?}", learner.is_distribution_learned);
 
         learner.to_folder();
         learner
@@ -175,74 +190,21 @@ impl <const S: bool> Learner<S>
     // --- Evaluation --- //
 
     fn reset_dac(&mut self, dac_id: usize) {
+        //println!("Resetting dac {}", dac_id);
         for node in self.dacs[dac_id].iter() {
             if self.dacs[dac_id][node].is_node_incomplete() {
                 let solver = self.solvers[dac_id].as_mut().unwrap();
                 match solver {
-                    Solver::SMinInDegree(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    Solver::SMinOutDegree(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    Solver::SMaxDegree(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    Solver::SVSIDS(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
                     Solver::QMinInDegree(ref mut s) => {
+                        //println!("Resetting node {}, propagation {:?}", node.0, self.dacs[dac_id][node].get_propagation());
                         s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
                         match s.solve() {
                             Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
+                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
                                           // This should break the learning
                         };
                     },
-                    Solver::QMinOutDegree(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    Solver::QMaxDegree(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    Solver::QVSIDS(ref mut s) => {
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
-                            Err(_) => {}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
+                    _ => panic!("To implement"),
                 };
             } else {
                 match self.dacs[dac_id][node].get_type() {
@@ -254,6 +216,8 @@ impl <const S: bool> Learner<S>
                     },
                     TypeNode::Distribution{d, v} => {
                         let proba = self.get_probability(d, v);
+                        //let idx = self.dacs[dac_id].get_distribution_value_node_index(DistributionIndex(d), v, proba);
+                        //println!("idx {:?} node {:?}", idx, node);
                         self.dacs[dac_id][node].set_value(proba);
                     },
                 }
@@ -290,8 +254,10 @@ impl <const S: bool> Learner<S>
     pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
         for dac_id in 0..self.dacs.len() {
+            //println!("dac {}", dac_id);
             // Iterate on all nodes from the DAC, top-down way
             for node in self.dacs[dac_id].iter_rev() {
+                //if dac_id==0{ println!("Node {}, value {},  {:?}", node.0,self.dacs[dac_id][node].get_value(),  self.dacs[dac_id][node].get_type());}
                 let start = self.dacs[dac_id][node].get_input_start();
                 let end = start + self.dacs[dac_id][node].get_number_inputs();
                 let value = self.dacs[dac_id][node].get_value();
@@ -301,6 +267,7 @@ impl <const S: bool> Learner<S>
                 // and compute the gradient for the children leaf distributions
                 for child_index in start..end {
                     let child = self.dacs[dac_id].get_input_at(child_index);
+                    //if dac_id==0{ println!("child {}, value {}, {:?}", child.0,  self.dacs[dac_id][child].get_value(), self.dacs[dac_id][child].get_type());}
                     match self.dacs[dac_id][child].get_type() {
                         TypeNode::Sum => {
                             let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value();
@@ -319,11 +286,14 @@ impl <const S: bool> Learner<S>
                             // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
                             let mut sum_other_w = f128!(0.0);
                             let child_w = self.get_probability(d, v);
+                            //let ind = self.dacs[dac_id].get_distribution_value_node_index(DistributionIndex(d), v, 0.0);
+                            //if dac_id==0{ println!("proba {} value {}", self.get_probability(d,v), self.dacs[dac_id][ind].get_value());}
                             for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
                                 let weight = self.get_probability(d, params);
                                 self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
                                 sum_other_w += weight.clone();
                             }
+                            //if dac_id==0{ println!("d {} v {}, factor {} child_w {} and sum_o {}", d,v,factor,child.0,sum_other_w);}
                             self.gradients[d][v] += factor * child_w * sum_other_w;
                         },
                     }
@@ -336,6 +306,21 @@ impl <const S: bool> Learner<S>
         for (distribution, grad) in self.unsoftmaxed_distributions.iter_mut().zip(self.gradients.iter()) {
             for (value, grad) in distribution.iter_mut().zip(grad.iter()) {
                 *value -= (self.lr * grad.clone()).to_f64();
+            }
+        }
+        let softmaxed = self.get_softmaxed_array();
+        for s in self.solvers.iter_mut() {
+            if let Some(solver) = s {
+                match solver {
+                    Solver::SMinInDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::SMinOutDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::SMaxDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::SVSIDS(solver) => solver.update_distributions(&softmaxed),
+                    Solver::QMinInDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::QMinOutDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::QMaxDegree(solver) => solver.update_distributions(&softmaxed),
+                    Solver::QVSIDS(solver) => solver.update_distributions(&softmaxed),
+                }
             }
         }
     }
@@ -379,7 +364,7 @@ impl <const S: bool> Learner<S>
                 loss_grad[dac_id] = 2.0 * (predictions[dac_id] - self.expected_outputs[dac_id]);
             }
             self.compute_gradients(&loss_grad);
-            println!("Gradients: {:?}", self.gradients);
+            if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
             self.log.add_epoch(&loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
             loss.fill(0.0);

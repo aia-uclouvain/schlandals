@@ -66,6 +66,8 @@ where
     /// Vector used to store probability mass out of the distribution in each node
     distribution_out_vec: Vec<f64>,
     epsilon: f64,
+    preproc_in: Float,
+    preproc_out: Float,
 }
 
 impl<B, const S: bool> SearchSolver<B, S>
@@ -94,6 +96,8 @@ where
             mlimit,
             distribution_out_vec,
             epsilon,
+            preproc_in: f128!(0.0),
+            preproc_out: f128!(1.0),
         }
     }
     
@@ -248,15 +252,12 @@ where
         ((p_in, 1.0 - p_out), level - 1)
     }
     
-    pub fn solve(&mut self) -> ProblemSolution {
-        self.state.save_state();
-        self.propagator.init(self.graph.number_clauses());
+    pub fn preproc(&mut self) -> Result<(), Unsat>{
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
-            return ProblemSolution::Err(Unsat);
+            return Err(Unsat);
         }
-        let p_in = preproc.unwrap();
-        let mut p_out = f128!(1.0);
+        self.preproc_in = preproc.unwrap();
         
         for distribution in self.graph.distributions_iter() {
             let mut sum_neg = 0.0;
@@ -270,15 +271,21 @@ where
                     }
                 }
             }
-            p_out *= 1.0 - sum_neg;
+            self.preproc_out *= 1.0 - sum_neg;
         }
-        p_out = 1.0 - p_out;
+        self.preproc_out = 1.0 - self.preproc_out.clone();
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
+        Ok(())
+    }
+
+    pub fn solve(&mut self) -> ProblemSolution {
+        self.state.save_state();
+        self.preproc();
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
-        let ub: Float = 1.0 - solution.1*(1.0 - p_out);
-        let proba = p_in * (solution.0 * &ub).sqrt();
+        let ub: Float = 1.0 - solution.1*(1.0 - self.preproc_out.clone());
+        let proba = &self.preproc_in * (solution.0 * &ub).sqrt();
         self.restore();
         ProblemSolution::Ok(proba)
     }
@@ -287,6 +294,18 @@ where
         for (variable, value) in propagation.iter().copied() {
             self.propagator.add_to_propagation_stack(variable, value, None);
         }
+    }
+
+    pub fn update_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
+        for i in 0..distributions.len() {
+            for (j, v) in self.graph[DistributionIndex(i)].iter_variables().enumerate() {
+                self.graph[v].set_weight(distributions[i][j]);
+            }
+        }
+    }
+
+    pub fn init(&mut self) {
+        self.propagator.init(self.graph.number_clauses());
     }
 
     pub fn reset_cache(&mut self) {

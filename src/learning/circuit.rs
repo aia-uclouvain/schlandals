@@ -755,9 +755,11 @@ impl Dac {
         // Generating the nodes in the network 
 
         for node in (0..self.nodes.len()).map(NodeIndex) {
-            if matches!(self.nodes[node.0].typenode, TypeNode::Distribution {..}) && !self.nodes[node.0].outputs.is_empty() {
-                let id = self.distribution_node_id(node);
-                out.push_str(&Dac::node(id, &dist_node_attributes, &format!("d{}", id)));
+            if let TypeNode::Distribution{d,v} = self.nodes[node.0].typenode{// && self.nodes[node.0].number_outputs>0 {
+                if self.nodes[node.0].number_outputs>0 {
+                    let id = self.distribution_node_id(node);
+                    out.push_str(&Dac::node(id, &dist_node_attributes, &format!("id{} d{} v{} ({:.4})", id, d, v, self.nodes[node.0].value)));
+                }
             }
         }
 
@@ -773,16 +775,24 @@ impl Dac {
         // Generating the edges
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let from = self.distribution_node_id(node);
-            for output in self.nodes[node.0].outputs.iter().filter(|n| matches!(self.nodes[n.0].typenode, TypeNode::Distribution {..})).copied() {
-                let to = self.sp_node_id(output);
-                let f_value = format!("({}, {:.3})", self.nodes[node.0].typenode.get_value(), self.nodes[output.0].value);
-                out.push_str(&Dac::edge(from, to, Some(f_value)));
+            let out_start = self.nodes[node.0].output_start;
+            let out_end = out_start + self.nodes[node.0].number_outputs;
+            for output_i in out_start..out_end {
+                let output = self.outputs[output_i];
+                if matches!(self.nodes[output.0].typenode, TypeNode::Distribution { .. }) {
+                    let to = self.sp_node_id(output);
+                    let f_value = format!("({}, {:.3})", self.nodes[node.0].typenode.get_value(), self.nodes[output.0].value);
+                    out.push_str(&Dac::edge(from, to, Some(f_value)));
+                }
             }
         }
         
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let from = self.sp_node_id(node);
-                for output in self.nodes[node.0].outputs.iter().copied() {
+            let out_start = self.nodes[node.0].output_start;
+            let out_end = out_start + self.nodes[node.0].number_outputs;
+            for output_i in out_start..out_end {
+                let output = self.outputs[output_i];
                 let to = self.sp_node_id(output);
                 out.push_str(&Dac::edge(from, to, None));
             }
