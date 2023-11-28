@@ -826,7 +826,7 @@ impl fmt::Display for Dac {
                 TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
             write!(f, " {} {} {} {} ", node.output_start, node.number_outputs, node.input_start, node.number_inputs)?;
-            writeln!(f, "{}", node.propagation.iter().map(|l| format!("{} {}", l.0.0, l.1)).collect::<Vec<String>>().join(" "))?;
+            writeln!(f, "{}", node.propagation.iter().map(|l| format!("{} {}", l.0.0, if l.1 { "t" } else { "f" })).collect::<Vec<String>>().join(" "))?;
         }
         fmt::Result::Ok(())
     }
@@ -856,7 +856,7 @@ impl Dac {
                 let mut i = 5;
                 while i < split.len() {
                     let var = VariableIndex(split[i].parse::<usize>().unwrap());
-                    let value = split[i+1].parse::<bool>().unwrap();
+                    let value = split[i+1] == "t";
                     propagation.push((var, value));
                     i += 2;
                 }
