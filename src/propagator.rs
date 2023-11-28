@@ -519,7 +519,7 @@ impl Propagator {
     }
 
     pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
-        self.assignments.iter().copied()
+        self.assignments.iter().skip(self.forced).copied()
     }
 }
 
