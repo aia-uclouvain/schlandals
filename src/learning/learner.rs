@@ -374,6 +374,7 @@ impl <const S: bool> Learner<S>
         self.lr = init_lr;
         let lr_drop: f64 = 0.25;
         let epoch_drop = 100.0;
+        let stopping_criterion = 0.0001;
         self.log.start();
 
         let mut dac_loss = vec![0.0; self.dacs.len()];
@@ -395,6 +396,7 @@ impl <const S: bool> Learner<S>
             if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
             self.log.add_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
+            if (dac_loss.iter().sum::<f64>() / dac_loss.len() as f64) < stopping_criterion{ break;}
             dac_loss.fill(0.0);
             dac_grad.fill(0.0);
         }
