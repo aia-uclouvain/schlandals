@@ -45,6 +45,8 @@ pub struct Learner<const S: bool>
     log: Logger<S>,
     solvers: Vec<Option<Solver>>,
     outfolder: Option<PathBuf>,
+    epsilon: f64,
+    ratio_learn: f64,
 }
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
@@ -82,6 +84,7 @@ impl <const S: bool> Learner<S>
     /// solved, and the expected_outputs contains, for each query, its expected probability.
     pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, timeout:u64, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
         let distributions = distributions_from_cnf(&inputs[0]);
+        println!("distributions {:?}", distributions);
         // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
@@ -106,6 +109,8 @@ impl <const S: bool> Learner<S>
             log: Logger::default(),
             solvers: vec![],
             outfolder,
+            epsilon,
+            ratio_learn,
         };
         for (i , input) in inputs.iter().enumerate() {
             // We compile the input. This can either be a .cnf file or a fdac file.
@@ -118,7 +123,8 @@ impl <const S: bool> Learner<S>
                     // query.
                     let number_distribution = Self::get_number_needed_distributions(input, branching);
                     // TODO: Maybe use a fixed threshold for easy instance
-                    let learned = (ratio_learn * number_distribution as f64).floor() as usize;
+                    let learned = (ratio_learn * number_distribution as f64).ceil() as usize;
+                    //println!("Number of distributions: {}, learned: {}", number_distribution, learned);
                     let compiler = make_compiler!(input, branching, learned);
                     compile!(compiler, timeout)
                 },
@@ -155,8 +161,10 @@ impl <const S: bool> Learner<S>
         else {
             learner.unsoftmaxed_distributions = rand_init;
         }
-        println!("is_distrib_learned {:?}", learner.is_distribution_learned);
+        // Send the randomized distributions to the solvers
+        learner.update_distributions();
 
+        println!("is_distrib_learned {:?}", learner.is_distribution_learned);
         learner.to_folder();
         learner
     }
@@ -197,9 +205,12 @@ impl <const S: bool> Learner<S>
                 match solver {
                     Solver::QMinInDegree(ref mut s) => {
                         //println!("Resetting node {}, propagation {:?}", node.0, self.dacs[dac_id][node].get_propagation());
-                        s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
+                        let prefix_proba = s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
                         match s.solve() {
-                            Ok(p) => self.dacs[dac_id][node].set_value(p.to_f64()),
+                            Ok(p) => {
+                                self.dacs[dac_id][node].set_value(p.to_f64()/prefix_proba.to_f64());
+                                //if dac_id==0{ println!("Node {} value {} p {} prefix_proba {}", node.0, self.dacs[dac_id][node].get_value(), p, prefix_proba.to_f64());}
+                            },
                             Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
                                           // This should break the learning
                         };
@@ -254,10 +265,8 @@ impl <const S: bool> Learner<S>
     pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
         for dac_id in 0..self.dacs.len() {
-            //println!("dac {}", dac_id);
             // Iterate on all nodes from the DAC, top-down way
             for node in self.dacs[dac_id].iter_rev() {
-                //if dac_id==0{ println!("Node {}, value {},  {:?}", node.0,self.dacs[dac_id][node].get_value(),  self.dacs[dac_id][node].get_type());}
                 let start = self.dacs[dac_id][node].get_input_start();
                 let end = start + self.dacs[dac_id][node].get_number_inputs();
                 let value = self.dacs[dac_id][node].get_value();
@@ -267,7 +276,6 @@ impl <const S: bool> Learner<S>
                 // and compute the gradient for the children leaf distributions
                 for child_index in start..end {
                     let child = self.dacs[dac_id].get_input_at(child_index);
-                    //if dac_id==0{ println!("child {}, value {}, {:?}", child.0,  self.dacs[dac_id][child].get_value(), self.dacs[dac_id][child].get_type());}
                     match self.dacs[dac_id][child].get_type() {
                         TypeNode::Sum => {
                             let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value();
@@ -286,14 +294,11 @@ impl <const S: bool> Learner<S>
                             // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
                             let mut sum_other_w = f128!(0.0);
                             let child_w = self.get_probability(d, v);
-                            //let ind = self.dacs[dac_id].get_distribution_value_node_index(DistributionIndex(d), v, 0.0);
-                            //if dac_id==0{ println!("proba {} value {}", self.get_probability(d,v), self.dacs[dac_id][ind].get_value());}
                             for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
                                 let weight = self.get_probability(d, params);
                                 self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
                                 sum_other_w += weight.clone();
                             }
-                            //if dac_id==0{ println!("d {} v {}, factor {} child_w {} and sum_o {}", d,v,factor,child.0,sum_other_w);}
                             self.gradients[d][v] += factor * child_w * sum_other_w;
                         },
                     }
@@ -329,7 +334,7 @@ impl <const S: bool> Learner<S>
     fn training_to_file(& self) {
         let mut out_writer = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(x.join("learn.out")).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join(format!("learn_e{}_r{}.out", self.epsilon, self.ratio_learn))).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -340,7 +345,7 @@ impl <const S: bool> Learner<S>
 
         let mut csv_file = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(x.join("log").with_extension("csv")).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join(format!("log_e{}_r{}", self.epsilon, self.ratio_learn)).with_extension("csv")).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -355,10 +360,15 @@ impl <const S: bool> Learner<S>
         let mut loss = vec![0.0; self.dacs.len()];
         let mut loss_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
-            let do_print = e % 500 == 0;
+            let do_print = e % 50 == 0;
             let predictions = self.evaluate();
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
+            /* if do_print { 
+                for i in 0..self.expected_distribution.len(){
+                    println!("Distribution {}  predicted {:?} expected {:?}", i, self.get_softmaxed(i), self.expected_distribution[i]);
+                }
+            } */
             for dac_id in 0..self.dacs.len() {
                 loss[dac_id] = (predictions[dac_id] - self.expected_outputs[dac_id]).powi(2);
                 loss_grad[dac_id] = 2.0 * (predictions[dac_id] - self.expected_outputs[dac_id]);

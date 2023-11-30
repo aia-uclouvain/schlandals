@@ -281,19 +281,25 @@ where
 
     pub fn solve(&mut self) -> ProblemSolution {
         self.state.save_state();
-        self.preproc();
+        let _ = self.preproc();
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
         let ub: Float = 1.0 - solution.1*(1.0 - self.preproc_out.clone());
+        let lb = &self.preproc_in * (solution.0.clone());
         let proba = &self.preproc_in * (solution.0 * &ub).sqrt();
         self.restore();
-        ProblemSolution::Ok(proba)
+        ProblemSolution::Ok(lb)
     }
 
-    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) {
+    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) -> Float {
+        let mut prefix_proba = f128!(1.0);
         for (variable, value) in propagation.iter().copied() {
             self.propagator.add_to_propagation_stack(variable, value, None);
+            if self.graph[variable].is_probabilitic() && value {
+                prefix_proba *= self.graph[variable].weight().unwrap();
+            }
         }
+        prefix_proba
     }
 
     pub fn update_distributions(&mut self, distributions: &Vec<Vec<f64>>) {

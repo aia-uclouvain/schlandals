@@ -358,7 +358,10 @@ impl Dac {
         // At this point, the nodes vector is sorted by layer. But the indexes for the outputs/inputs must be updated.
         for node in 0..self.nodes.len() {
             // Drop all nodes that have been removed
-            if let TypeNode::Distribution {..} = self.nodes[node].get_type(){self.nodes[node].outputs.retain(|&x| new_indexes[x.0] < end);}
+            if let TypeNode::Distribution {d,v} = self.nodes[node].get_type(){
+                self.nodes[node].outputs.retain(|&x| new_indexes[x.0] < end);
+                self.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(node));
+            }
             if self.is_node_incomplete(NodeIndex(node)){self.nodes[node].outputs.retain(|&x| new_indexes[x.0] < end);}
             // Update the outputs with the new indexes
             self.nodes[node].output_start = self.outputs.len();
@@ -748,6 +751,7 @@ impl Dac {
         let dist_node_attributes = String::from("shape=circle,style=filled");
         let prod_node_attributes = String::from("shape=circle,style=filled");
         let sum_node_attributes = String::from("shape=circle,style=filled");
+        let partial_node_attributes = String::from("shape=square,style=filled");
         
         let mut out = String::new();
         out.push_str("digraph {\ntranksep = 3;\n\n");
@@ -765,7 +769,9 @@ impl Dac {
 
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = self.sp_node_id(node);
-            if matches!(self.nodes[node.0].typenode, TypeNode::Product) {
+            if self.nodes[node.0].get_propagation().len() > 0 {
+                out.push_str(&Dac::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self.nodes[node.0].value)));
+            } else if matches!(self.nodes[node.0].typenode, TypeNode::Product) {
                 out.push_str(&Dac::node(id, &prod_node_attributes, &format!("X ({:.3})", self.nodes[node.0].value)));
             } else if matches!(self.nodes[node.0].typenode, TypeNode::Sum) {
                 out.push_str(&Dac::node(id, &sum_node_attributes, &format!("+ ({:.3})", self.nodes[node.0].value)));

@@ -37,7 +37,7 @@ mod solvers;
 mod parser;
 mod propagator;
 mod preprocess;
-mod learning;
+pub mod learning;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -59,7 +59,7 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
     match type_of_input(&input) {
         FileType::CNF => {
             let number_distribution = distributions_from_cnf(&input).len();
-            let limit = (ratio * number_distribution as f64).floor() as usize;
+            let limit = (ratio * number_distribution as f64).ceil() as usize;
             let compiler = make_compiler!(&input, branching, limit);
             let mut res = compile!(compiler, u64::MAX);
             if let Some(ref mut dac) = &mut res {
