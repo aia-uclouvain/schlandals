@@ -88,11 +88,15 @@ enum Command {
         #[clap(long, default_value_t=u64::MAX)]
         timeout: u64,
         /// If present, do an approximate learner on the given ratio of distributions.
-        #[clap(long)]
-        rlearned: Option<f64>,
+        #[clap(long, default_value_t=1.0)]
+        rlearned: f64,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
         #[clap(short, long, default_value_t=0.0)]
         epsilon: f64,
+        /// Loss to use for the training, default is the MAE
+        /// Possible values: MAE, MSE
+        #[clap(long, default_value_t=schlandals::Loss::MAE, value_enum)]
+        loss: schlandals::Loss, 
     }
 }
 
@@ -112,8 +116,8 @@ fn main() {
         Command::Compile { input, branching, ratio, fdac, dotfile} => {
             schlandals::compile(input, branching, ratio, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon} => {
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon, loss} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon, loss);
         }
     }
 }

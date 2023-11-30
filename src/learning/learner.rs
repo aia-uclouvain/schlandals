@@ -30,6 +30,7 @@ use crate::propagator::Propagator;
 use crate::preprocess::Preprocessor;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
+use crate::Loss;
 use super::exact::DACCompiler;
 use crate::solvers::*;
 
@@ -59,6 +60,22 @@ pub struct Learner<const S: bool>
 pub fn softmax(x: &[f64]) -> Vec<f64> {
     let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
     x.iter().map(|i| i.exp() / sum_exp).collect()
+}
+
+fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac_loss: Vec<f64>, mut dac_grad: Vec<f64>) -> (Vec<f64>, Vec<f64>) {
+    for i in 0..predictions.len() {
+        match loss {
+            Loss::MSE => {
+                dac_loss[i] = (predictions[i] - expected[i]).powi(2);
+                dac_grad[i] = 2.0 * (predictions[i] - expected[i]);
+            },
+            Loss::MAE => {
+                dac_loss[i] = (predictions[i] - expected[i]).abs();
+                dac_grad[i] = if predictions[i] > expected[i] {1.0} else {-1.0};
+            },
+        }
+    }
+    (dac_loss, dac_grad)
 }
 
 impl <const S: bool> Learner<S>
@@ -345,7 +362,7 @@ impl <const S: bool> Learner<S>
 
         let mut csv_file = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(x.join(format!("log_e{}_r{}", self.epsilon, self.ratio_learn)).with_extension("csv")).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join(format!("log_e{}_r{}.csv", self.epsilon, self.ratio_learn))).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -353,14 +370,18 @@ impl <const S: bool> Learner<S>
         
     }
 
-    pub fn train(&mut self, nepochs:usize, lr:f64) {
-        self.lr = lr;
+    pub fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss) {
+        self.lr = init_lr;
+        let lr_drop: f64 = 0.25;
+        let epoch_drop = 100.0;
         self.log.start();
 
-        let mut loss = vec![0.0; self.dacs.len()];
-        let mut loss_grad = vec![0.0; self.dacs.len()];
+        let mut dac_loss = vec![0.0; self.dacs.len()];
+        let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             let do_print = e % 50 == 0;
+            self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
+            if do_print{println!("Epoch {} lr {}", e, self.lr);}
             let predictions = self.evaluate();
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
@@ -369,16 +390,13 @@ impl <const S: bool> Learner<S>
                     println!("Distribution {}  predicted {:?} expected {:?}", i, self.get_softmaxed(i), self.expected_distribution[i]);
                 }
             } */
-            for dac_id in 0..self.dacs.len() {
-                loss[dac_id] = (predictions[dac_id] - self.expected_outputs[dac_id]).powi(2);
-                loss_grad[dac_id] = 2.0 * (predictions[dac_id] - self.expected_outputs[dac_id]);
-            }
-            self.compute_gradients(&loss_grad);
+            (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
+            self.compute_gradients(&dac_grad);
             if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
-            self.log.add_epoch(&loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
-            loss.fill(0.0);
-            loss_grad.fill(0.0);
+            self.log.add_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
+            dac_loss.fill(0.0);
+            dac_grad.fill(0.0);
         }
 
         self.training_to_file();

@@ -13,7 +13,7 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
+use std::{path::{PathBuf, Display}, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::{LogLearner, QuietLearner, circuit::Dac};
 use learning::exact::DACCompiler;
@@ -55,6 +55,20 @@ pub enum Branching {
     VSIDS,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Loss {
+    MAE,
+    MSE,
+}
+impl std::fmt::Display for Loss {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Loss::MAE => write!(f, "MAE (Mean Absolute Error)"),
+            Loss::MSE => write!(f, "MSE (Mean Squared Error)"),
+        }
+    }
+}
+
 pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac>{
     match type_of_input(&input) {
         FileType::CNF => {
@@ -93,7 +107,7 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, rlearned: Option<f64>, epsilon: f64) {    
+            log:bool, timeout:u64, rlearned: f64, epsilon: f64, loss: Loss) {    
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
     let file = File::open(&trainfile).unwrap();
@@ -104,16 +118,12 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    let ratio_learned = match rlearned {
-        None => 1.0,
-        Some(r) => r,
-    };
     if log { 
-        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, ratio_learned);
-        learner.train(nepochs, lr);
+        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, rlearned);
+        learner.train(nepochs, lr, loss);
     } else {
-        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, ratio_learned);
-        learner.train(nepochs, lr);
+        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, rlearned);
+        learner.train(nepochs, lr, loss);
     }
 }
 
