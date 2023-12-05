@@ -21,7 +21,8 @@ use std::fs::File;
 use std::io::{self, Write};
 use rug::{Assign, Float};
 use crate::common::*;
-use crate::learning::circuit::*;
+use crate::diagrams::dac::dac::*;
+use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
 use search_trail::StateManager;
 use crate::branching::*;
@@ -31,12 +32,13 @@ use crate::preprocess::Preprocessor;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
 use crate::Loss;
-use super::exact::DACCompiler;
+use crate::solvers::DACCompiler;
 use crate::solvers::*;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DacIndex(pub usize);
+use rayon::prelude::*;
 
 pub struct Learner<const S: bool>
 {
@@ -156,15 +158,13 @@ impl <const S: bool> Learner<S>
                 }
             };
             // We handle the compiled circuit, if present.
-            if let Some(dac) = d {
+            if let Some(mut dac) = d {
                 if dac.has_cutoff_nodes() {
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
                     // for this query.
                     let solver = make_solver!(input, branching, epsilon, None, false);
-                    learner.solvers.push(Some(solver));
-                } else {
-                    learner.solvers.push(None);
+                    dac.set_solver(solver);
                 }
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
@@ -239,66 +239,15 @@ impl <const S: bool> Learner<S>
 
     // --- Evaluation --- //
 
-    fn reset_dac(&mut self, dac_id: usize) {
-        //println!("Resetting dac {}", dac_id);
-        for node in self.dacs[dac_id].iter() {
-            if self.dacs[dac_id][node].is_node_incomplete() {
-                let solver = self.solvers[dac_id].as_mut().unwrap();
-                match solver {
-                    Solver::QMinInDegree(ref mut s) => {
-                        //println!("Resetting node {}, propagation {:?}", node.0, self.dacs[dac_id][node].get_propagation());
-                        let prefix_proba = s.add_to_propagation_stack(self.dacs[dac_id][node].get_propagation());
-                        match s.solve() {
-                            Ok(p) => {
-                                self.dacs[dac_id][node].set_value(p.to_f64()/prefix_proba.to_f64());
-                                //if dac_id==0{ println!("Node {} value {} p {} prefix_proba {}", node.0, self.dacs[dac_id][node].get_value(), p, prefix_proba.to_f64());}
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                                          // This should break the learning
-                        };
-                    },
-                    _ => panic!("To implement"),
-                };
-            } else {
-                match self.dacs[dac_id][node].get_type() {
-                    TypeNode::Sum => {
-                        self.dacs[dac_id][node].set_value(0.0);
-                    },
-                    TypeNode::Product => {
-                        self.dacs[dac_id][node].set_value(1.0);
-                    },
-                    TypeNode::Distribution{d, v} => {
-                        let proba = self.get_probability(d, v);
-                        //let idx = self.dacs[dac_id].get_distribution_value_node_index(DistributionIndex(d), v, proba);
-                        //println!("idx {:?} node {:?}", idx, node);
-                        self.dacs[dac_id][node].set_value(proba);
-                    },
-                }
-            }
-        }
-        if let Some(solver) = &mut self.solvers[dac_id] {
-            match solver {
-                Solver::SMinInDegree(ref mut s) => s.reset_cache(),
-                Solver::SMinOutDegree(ref mut s) => s.reset_cache(),
-                Solver::SMaxDegree(ref mut s) => s.reset_cache(),
-                Solver::SVSIDS(ref mut s) => s.reset_cache(),
-                Solver::QMinInDegree(ref mut s) => s.reset_cache(),
-                Solver::QMinOutDegree(ref mut s) => s.reset_cache(),
-                Solver::QMaxDegree(ref mut s) => s.reset_cache(),
-                Solver::QVSIDS(ref mut s) => s.reset_cache(),
-            };
-        }
-    }
-
     // Evaluate the different DACs and return the results
     pub fn evaluate(&mut self) -> Vec<f64> {
-        let mut probas: Vec<f64> = vec![];
-        for i in 0..self.dacs.len() {
-            self.reset_dac(i);
-            let p = self.dacs[i].evaluate().to_f64();
-            probas.push(p);
+        for dac in self.dacs.iter_mut() {
+            dac.reset_distributions(&self.unsoftmaxed_distributions);
         }
-        probas
+        self.dacs.par_iter_mut().for_each(|d| {
+            d.evaluate();
+        });
+        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect::<Vec<f64>>()
     }
 
     // --- Gradient computation --- //

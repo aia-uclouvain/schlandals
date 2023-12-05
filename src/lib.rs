@@ -13,10 +13,12 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 use std::{path::{PathBuf, Display}, fs::File, io::{Write,BufRead,BufReader}};
 
-use learning::{LogLearner, QuietLearner, circuit::Dac};
-use learning::exact::DACCompiler;
+use learning::{LogLearner, QuietLearner};
+use diagrams::dac::dac::Dac;
+use solvers::compiler::DACCompiler;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -38,6 +40,7 @@ mod parser;
 mod propagator;
 mod preprocess;
 pub mod learning;
+mod diagrams;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -107,7 +110,9 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, rlearned: f64, epsilon: f64, loss: Loss) {    
+            log:bool, timeout:u64, rlearned: f64, epsilon: f64, loss: Loss, jobs: usize) {    
+    // Sets the number of threads for rayon
+    rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
     let file = File::open(&trainfile).unwrap();

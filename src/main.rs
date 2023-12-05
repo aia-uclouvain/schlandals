@@ -97,6 +97,9 @@ enum Command {
         /// Possible values: MAE, MSE
         #[clap(long, default_value_t=schlandals::Loss::MAE, value_enum)]
         loss: schlandals::Loss, 
+        /// Number of threads to use for the evaluation of the DACs
+        #[clap(long, default_value_t=1, short)]
+        jobs: usize,
     }
 }
 
@@ -116,8 +119,8 @@ fn main() {
         Command::Compile { input, branching, ratio, fdac, dotfile} => {
             schlandals::compile(input, branching, ratio, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon, loss} => {
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon, loss);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon, loss, jobs} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon, loss, jobs);
         }
     }
 }

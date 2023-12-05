@@ -34,8 +34,8 @@ use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
-use crate::learning::circuit::*;
 use std::time::SystemTime;
+use crate::diagrams::dac::dac::{NodeIndex, Dac};
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -183,8 +183,9 @@ where
                         } else {
                             if self.component_extractor.component_distribution_iter(sub_component).find(|d| self.graph[*d].is_constrained(&self.state)).is_some() {
                                 let child = dac.add_sum_node();
-                                let propagated = self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| self.graph[*l].is_probabilitic() && self.graph[*l].reason(&self.state).is_none()).collect::<Vec<(VariableIndex, bool)>>();
-                                dac.set_node_propagations(child, propagated);
+                                for (variable, value) in  self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| self.graph[*l].is_probabilitic() && self.graph[*l].reason(&self.state).is_none()) {
+                                    dac[child].add_to_propagation(variable, value);
+                                }
                                 sum_children.push(child);
                             }
                         }

@@ -16,6 +16,9 @@
 
 
 use rug::Float;
+use crate::branching::*;
+
+
 /// Unit structure representing the the problem is UNSAT
 #[derive(Debug)]
 pub struct Unsat;
@@ -26,10 +29,11 @@ pub type ProblemSolution = Result<Float, Unsat>;
 pub type Bounds = (Float, Float);
 
 pub mod search;
+pub mod compiler;
 mod statistics;
 
 pub use search::SearchSolver;
-use crate::branching::*;
+pub use compiler::DACCompiler;
 pub use sysinfo::{SystemExt, System};
 
 pub enum Solver {
@@ -145,8 +149,6 @@ macro_rules! solve_search {
         }
     }
 }
-
-pub use crate::learning::exact::DACCompiler;
 
 pub enum Compiler {
     MinInDegree(DACCompiler<MinInDegree>),
