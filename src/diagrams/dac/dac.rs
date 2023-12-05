@@ -338,6 +338,10 @@ impl Dac {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
                 self[node].set_value(distributions[d][v]);
             }
+            // All the distributions are at layer 0
+            if self[node].get_layer() > 0 {
+                break;
+            }
         }
         if let Some(ref mut s) = self.solver {
             match s {
