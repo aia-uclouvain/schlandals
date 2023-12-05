@@ -150,7 +150,6 @@ impl Node{
     pub fn is_node_incomplete(&self) -> bool {
         !self.propagation.is_empty()
     }
-
     // --- Setters --- /
 
     /// Sets the value of the node to the given float
@@ -627,12 +626,40 @@ impl Dac {
         }
     }
 
+    // Retruns, for a given distribution index and its value, the corresponding node index in the dac
+    pub fn get_distribution_value_node_index_usize(&self, distribution: DistributionIndex, value: usize) -> isize {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            x.0 as isize
+        }
+        else {
+            -1
+        }
+    }
+
     pub fn is_node_incomplete(&self, node: NodeIndex) -> bool {
         !self.nodes[node.0].propagation.is_empty()
     }
 
     pub fn set_node_propagations(&mut self, node: NodeIndex, propagation: Vec<(VariableIndex, bool)>) {
         self.nodes[node.0].propagation = propagation;
+    }
+
+    pub fn get_number_distribution_nodes(&self) -> usize {
+        let mut cnt = 0;
+        for node in 0..self.nodes.len() {
+            if matches!(self.nodes[node].typenode, TypeNode::Distribution{..}) {
+                cnt += 1;
+            }
+        }
+        cnt
+    }
+
+    pub fn get_number_circuit_nodes(&self) -> usize {
+        self.nodes.len() - self.get_number_distribution_nodes()
+    }
+
+    pub fn is_circuit_node_distribution(&self, node: NodeIndex) -> bool {
+        matches!(self.nodes[node.0].typenode, TypeNode::Distribution{..})
     }
 
     /// Returns, for a given node and an index in its distributions input vector, the distribution index of the input and the value

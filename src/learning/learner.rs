@@ -34,6 +34,10 @@ use crate::Loss;
 use super::exact::DACCompiler;
 use crate::solvers::*;
 
+/// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct DacIndex(pub usize);
+
 pub struct Learner<const S: bool>
 {
     dacs: Vec<Dac>,
@@ -195,12 +199,32 @@ impl <const S: bool> Learner<S>
         self.get_softmaxed(distribution)[index]
     }
 
-    fn get_softmaxed_array(&self) -> Vec<Vec<f64>> {
+    pub fn get_softmaxed_array(&self) -> Vec<Vec<f64>> {
         let mut softmaxed: Vec<Vec<f64>> = vec![];
         for distribution in self.unsoftmaxed_distributions.iter() {
             softmaxed.push(softmax(distribution));
         }
         softmaxed
+    }
+
+    pub fn get_expected_outputs(&self) -> &Vec<f64> {
+        &self.expected_outputs
+    }
+
+    pub fn get_expected_distributions(&self) -> &Vec<Vec<f64>> {
+        &self.expected_distribution
+    }
+
+    pub fn get_current_distributions(&self) -> &Vec<Vec<f64>> {
+        &self.unsoftmaxed_distributions
+    }
+
+    pub fn get_number_dacs(&self) -> usize {
+        self.dacs.len()
+    }
+
+    pub fn get_dac_i(&self, i: usize) -> &Dac {
+        &self.dacs[i]
     }
 
     // --- Setters --- //
@@ -211,6 +235,7 @@ impl <const S: bool> Learner<S>
             }
         }
     }
+
 
     // --- Evaluation --- //
 
@@ -405,6 +430,14 @@ impl <const S: bool> Learner<S>
     }
 }
 
+// --- Indexing the graph with dac indexes --- //
+impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> {
+    type Output = Dac;
+
+    fn index(&self, index: DacIndex) -> &Self::Output {
+        &self.dacs[index.0]
+    }
+}
 
 // --- Display/Output methods ---- 
 
