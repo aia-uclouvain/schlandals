@@ -316,6 +316,7 @@ where
 
     pub fn reset_cache(&mut self) {
         self.cache.clear();
+        self.cache.shrink_to_fit();
     }
     
     #[inline]

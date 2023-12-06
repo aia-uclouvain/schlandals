@@ -34,7 +34,6 @@ use crate::branching::BranchingDecision;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
-use std::time::SystemTime;
 use crate::diagrams::dac::dac::{NodeIndex, Dac};
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
@@ -92,10 +91,7 @@ where
         self.state.restore_state();
     }
 
-    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize, start:SystemTime, timeout:u64) -> Option<NodeIndex> {
-        if start.elapsed().unwrap().as_secs() > timeout {
-            return None;
-        }
+    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> {
 
         let mut children: Vec<NodeIndex> = vec![];
         for variable in self.graph[distribution].iter_variables() {
@@ -103,11 +99,8 @@ where
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, start, timeout) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1) {
                         children.push(child);
-                    }
-                    if start.elapsed().unwrap().as_secs() > timeout {
-                        return None;
                     }
                 }
             }
@@ -124,11 +117,7 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize, start:SystemTime, timeout:u64) -> Option<NodeIndex> {
-        if start.elapsed().unwrap().as_secs() > timeout {
-            return None;
-        }
-        
+    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<NodeIndex> {        
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for literal in self.propagator.assignments_iter(&self.state) {
@@ -167,7 +156,7 @@ where
                         if self.state.get_usize(self.distribution_count) < self.limit {
                             if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
                                 self.state.increment_usize(self.distribution_count);
-                                if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, start, timeout) {
+                                if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
                                     sum_children.push(child);
                                     self.cache.insert(bit_repr, Some(child));
                                 } else {
@@ -175,9 +164,6 @@ where
                                     prod_node = None;
                                     sum_children.clear();
                                     break;
-                                }
-                                if start.elapsed().unwrap().as_secs() > timeout {
-                                    return None;
                                 }
                             }
                         } else {
@@ -218,8 +204,7 @@ where
         prod_node
     }
 
-    pub fn compile(&mut self, timeout:u64) -> Option<Dac> {
-        let start = SystemTime::now();
+    pub fn compile(&mut self) -> Option<Dac> {
 
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
@@ -235,7 +220,7 @@ where
         }
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, start, timeout) {
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
             Some(_) => {
                 dac.remove_dead_ends();

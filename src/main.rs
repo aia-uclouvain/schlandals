@@ -84,9 +84,9 @@ enum Command {
         /// If present, save a detailled csv of the training and use a codified output filename
         #[clap(long, short, action)]
         do_log: bool,
-        /// If present, define the compilation timeout
-        #[clap(long, default_value_t=u64::MAX)]
-        timeout: u64,
+        /// If present, define the learning timeout
+        #[clap(long, default_value_t=i64::MAX)]
+        timeout: i64,
         /// If present, do an approximate learner on the given ratio of distributions.
         #[clap(long, default_value_t=1.0)]
         rlearned: f64,

@@ -183,12 +183,12 @@ macro_rules! make_compiler {
 }
 
 macro_rules! compile {
-    ($c:expr, $t:expr) => {
+    ($c:expr) => {
         match $c {
-            Compiler::MinInDegree(mut c) => c.compile($t),
-            Compiler::MinOutDegree(mut c) => c.compile($t),
-            Compiler::MaxDegree(mut c) => c.compile($t),
-            Compiler::VSIDS(mut c) => c.compile($t),
+            Compiler::MinInDegree(mut c) => c.compile(),
+            Compiler::MinOutDegree(mut c) => c.compile(),
+            Compiler::MaxDegree(mut c) => c.compile(),
+            Compiler::VSIDS(mut c) => c.compile(),
         }
     }
 }

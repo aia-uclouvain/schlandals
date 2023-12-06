@@ -50,7 +50,6 @@ pub struct Learner<const S: bool>
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
     log: Logger<S>,
-    solvers: Vec<Option<Solver>>,
     outfolder: Option<PathBuf>,
     epsilon: f64,
     ratio_learn: f64,
@@ -105,7 +104,7 @@ impl <const S: bool> Learner<S>
 
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, timeout:u64, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
         let distributions = distributions_from_cnf(&inputs[0]);
         println!("distributions {:?}", distributions);
         // TODO what about fdist files ?
@@ -120,25 +119,10 @@ impl <const S: bool> Learner<S>
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
-
-        let mut learner = Self { 
-            dacs: vec![], 
-            unsoftmaxed_distributions, 
-            gradients: grads,
-            is_distribution_learned: vec![true; distributions.len()],
-            lr: 0.0,
-            expected_distribution: distributions,
-            expected_outputs: vec![],
-            log: Logger::default(),
-            solvers: vec![],
-            outfolder,
-            epsilon,
-            ratio_learn,
-        };
-        for (i , input) in inputs.iter().enumerate() {
+        let dacs = inputs.par_iter().map(| input| {
             // We compile the input. This can either be a .cnf file or a fdac file.
             // If the file is a fdac file, then we read directly from it
-            let d = match type_of_input(input) {
+            let mut d = match type_of_input(input) {
                 FileType::CNF => {
                     println!("Compiling {}", input.to_str().unwrap());
                     // The input is a CNF file, we need to compile it from scratch
@@ -149,7 +133,7 @@ impl <const S: bool> Learner<S>
                     let learned = (ratio_learn * number_distribution as f64).ceil() as usize;
                     //println!("Number of distributions: {}, learned: {}", number_distribution, learned);
                     let compiler = make_compiler!(input, branching, learned);
-                    compile!(compiler, timeout)
+                    compile!(compiler)
                 },
                 FileType::FDAC => {
                     println!("Reading {}", input.to_str().unwrap());
@@ -158,7 +142,7 @@ impl <const S: bool> Learner<S>
                 }
             };
             // We handle the compiled circuit, if present.
-            if let Some(mut dac) = d {
+            if let Some(ref mut dac) = d.as_mut() {
                 if dac.has_cutoff_nodes() {
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
@@ -166,6 +150,26 @@ impl <const S: bool> Learner<S>
                     let solver = make_solver!(input, branching, epsilon, None, false);
                     dac.set_solver(solver);
                 }
+            }
+            d
+        }).collect::<Vec<_>>();
+        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count(), &distributions);
+        let mut learner = Self { 
+            dacs: vec![], 
+            unsoftmaxed_distributions, 
+            gradients: grads,
+            is_distribution_learned: vec![true; distributions.len()],
+            lr: 0.0,
+            expected_distribution: distributions,
+            expected_outputs: vec![],
+            log: logger,
+            outfolder,
+            epsilon,
+            ratio_learn,
+        };
+
+        for (i, dac) in dacs.into_iter().enumerate() {
+            if let Some(dac) = dac {
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
             }
@@ -241,8 +245,9 @@ impl <const S: bool> Learner<S>
 
     // Evaluate the different DACs and return the results
     pub fn evaluate(&mut self) -> Vec<f64> {
+        let softmaxed = self.get_softmaxed_array();
         for dac in self.dacs.iter_mut() {
-            dac.reset_distributions(&self.unsoftmaxed_distributions);
+            dac.reset_distributions(&softmaxed);
         }
         self.dacs.par_iter_mut().for_each(|d| {
             d.evaluate();
@@ -304,21 +309,6 @@ impl <const S: bool> Learner<S>
                 *value -= (self.lr * grad.clone()).to_f64();
             }
         }
-        let softmaxed = self.get_softmaxed_array();
-        for s in self.solvers.iter_mut() {
-            if let Some(solver) = s {
-                match solver {
-                    Solver::SMinInDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::SMinOutDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::SMaxDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::SVSIDS(solver) => solver.update_distributions(&softmaxed),
-                    Solver::QMinInDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::QMinOutDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::QMaxDegree(solver) => solver.update_distributions(&softmaxed),
-                    Solver::QVSIDS(solver) => solver.update_distributions(&softmaxed),
-                }
-            }
-        }
     }
 
     // --- Training --- //
@@ -333,27 +323,21 @@ impl <const S: bool> Learner<S>
         for i in 0..self.unsoftmaxed_distributions.len() {
             writeln!(out_writer, "Distribution {}: {:?}", i, self.get_softmaxed(i)).unwrap();
         }
-
-        let mut csv_file = match &self.outfolder {
-            Some(x) => {
-                Box::new(File::create(x.join(format!("log_e{}_r{}.csv", self.epsilon, self.ratio_learn))).unwrap()) as Box<dyn Write>
-            }
-            None => Box::new(io::stdout()) as Box<dyn Write>,
-        };
-        writeln!(csv_file, "{}", self.log).unwrap();
         
     }
 
-    pub fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss) {
+    pub fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
         self.lr = init_lr;
         let lr_drop: f64 = 0.25;
         let epoch_drop = 100.0;
         let stopping_criterion = 0.0001;
         self.log.start();
+        let start = chrono::Local::now();
 
         let mut dac_loss = vec![0.0; self.dacs.len()];
         let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
+            if (chrono::Local::now() - start).num_seconds() > timeout { break;}
             let do_print = e % 50 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
@@ -369,7 +353,7 @@ impl <const S: bool> Learner<S>
             self.compute_gradients(&dac_grad);
             if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
-            self.log.add_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr);
+            self.log.log_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr, self.epsilon, self.ratio_learn);
             if (dac_loss.iter().sum::<f64>() / dac_loss.len() as f64) < stopping_criterion{ break;}
             dac_loss.fill(0.0);
             dac_grad.fill(0.0);

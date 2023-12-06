@@ -449,7 +449,7 @@ impl Dac {
             } else {
                 match self[node].get_type() {
                     TypeNode::Product => self[node].set_value(1.0),
-                    TypeNode::Sum => self[node].set_value(1.0),
+                    TypeNode::Sum => self[node].set_value(0.0),
                     _ => (),
                 }
             }

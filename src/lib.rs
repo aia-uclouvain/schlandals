@@ -78,7 +78,7 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
             let number_distribution = distributions_from_cnf(&input).len();
             let limit = (ratio * number_distribution as f64).ceil() as usize;
             let compiler = make_compiler!(&input, branching, limit);
-            let mut res = compile!(compiler, u64::MAX);
+            let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.evaluate();
                 if let Some(f) = dotfile {
@@ -110,7 +110,7 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:u64, rlearned: f64, epsilon: f64, loss: Loss, jobs: usize) {    
+            log:bool, timeout:i64, rlearned: f64, epsilon: f64, loss: Loss, jobs: usize) {    
     // Sets the number of threads for rayon
     rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
     let mut inputs = vec![];
@@ -124,11 +124,11 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
     if log { 
-        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, rlearned);
-        learner.train(nepochs, lr, loss);
+        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, outfolder, rlearned);
+        learner.train(nepochs, lr, loss, timeout);
     } else {
-        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, timeout, outfolder, rlearned);
-        learner.train(nepochs, lr, loss);
+        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, outfolder, rlearned);
+        learner.train(nepochs, lr, loss, timeout);
     }
 }
 
