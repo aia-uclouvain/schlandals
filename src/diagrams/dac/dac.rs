@@ -512,6 +512,44 @@ impl Dac {
         }
     }
 
+    // --- GETTERS FOR PYTHON INTERFACE --- //
+    pub fn get_number_distribution_nodes(&self) -> usize {
+        let mut cnt = 0;
+        for node in 0..self.nodes.len() {
+            if matches!(self.nodes[node].get_type(), TypeNode::Distribution{..}) {
+                cnt += 1;
+            }
+        }
+        cnt
+    }
+
+    pub fn get_number_circuit_nodes(&self) -> usize {
+        self.nodes.len() - self.get_number_distribution_nodes()
+    }
+
+    // Retruns, for a given distribution index and its value, the corresponding node index in the dac
+    pub fn get_distribution_value_node_index_usize(&self, distribution: DistributionIndex, value: usize) -> isize {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            x.0 as isize
+        }
+        else {
+            -1
+        }
+    }
+
+    /// Returns the number of input edges from the distributions of the given node
+    pub fn get_circuit_node_number_distribution_input(&self, node: NodeIndex) -> usize {
+        let mut cnt = 0;
+        let num_inputs = self.nodes[node.0].get_number_inputs();
+        let input_start = self.nodes[node.0].get_input_start();
+        for i in 0..num_inputs {
+            if matches!(self.nodes[self.inputs[input_start+i].0].get_type(), TypeNode::Distribution{..}) {
+                cnt += 1;
+            }
+        }
+        cnt
+    }
+
     // --- QUERIES --- //
     
     /// Returns the number of computational nodes in the circuit

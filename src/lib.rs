@@ -40,7 +40,7 @@ mod parser;
 mod propagator;
 mod preprocess;
 pub mod learning;
-mod diagrams;
+pub mod diagrams;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]

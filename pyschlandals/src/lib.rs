@@ -2,8 +2,8 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use schlandals::*;
 use schlandals::core::graph::DistributionIndex;
-use schlandals::learning::circuit::{NodeIndex, Dac};
-use schlandals::learning::LogLearner;
+use schlandals::diagrams::dac::dac::{NodeIndex, Dac};
+use schlandals::learning::QuietLearner;
 use schlandals::learning::learner::DacIndex;
 use std::{path::PathBuf, fs::File, io::{BufRead,BufReader}};
 
@@ -90,14 +90,14 @@ struct PyDac {
 
 #[pyclass(name = "Learner")]
 struct PyLearner {
-    learner: LogLearner,
+    learner: QuietLearner,
 }
 
 #[pymethods]
 impl PyLearner {
     #[staticmethod]
     /// Parse the given folder and create a learner from it.
-    pub fn create_learner(trainfile: String, epsilon: f64, branching: BranchingHeuristic, ratio_learn:f64, outputdir: String) -> Self {
+    pub fn create_learner(trainfile: String, branching: BranchingHeuristic, outputdir: String) -> Self {
         let path_trainfile = PathBuf::from(trainfile);
         let mut inputs = vec![];
         let mut expected: Vec<f64> = vec![];
@@ -115,8 +115,13 @@ impl PyLearner {
             BranchingHeuristic::MaxDegree => Branching::MaxDegree,
         };
         let outfolder = PathBuf::from(outputdir);
-        let learner = LogLearner::new(inputs, expected, epsilon, branching_heuristic, 6000, Some(outfolder), ratio_learn);
+        let learner = QuietLearner::new(inputs, expected, 0.0, branching_heuristic, Some(outfolder), 1.0);
         PyLearner { learner }
+    }
+
+    /// Evaluates the different dacs and returns the computed probabilities
+    pub fn evaluate(&mut self) -> Vec<f64> {
+        self.learner.evaluate()
     }
 
     /// Returns the expected outputs
@@ -156,7 +161,7 @@ impl PyLearner {
 
     /// Returns the number of inputs of the given node for dac i
     pub fn get_node_number_input(&self, i: usize, node: usize) -> usize {
-        self.learner[DacIndex(i)].get_circuit_node_number_input(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].get_number_inputs()
     }
 
     /// Returns the node's index from the input vector at the given index for dac i
@@ -167,7 +172,7 @@ impl PyLearner {
     /// Returns the first index, in the input vector, of the inputs of
     /// the given node for dac i
     pub fn get_node_input_start(&self, i: usize, node: usize) -> usize {
-        self.learner[DacIndex(i)].get_circuit_node_in_start(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].get_input_start()
     }
 
     /// Returns the CiruitIndex of the distribution distribution and value for dac i
@@ -177,7 +182,7 @@ impl PyLearner {
 
     /// Returns the number of outputs of the given node for dac i
     pub fn get_node_number_output(&self, i: usize, node: usize) -> usize {
-        self.learner[DacIndex(i)].get_circuit_node_number_output(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].get_number_outputs()
     }
 
     /// Returns the node's index from the output vector at the given index for dac i
@@ -187,17 +192,22 @@ impl PyLearner {
 
     /// Returns the start index of the outputs of the given node for dac i
     pub fn get_node_output_start(&self, i: usize, node: usize) -> usize {
-        self.learner[DacIndex(i)].get_circuit_node_out_start(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].get_output_start()
     }
 
     /// Returns if the node is a distribution node for dac i
     pub fn is_node_distribution(&self, i: usize, node: usize) -> bool {
-        self.learner[DacIndex(i)].is_circuit_node_distribution(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].is_distribution()
     }
 
     /// Returns if the node is a multiplication node for dac i
     pub fn is_node_mul(&self, i: usize, node: usize) -> bool {
-        self.learner[DacIndex(i)].is_circuit_node_mul(NodeIndex(node))
+        self.learner[DacIndex(i)][NodeIndex(node)].is_product()
+    }
+
+    /// prints the graphviz representation of the dac i
+    pub fn to_graphviz(&self, i: usize) {
+        println!("{}",self.learner[DacIndex(i)].as_graphviz())
     }
 }
 #[pymethods]
@@ -227,34 +237,34 @@ impl PyDac {
     
     /// Returns the probability computed at a node
     pub fn get_node_value(&self, node: usize) -> f64 {
-        self.dac.get_circuit_node_probability(NodeIndex(node)).to_f64()
+        self.dac[NodeIndex(node)].get_value().to_f64()
     }
     
     /// Returns true if and only if the node is a multiplicative node
     pub fn is_node_mul(&self, node: usize) -> bool {
-        self.dac.is_circuit_node_mul(NodeIndex(node))
+        self.dac[NodeIndex(node)].is_product()
     }
     
     /// Returns the first index, in the output vector, of the outpouts of
     /// the given node
     pub fn get_node_output_start(&self, node: usize) -> usize {
-        self.dac.get_circuit_node_out_start(NodeIndex(node))
+        self.dac[NodeIndex(node)].get_output_start()
     }
     
     /// Returns the first index, in the input vector, of the inputs of
     /// the given node
     pub fn get_node_input_start(&self, node: usize) -> usize {
-        self.dac.get_circuit_node_in_start(NodeIndex(node))
+        self.dac[NodeIndex(node)].get_input_start()
     }
     
     /// Returns the number of outputs of the given node
     pub fn get_node_number_output(&self, node: usize) -> usize {
-        self.dac.get_circuit_node_number_output(NodeIndex(node))
+        self.dac[NodeIndex(node)].get_number_outputs()
     }
     
     /// Returns the number of inputs of the given node
     pub fn get_node_number_input(&self, node: usize) -> usize {
-        self.dac.get_circuit_node_number_input(NodeIndex(node))
+        self.dac[NodeIndex(node)].get_number_inputs()
     }
     
     /// Returns the node's index from the input vector at the given index

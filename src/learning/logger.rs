@@ -18,13 +18,13 @@ use std::path::PathBuf;
 use chrono;
 use rug::Float;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::Write;
 
 /// Implements a bunch of statistics that are collected during the search
 #[cfg(not(tarpaulin_include))]
 pub struct Logger<const B: bool> {
     global_timestamp: chrono::DateTime<chrono::Local>,
-    outfile: Box<dyn Write>,
+    outfile: Option<File>,
 }
 
 impl<const B: bool> Logger<B> {
@@ -33,9 +33,9 @@ impl<const B: bool> Logger<B> {
         let csv_file = if B{
             let mut out = match outfolder {
                 Some(x) => {
-                    Box::new(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap()) as Box<dyn Write>
-                }
-                None => Box::new(io::stdout()) as Box<dyn Write>,
+                    Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
+                },
+                None => None,
             };
             let mut output= "".to_string();
             output.push_str("epoch_lr, epsilon, rlearned, epochs_total_duration,");
@@ -47,10 +47,10 @@ impl<const B: bool> Logger<B> {
                     output.push_str(&format!("distribution{}_{} epoch_distance,",i, j));
                 }
             }
-            writeln!(out, "{}", output).unwrap();
+            writeln!(out.as_mut().unwrap(), "{}", output).unwrap();
             out
         } else {
-            Box::new(io::stdout()) as Box<dyn Write>
+            None
         };
         Self {
             global_timestamp,
@@ -75,7 +75,7 @@ impl<const B: bool> Logger<B> {
                     output.push_str(&format!("{:.6},", d));
                 }
             }
-            writeln!(self.outfile, "{}", output).unwrap();
+            writeln!(self.outfile.as_mut().unwrap(), "{}", output).unwrap();
             
         }
     }
