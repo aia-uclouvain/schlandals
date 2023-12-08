@@ -3,9 +3,10 @@ use pyo3::Python;
 use schlandals::*;
 use schlandals::core::graph::DistributionIndex;
 use schlandals::diagrams::dac::dac::{NodeIndex, Dac};
-use schlandals::learning::QuietLearner;
+use schlandals::learning::LogLearner;
 use schlandals::learning::learner::DacIndex;
 use std::{path::PathBuf, fs::File, io::{BufRead,BufReader}};
+use rug::Float;
 
 #[pyclass]
 #[derive(Clone)]
@@ -90,7 +91,7 @@ struct PyDac {
 
 #[pyclass(name = "Learner")]
 struct PyLearner {
-    learner: QuietLearner,
+    learner: LogLearner,
 }
 
 #[pymethods]
@@ -115,13 +116,22 @@ impl PyLearner {
             BranchingHeuristic::MaxDegree => Branching::MaxDegree,
         };
         let outfolder = PathBuf::from(outputdir);
-        let learner = QuietLearner::new(inputs, expected, 0.0, branching_heuristic, Some(outfolder), 1.0);
+        let learner = LogLearner::new(inputs, expected, 0.0, branching_heuristic, Some(outfolder), 1.0);
         PyLearner { learner }
     }
 
     /// Evaluates the different dacs and returns the computed probabilities
     pub fn evaluate(&mut self) -> Vec<f64> {
         self.learner.evaluate()
+    }
+
+    pub fn start_logger(&mut self) {
+        self.learner.start_logger();
+    }
+
+    pub fn log_epoch(&mut self, pred_distribs: Vec<Vec<f64>>, loss:Vec<f64>, gradients: Vec<Vec<f64>>, lr:f64) {
+        let grads: Vec<Vec<Float>> = gradients.iter().map(|x| x.iter().map(|y| Float::with_val(128, *y)).collect()).collect();
+        self.learner.log_epoch(&pred_distribs, &loss, &grads, lr);
     }
 
     /// Returns the expected outputs

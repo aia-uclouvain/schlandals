@@ -38,7 +38,7 @@ impl<const B: bool> Logger<B> {
                 None => None,
             };
             let mut output= "".to_string();
-            output.push_str("epoch_lr, epsilon, rlearned, epochs_total_duration,");
+            output.push_str("epoch_lr,epsilon,rlearned,epochs_total_duration,avg_errror,avg_distance,");
             for i in 0..ndacs {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
@@ -66,11 +66,13 @@ impl<const B: bool> Logger<B> {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            output.push_str(&format!("{},{},{},{},", lr, epsilon, rlearned, epoch_duration));
+            let distances = Self::distance(&expected_distribution, &predicted_distribution, &gradients);
+            let non_null_distances: Vec<f64> = distances.iter().flatten().filter(|d| **d!=0.0).copied().collect();
+            output.push_str(&format!("{},{},{},{},{},{},", lr, epsilon, rlearned, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
-            for distr in Self::distance(&expected_distribution, &predicted_distribution, &gradients).iter() {
+            for distr in distances.iter() {
                 for d in distr.iter() {
                     output.push_str(&format!("{:.6},", d));
                 }

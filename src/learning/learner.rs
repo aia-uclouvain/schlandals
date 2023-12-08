@@ -231,6 +231,14 @@ impl <const S: bool> Learner<S>
         &self.dacs[i]
     }
 
+    pub fn start_logger(&mut self) {
+        self.log.start();
+    }
+
+    pub fn log_epoch(&mut self, pred_distrib: &Vec<Vec<f64>>, loss:&Vec<f64>, gradients: &Vec<Vec<Float>>, lr:f64) {
+        self.log.log_epoch(loss, &self.expected_distribution, pred_distrib, gradients, lr, self.epsilon, self.ratio_learn);
+    }
+
     // --- Setters --- //
     pub fn zero_grads(&mut self) {
         for grad in self.gradients.iter_mut() {
@@ -338,7 +346,7 @@ impl <const S: bool> Learner<S>
         let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 50 == 0;
+            let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
             let predictions = self.evaluate();
@@ -351,7 +359,7 @@ impl <const S: bool> Learner<S>
             } */
             (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
             self.compute_gradients(&dac_grad);
-            if do_print{ println!("Gradients: {:?}", self.gradients);}
+            //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
             self.log.log_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr, self.epsilon, self.ratio_learn);
             if (dac_loss.iter().sum::<f64>() / dac_loss.len() as f64) < stopping_criterion{ break;}
