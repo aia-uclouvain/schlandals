@@ -68,7 +68,7 @@ impl<const B: bool> Logger<B> {
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
             //let distances = Self::distance(&expected_distribution, &predicted_distribution, &gradients);
             //let non_null_distances: Vec<f64> = distances.iter().flatten().filter(|d| **d!=0.0).copied().collect();
-            output.push_str(&format!("{},{},{},{},{},", lr, epsilon, rlearned, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64)); //, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64
+            output.push_str(&format!("{:.6},{},{},{},{:.8},", lr, epsilon, rlearned, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64)); //, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
