@@ -153,7 +153,7 @@ impl <const S: bool> Learner<S>
             }
             d
         }).collect::<Vec<_>>();
-        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count(), &distributions);
+        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count());
         let mut learner = Self { 
             dacs: vec![], 
             unsoftmaxed_distributions, 
@@ -235,8 +235,8 @@ impl <const S: bool> Learner<S>
         self.log.start();
     }
 
-    pub fn log_epoch(&mut self, pred_distrib: &Vec<Vec<f64>>, loss:&Vec<f64>, gradients: &Vec<Vec<Float>>, lr:f64) {
-        self.log.log_epoch(loss, &self.expected_distribution, pred_distrib, gradients, lr, self.epsilon, self.ratio_learn);
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64) {
+        self.log.log_epoch(loss, lr, self.epsilon, self.ratio_learn);
     }
 
     // --- Setters --- //
@@ -252,12 +252,13 @@ impl <const S: bool> Learner<S>
     // --- Evaluation --- //
 
     // Evaluate the different DACs and return the results
-    pub fn evaluate(&mut self) -> Vec<f64> {
+    pub fn evaluate(&mut self, eval_approx:bool) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.dacs.iter_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.dacs.par_iter_mut().for_each(|d| {
+            d.reset(eval_approx);
             d.evaluate();
         });
         self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect::<Vec<f64>>()
@@ -336,9 +337,12 @@ impl <const S: bool> Learner<S>
 
     pub fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
         self.lr = init_lr;
-        let lr_drop: f64 = 0.25;
+        let lr_drop: f64 = 0.75;
         let epoch_drop = 100.0;
         let stopping_criterion = 0.0001;
+        let mut prev_loss = 1.0;
+        let delta_early_stop = 0.0001;
+        let eval_approx_freq = 500;
         self.log.start();
         let start = chrono::Local::now();
 
@@ -349,7 +353,7 @@ impl <const S: bool> Learner<S>
             let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
-            let predictions = self.evaluate();
+            let predictions = self.evaluate(e % eval_approx_freq == 0);
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
             /* if do_print { 
@@ -361,8 +365,23 @@ impl <const S: bool> Learner<S>
             self.compute_gradients(&dac_grad);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
-            self.log.log_epoch(&dac_loss, &self.expected_distribution, &self.get_softmaxed_array(), &self.gradients, self.lr, self.epsilon, self.ratio_learn);
-            if (dac_loss.iter().sum::<f64>() / dac_loss.len() as f64) < stopping_criterion{ break;}
+            self.log.log_epoch(&dac_loss, self.lr, self.epsilon, self.ratio_learn);
+            let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+            if (avg_loss < stopping_criterion) || (avg_loss/prev_loss<delta_early_stop) {
+                if self.ratio_learn < 1.0 {
+                    let predictions = self.evaluate(true);
+                    (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
+                    avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+                    if (avg_loss < stopping_criterion) || (avg_loss/prev_loss<delta_early_stop) {
+                        println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                        break;
+                    }
+                } else {
+                    println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                    break;
+                }
+            }
+            prev_loss = avg_loss;
             dac_loss.fill(0.0);
             dac_grad.fill(0.0);
         }

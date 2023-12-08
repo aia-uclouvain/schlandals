@@ -367,84 +367,14 @@ impl Dac {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, eval_approx: bool) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if self[node].is_node_incomplete() {
-                let propagations = self[node].get_propagation().clone();
-                let s = self.solver.as_mut().unwrap();
-                match s {
-                    Solver::SMinInDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::SMinOutDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::SMaxDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::SVSIDS(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::QMinInDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::QMinOutDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::QMaxDegree(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
-                    Solver::QVSIDS(ref mut solver) => {
-                        let prefix_proba = solver.add_to_propagation_stack(&propagations);
-                        match solver.solve() {
-                            Ok(p) => {
-                                self[node].set_value(p.to_f64() / prefix_proba.to_f64());
-                            },
-                            Err(_) => {println!("Error reset")}, // TODO what do we do if we can not evaluate the node ?
-                        };
-                    },
+                if eval_approx {
+                    let propagations = self[node].get_propagation().clone();
+                    let s = self.solver.as_mut().unwrap();
+                    let value = s.solve_partial(&propagations);
+                    self[node].set_value(value);
                 }
             } else {
                 match self[node].get_type() {
@@ -470,7 +400,6 @@ impl Dac {
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
     pub fn evaluate(&mut self) -> Float {
-        self.reset();
         for node in (0..self.nodes.len()).map(NodeIndex) {
             self.send_value(node, self[node].get_value());
         }

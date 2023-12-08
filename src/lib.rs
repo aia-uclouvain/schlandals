@@ -14,7 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::{path::{PathBuf, Display}, fs::File, io::{Write,BufRead,BufReader}};
+use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::{LogLearner, QuietLearner};
 use diagrams::dac::dac::Dac;

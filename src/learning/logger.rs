@@ -16,7 +16,7 @@
 
 use std::path::PathBuf;
 use chrono;
-use rug::Float;
+//use rug::Float;
 use std::fs::File;
 use std::io::Write;
 
@@ -28,7 +28,7 @@ pub struct Logger<const B: bool> {
 }
 
 impl<const B: bool> Logger<B> {
-    pub fn new(outfolder:Option<&PathBuf>, ndacs:usize, distributions:&Vec<Vec<f64>>) -> Self {
+    pub fn new(outfolder:Option<&PathBuf>, ndacs:usize) -> Self {
         let global_timestamp = chrono::Local::now();
         let csv_file = if B{
             let mut out = match outfolder {
@@ -38,15 +38,15 @@ impl<const B: bool> Logger<B> {
                 None => None,
             };
             let mut output= "".to_string();
-            output.push_str("epoch_lr,epsilon,rlearned,epochs_total_duration,avg_errror,avg_distance,");
+            output.push_str("epoch_lr,epsilon,rlearned,epochs_total_duration,avg_errror,"); //avg_distance,
             for i in 0..ndacs {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
-            for i in 0..distributions.len() {
+            /* for i in 0..distributions.len() {
                 for j in 0..distributions[i].len() {
                     output.push_str(&format!("distribution{}_{} epoch_distance,",i, j));
                 }
-            }
+            } */
             writeln!(out.as_mut().unwrap(), "{}", output).unwrap();
             out
         } else {
@@ -62,26 +62,26 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>, lr: f64, epsilon:f64, rlearned:f64) {
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64, rlearned:f64) { //expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>,
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            let distances = Self::distance(&expected_distribution, &predicted_distribution, &gradients);
-            let non_null_distances: Vec<f64> = distances.iter().flatten().filter(|d| **d!=0.0).copied().collect();
-            output.push_str(&format!("{},{},{},{},{},{},", lr, epsilon, rlearned, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64));
+            //let distances = Self::distance(&expected_distribution, &predicted_distribution, &gradients);
+            //let non_null_distances: Vec<f64> = distances.iter().flatten().filter(|d| **d!=0.0).copied().collect();
+            output.push_str(&format!("{},{},{},{},{},", lr, epsilon, rlearned, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64)); //, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
-            for distr in distances.iter() {
+            /* for distr in distances.iter() {
                 for d in distr.iter() {
                     output.push_str(&format!("{:.6},", d));
                 }
-            }
+            } */
             writeln!(self.outfile.as_mut().unwrap(), "{}", output).unwrap();
             
         }
     }
-    fn distance(expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>) -> Vec<Vec<f64>> {
+    /* fn distance(expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>) -> Vec<Vec<f64>> {
         let mut total: Vec<Vec<f64>> = vec![];
         for i in 0..expected_distribution.len() {
             let mut tmp: Vec<f64> = vec![];
@@ -96,5 +96,5 @@ impl<const B: bool> Logger<B> {
             total.push(tmp);
         }
         total
-    }
+    } */
 }

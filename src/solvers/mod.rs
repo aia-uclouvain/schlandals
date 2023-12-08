@@ -16,7 +16,7 @@
 
 
 use rug::Float;
-use crate::branching::*;
+use crate::{branching::*, core::graph::VariableIndex};
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -45,6 +45,98 @@ pub enum Solver {
     QMinOutDegree(SearchSolver<MinOutDegree, false>),
     QMaxDegree(SearchSolver<MaxDegree, false>),
     QVSIDS(SearchSolver<VSIDS, false>),
+}
+
+impl Solver {
+    pub fn solve(&mut self) -> ProblemSolution {
+        match self {
+            Solver::SMinInDegree(solver) => solver.solve(),
+            Solver::SMinOutDegree(solver) => solver.solve(),
+            Solver::SMaxDegree(solver) => solver.solve(),
+            Solver::SVSIDS(solver) => solver.solve(),
+            Solver::QMinInDegree(solver) => solver.solve(),
+            Solver::QMinOutDegree(solver) => solver.solve(),
+            Solver::QMaxDegree(solver) => solver.solve(),
+            Solver::QVSIDS(solver) => solver.solve(),
+        }
+    }
+
+    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>) -> f64 {
+        match self {
+            Solver::SMinInDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::SMinOutDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::SMaxDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::SVSIDS(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::QMinInDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::QMinOutDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::QMaxDegree(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+            Solver::QVSIDS(ref mut solver) => {
+                let prefix_proba = solver.add_to_propagation_stack(propagations);
+                match solver.solve() {
+                    Ok(p) => {
+                        p.to_f64() / prefix_proba.to_f64()
+                    },
+                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
+                }
+            },
+        }
+    }
 }
 
 macro_rules! make_solver {
