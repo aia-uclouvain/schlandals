@@ -265,7 +265,7 @@ impl Dac {
                     // The removal of the node is the same, no matter the node type of the input
                     let input = self[node].iter_input().next().unwrap();
                     // Removing the node from the output of the input node
-                    if let Some(idx) = self[input].iter_output().position(|x| self[node].get_output_at(x) == node) {
+                    if let Some(idx) = self[input].iter_output().position(|x| self[input].get_output_at(x) == node) {
                         self[input].remove_index_from_output(idx);
                     }
                     for output_id in self[node].iter_output() {
@@ -281,7 +281,7 @@ impl Dac {
                 
                 }
             }
-                
+
             // If a distribution node send all its value to a sum node, remove the node from the output
             for node in (0..self.nodes.len()).map(NodeIndex) {
                 if self[node].is_sum() {
@@ -318,7 +318,7 @@ impl Dac {
                 }
             }
         }
-
+        
         // Move the inputs into the input vector
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let n = self.inputs.len();
