@@ -124,18 +124,18 @@ impl Dac {
         let mut number_layers = 1;
         while let Some((node, layer)) = to_process.pop() {
             // Only change if the layer must be increased
-            if layer >= self[node].get_layer() {
-                if number_layers < layer + 1 {
-                    number_layers = layer + 1;
-                }
-                self[node].set_layer(layer);
-                for output_id in self[node].iter_output() {
-                    let output = self[node].get_output_at(output_id);
-                    if self[output].get_layer() < layer + 1 {
-                        to_process.push((output, layer+1));
-                    }
+            //if layer >= self[node].get_layer() {
+            if number_layers < layer + 1 {
+                number_layers = layer + 1;
+            }
+            self[node].set_layer(layer);
+            for output_id in self[node].iter_output() {
+                let output = self[node].get_output_at(output_id);
+                if self[output].get_layer() < layer + 1 {
+                    to_process.push((output, layer+1));
                 }
             }
+            //}
         }
 
         let n_nodes = self.nodes.len();
@@ -175,15 +175,10 @@ impl Dac {
         }
         
         // At this point, the nodes vector is sorted by layer. But the indexes for the outputs/inputs must be updated.
-        for node in (0..self.nodes.len()).map(NodeIndex) {
+        for node in (0..end).map(NodeIndex) {
             // Drop all nodes that have been removed
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                self[node].retain_output_with_new_output(&new_indexes, end);
                 self.distribution_mapping.insert((DistributionIndex(d), v), node);
-            }
-
-            if self[node].is_node_incomplete() {
-                self[node].retain_output_with_new_output(&new_indexes, end);
             }
 
             // Update the outputs with the new indexes
@@ -203,14 +198,18 @@ impl Dac {
             }
             self[node].clear_and_shrink_output();
 
-            // Update the inputs
-            let input_start = self[node].get_input_start();
-            let number_input = self[node].get_number_inputs();
+            let n = self.inputs.len();
+            self[node].set_input_start(n);
+            self[node].set_number_inputs(0);
 
-            for input_index in input_start..(input_start+number_input) {
-                let old = self.inputs[input_index];
-                self.inputs[input_index] = NodeIndex(new_indexes[old.0]);
+            for input in self[node].iter_input().collect::<Vec<NodeIndex>>() {
+                if new_indexes[input.0] < end {
+                    let new_input = NodeIndex(new_indexes[input.0]);
+                    self.inputs.push(new_input);
+                    self[node].increment_number_input();
+                }
             }
+            self[node].clear_and_shrink_input();
         }
         // Actually remove the nodes (and allocated space) from the nodes vector.
         self.nodes.truncate(end);
@@ -223,9 +222,9 @@ impl Dac {
         let mut to_process: Vec<NodeIndex> = vec![];
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if self[node].is_distribution() || self[node].is_node_incomplete() {
+                self[node].set_to_remove(false);
                 for output_id in self[node].iter_output() {
                     let output = self[node].get_output_at(output_id);
-                    self[node].set_to_remove(false);
                     to_process.push(output)
                 }
             }
@@ -305,7 +304,7 @@ impl Dac {
                         changed = true;
                         for input in self[node].iter_input().collect::<Vec<NodeIndex>>() {
                             //debug_assert!(matches!(self.nodes[input.0].typenode, TypeNode::Distribution{..}));
-                            let index_to_remove = self[input].iter_output().position(|x| self[node].get_output_at(x) == node).unwrap();
+                            let index_to_remove = self[input].iter_output().position(|x| self[input].get_output_at(x) == node).unwrap();
                             self[input].remove_index_from_output(index_to_remove);
                         }
                         self[node].set_to_remove(true);
@@ -317,16 +316,6 @@ impl Dac {
                     }
                 }
             }
-        }
-        
-        // Move the inputs into the input vector
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            let n = self.inputs.len();
-            self[node].set_input_start(n);
-            for input in self[node].iter_input().collect::<Vec<NodeIndex>>() {
-                self.inputs.push(input);
-            }
-            self[node].clear_and_shrink_input();
         }
     }
     

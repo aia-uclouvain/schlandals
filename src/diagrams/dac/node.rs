@@ -241,13 +241,11 @@ impl Node{
     /// Adds the given node to the outputs
     pub fn add_output(&mut self, node: NodeIndex) {
         self.outputs.push(node);
-        self.number_outputs += 1;
     }
 
     /// Adds the given node to the inputs
     pub fn add_input(&mut self, node: NodeIndex) {
         self.inputs.insert(node);
-        self.number_inputs += 1;
     }
 
     /// Sets the value of the node to the given float
@@ -280,6 +278,11 @@ impl Node{
         self.number_outputs += 1;
     }
 
+    /// Increments by one the number of inputs of the nodes
+    pub fn increment_number_input(&mut self) {
+        self.number_inputs += 1;
+    }
+
     /// Sets the start of the input of the node
     pub fn set_input_start(&mut self, input_start: usize){
         self.input_start = input_start;
@@ -300,11 +303,6 @@ impl Node{
         self.to_remove = to_remove;
     }
 
-    /// Remove all nodes, from the output, that have a new index superior to the limit
-    pub fn retain_output_with_new_output(&mut self, new_indexes: &Vec<usize>, limit: usize) {
-        self.outputs.retain(|&x| new_indexes[x.0] < limit)
-    }
-
     /// Clear and shrink the output vector
     pub fn clear_and_shrink_output(&mut self) {
         self.outputs.clear();
@@ -320,13 +318,11 @@ impl Node{
     /// Remove a node at a particular index from the outputs
     pub fn remove_index_from_output(&mut self, index: usize) {
         self.outputs.swap_remove(index);
-        self.number_outputs -= 1;
     }
 
     /// Removes a node from the inputs
     pub fn remove_input(&mut self, input: NodeIndex) {
         self.inputs.remove(&input);
-        self.number_inputs -= 1;
     }
 
     pub fn get_output_at(&self, id: usize) -> NodeIndex {
