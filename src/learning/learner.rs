@@ -341,8 +341,10 @@ impl <const S: bool> Learner<S>
         let epoch_drop = 100.0;
         let stopping_criterion = 0.0001;
         let mut prev_loss = 1.0;
-        let delta_early_stop = 0.0001;
+        let delta_early_stop = 0.00001;
         let eval_approx_freq = 500;
+        let mut count_no_improve = 0;
+        let patience = 5;
         self.log.start();
         let start = chrono::Local::now();
 
@@ -367,12 +369,21 @@ impl <const S: bool> Learner<S>
             self.update_distributions();
             self.log.log_epoch(&dac_loss, self.lr, self.epsilon, self.ratio_learn);
             let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
-            if (avg_loss < stopping_criterion) || (avg_loss/prev_loss<delta_early_stop) {
+            if (avg_loss-prev_loss).abs()<delta_early_stop {
+                count_no_improve += 1;
+            }
+            else {
+                count_no_improve = 0;
+            }
+            if (avg_loss < stopping_criterion) || count_no_improve>=patience {
                 if self.ratio_learn < 1.0 {
                     let predictions = self.evaluate(true);
                     (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
                     avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
-                    if (avg_loss < stopping_criterion) || (avg_loss/prev_loss<delta_early_stop) {
+                    if (avg_loss-prev_loss).abs()>delta_early_stop {
+                        count_no_improve = 0;
+                    }
+                    if avg_loss < stopping_criterion || count_no_improve>=patience{
                         println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                         break;
                     }
