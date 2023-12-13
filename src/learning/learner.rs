@@ -19,7 +19,10 @@ use std::path::PathBuf;
 use std::fs::File;
 
 use std::io::{self, Write};
+use rand::SeedableRng;
 use rug::{Assign, Float};
+use rand::rngs::StdRng;
+use rand::Rng;
 use crate::common::*;
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
@@ -104,16 +107,19 @@ impl <const S: bool> Learner<S>
 
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, ratio_learn:f64) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, ratio_learn:f64, jobs:usize) -> Self {
+        rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
+
         let distributions = distributions_from_cnf(&inputs[0]);
         println!("distributions {:?}", distributions);
         // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
         let mut rand_init: Vec<Vec<f64>> = vec![];
+        let mut rand_gen = StdRng::seed_from_u64(18);
         for distribution in distributions.iter() {
             // Computing a random initial value in case the distribution must be learned
-            let random_probabilities = (0..distribution.len()).map(|_| rand::random::<f64>().log(std::f64::consts::E)).collect::<Vec<f64>>();
+            let random_probabilities = (0..distribution.len()).map(|_| rand_gen.gen::<f64>().log(std::f64::consts::E)).collect::<Vec<f64>>();
             let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
             rand_init.push(random_probabilities);
             unsoftmaxed_distributions.push(unsoftmaxed_vector);

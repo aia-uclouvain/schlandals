@@ -97,7 +97,7 @@ struct PyLearner {
 impl PyLearner {
     #[staticmethod]
     /// Parse the given folder and create a learner from it.
-    pub fn create_learner(trainfile: String, branching: BranchingHeuristic, outputdir: String) -> Self {
+    pub fn create_learner(trainfile: String, branching: BranchingHeuristic, outputdir: String, n_jobs:usize) -> Self {
         let path_trainfile = PathBuf::from(trainfile);
         let mut inputs = vec![];
         let mut expected: Vec<f64> = vec![];
@@ -115,7 +115,7 @@ impl PyLearner {
             BranchingHeuristic::MaxDegree => Branching::MaxDegree,
         };
         let outfolder = PathBuf::from(outputdir);
-        let learner = LogLearner::new(inputs, expected, 0.0, branching_heuristic, Some(outfolder), 1.0);
+        let learner = LogLearner::new(inputs, expected, 0.0, branching_heuristic, Some(outfolder), 1.0, n_jobs);
         PyLearner { learner }
     }
 

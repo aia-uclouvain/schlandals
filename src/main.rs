@@ -33,7 +33,7 @@ enum Command {
         #[clap(short, long, value_parser)]
         input: PathBuf,
         /// How to branch
-        #[clap(short, long, value_enum)]
+        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
         branching: schlandals::Branching,
         /// Collect stats during the search, default yes
         #[clap(short, long, action)]
@@ -51,7 +51,7 @@ enum Command {
         #[clap(short, long, value_parser)]
         input: PathBuf,
         /// How to branch
-        #[clap(short, long, value_enum)]
+        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
         branching: schlandals::Branching,
         /// The ratio of distribution to branch on before stopping the compilation of a branch.
         /// By default make a full compilation
@@ -70,7 +70,7 @@ enum Command {
         #[clap(long, value_parser, num_args=1.., value_delimiter=' ')]
         trainfile: PathBuf,
         /// How to branch
-        #[clap(short, long, value_enum)]
+        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
         branching: schlandals::Branching,
         /// If present, folder in which to store the output files
         #[clap(long)]
