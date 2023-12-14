@@ -21,7 +21,7 @@
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
 use super::graph::VariableIndex;
-use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager};
+use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
 
 /// A distribution of the input problem
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +40,7 @@ pub struct Distribution {
     pub number_false: ReversibleUsize,
     /// 
     constrained: ReversibleBool,
+    remaining: ReversibleF64,
 }
 
 impl Distribution {
@@ -53,6 +54,7 @@ impl Distribution {
             number_clause: 0,
             number_false: state.manage_usize(0),
             constrained: state.manage_bool(true),
+            remaining: state.manage_f64(1.0),
         }
     }
     
@@ -97,6 +99,16 @@ impl Distribution {
     pub fn set_unconstrained(&self, state: &mut StateManager) {
         state.set_bool(self.constrained, false);
     }
+
+    pub fn remaining(&self, state: &StateManager) -> f64 {
+        state.get_f64(self.remaining)
+    }
+
+    pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
+        let new_value = state.get_f64(self.remaining) - removed;
+        state.set_f64(self.remaining, new_value);
+    }
+
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
