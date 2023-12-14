@@ -175,6 +175,7 @@ impl Dac {
         }
         
         // At this point, the nodes vector is sorted by layer. But the indexes for the outputs/inputs must be updated.
+        self.distribution_mapping.clear();
         for node in (0..end).map(NodeIndex) {
             // Drop all nodes that have been removed
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
@@ -220,21 +221,15 @@ impl Dac {
     /// input) to the root of the DAC as to be removed.
     pub fn remove_dead_ends(&mut self) {
         let mut to_process: Vec<NodeIndex> = vec![];
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].is_distribution() || self[node].is_node_incomplete() {
-                self[node].set_to_remove(false);
-                for output_id in self[node].iter_output() {
-                    let output = self[node].get_output_at(output_id);
-                    to_process.push(output)
-                }
-            }
-        }
+        to_process.push(NodeIndex(self.nodes.len()-1));
         while let Some(node) = to_process.pop() {
+            if !self[node].is_to_remove() {
+                continue;
+            }
             self[node].set_to_remove(false);
-            for output_id in self[node].iter_output() {
-                let output = self[node].get_output_at(output_id);
-                if self[output].is_to_remove() {
-                    to_process.push(output);
+            for child in self[node].iter_input() {
+                if self[child].is_to_remove() {
+                    to_process.push(child);
                 }
             }
         }
@@ -422,8 +417,7 @@ impl Dac {
     pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
-        }
-        else {
+        } else {
             self.nodes.push(Node::distribution(distribution.0, value, probability));
             self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
@@ -449,8 +443,7 @@ impl Dac {
     pub fn get_distribution_value_node_index_usize(&self, distribution: DistributionIndex, value: usize) -> isize {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             x.0 as isize
-        }
-        else {
+        } else {
             -1
         }
     }
