@@ -152,7 +152,7 @@ impl Propagator {
             for weight in g[distribution].iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()) {
                 p += weight;
             }
-            self.propagation_prob *= &p;
+            self.propagation_prob *= p;
         }
     }
     

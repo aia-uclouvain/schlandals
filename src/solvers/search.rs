@@ -304,12 +304,13 @@ where
 
     pub fn solve(&mut self) -> ProblemSolution {
         self.state.save_state();
-        let _ = self.preproc();
+        if let Err(_) = self.preproc() {
+            return ProblemSolution::Err(Unsat);
+        }
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
         let ub: Float = 1.0 - (self.preproc_out.clone() + solution.1.clone() * &self.preproc_in);
         let lb: Float = self.preproc_in.clone() * solution.0;
-        println!("{} {}", lb, ub);
         let proba: Float = (ub*lb).sqrt();
         self.restore();
         ProblemSolution::Ok(proba)

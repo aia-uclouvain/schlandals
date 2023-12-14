@@ -66,7 +66,7 @@ where
         }
         
         // Find unit clauses
-        for clause in self.component_extractor.component_iter(ComponentIndex(0)) {
+        for clause in self.graph.clauses_iter() {
             if self.graph[clause].is_unit(self.state) {
                 let l = self.graph[clause].get_unit_assigment(self.state);
                 self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(Reason::Clause(clause)));
