@@ -88,23 +88,17 @@ pub struct Component {
     number_distribution: usize,
     /// Hash of the component, computed during its detection
     hash: u64,
+    max_probability: f64,
 }
 
-pub struct ComponentIterator {
-    limit: usize,
-    next: usize,
-}
+impl Component {
 
-impl Iterator for ComponentIterator {
-    type Item = ComponentIndex;
+    pub fn hash(&self) -> u64 {
+        self.hash
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next == self.limit {
-            None
-        } else {
-            self.next += 1;
-            Some(ComponentIndex(self.next - 1))
-        }
+    pub fn max_probability(&self) -> f64 {
+        self.max_probability
     }
 }
 
@@ -121,6 +115,7 @@ impl ComponentExtractor {
             distribution_start: 0,
             number_distribution: g.number_distributions(),
             hash: 0,
+            max_probability: 1.0,
         }];
         Self {
             clauses: nodes,
@@ -169,6 +164,7 @@ impl ComponentExtractor {
         comp_distribution_start: usize,
         comp_number_distribution: &mut usize,
         hash: &mut u64,
+        max_probability: &mut f64,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
@@ -202,7 +198,7 @@ impl ComponentExtractor {
                     for variable in g[clause].iter_probabilistic_variables() {
                         if !g[variable].is_fixed(state) {
                             let distribution = g[variable].distribution().unwrap();
-                            if self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
+                            if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
                                 let current_d_pos = self.distribution_positions[distribution.0];
                                 let new_d_pos = comp_distribution_start + *comp_number_distribution;
                                 if current_d_pos != new_d_pos {
@@ -211,6 +207,7 @@ impl ComponentExtractor {
                                     self.distribution_positions[distribution.0] = new_d_pos;
                                     self.distribution_positions[moved_d.0] = current_d_pos;
                                 }
+                                *max_probability *= g[distribution].remaining(state);
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
@@ -272,6 +269,7 @@ impl ComponentExtractor {
                 let mut size = 0;
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
+                let mut max_probability = 1.0;
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -280,10 +278,11 @@ impl ComponentExtractor {
                     distribution_start,
                     &mut number_distribution,
                     &mut hash,
+                    &mut max_probability,
                     state,
                 );
                 if number_distribution > 0 {
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash});
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -344,7 +343,10 @@ impl ComponentExtractor {
         }
         self.clause_positions.push(start);
         for comp in self.components.iter_mut() {
-            if comp.start <= start && comp.start + comp.size > start {
+            if comp.start == start {
+                comp.size += 1;
+                comp.start += 1;
+            } else if comp.start < start && comp.start + comp.size > start {
                 comp.size += 1;
             } else if comp.start > start {
                 comp.start += 1;
@@ -352,6 +354,38 @@ impl ComponentExtractor {
         }
     }
 
+}
+
+impl std::ops::Index<ComponentIndex> for ComponentExtractor {
+    type Output = Component;
+
+    fn index(&self, index: ComponentIndex) -> &Self::Output {
+        &self.components[index.0]
+    }
+}
+
+impl std::ops::IndexMut<ComponentIndex> for ComponentExtractor {
+    fn index_mut(&mut self, index: ComponentIndex) -> &mut Self::Output {
+        &mut self.components[index.0]
+    }
+}
+
+pub struct ComponentIterator {
+    limit: usize,
+    next: usize,
+}
+
+impl Iterator for ComponentIterator {
+    type Item = ComponentIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == self.limit {
+            None
+        } else {
+            self.next += 1;
+            Some(ComponentIndex(self.next - 1))
+        }
+    }
 }
 
 /*

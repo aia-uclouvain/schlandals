@@ -21,7 +21,7 @@
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
 use super::graph::{Graph, VariableIndex};
-use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager};
+use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
 use rug::Float;
 use crate::common::f128;
 
@@ -42,6 +42,7 @@ pub struct Distribution {
     pub number_false: ReversibleUsize,
     /// Is the distribution constrained
     constrained: ReversibleBool,
+    remaining: ReversibleF64,
 }
 
 impl Distribution {
@@ -55,6 +56,7 @@ impl Distribution {
             number_clause: 0,
             number_false: state.manage_usize(0),
             constrained: state.manage_bool(true),
+            remaining: state.manage_f64(1.0),
         }
     }
     
@@ -104,14 +106,15 @@ impl Distribution {
         state.get_bool(self.constrained)
     }
 
-    pub fn sum_unfixed(&self, g: &Graph, state: &StateManager) -> Float {
-        let mut s = f128!(0.0);
-        for v in self.iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()) {
-            s += v;
-        }
-        s
+    pub fn remaining(&self, state: &StateManager) -> f64 {
+        state.get_f64(self.remaining)
     }
-    
+
+    pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
+        let new_value = state.get_f64(self.remaining) - removed;
+        state.set_f64(self.remaining, new_value);
+    }
+
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
