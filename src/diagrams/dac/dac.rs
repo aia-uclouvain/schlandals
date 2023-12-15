@@ -328,16 +328,7 @@ impl Dac {
             }
         }
         if let Some(ref mut s) = self.solver {
-            match s {
-                Solver::SMinInDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::SMinOutDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::SMaxDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::SVSIDS(ref mut solver) => solver.update_distributions(distributions),
-                Solver::QMinInDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::QMinOutDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::QMaxDegree(ref mut solver) => solver.update_distributions(distributions),
-                Solver::QVSIDS(ref mut solver) => solver.update_distributions(distributions),
-            }
+            s.update_distributions(distributions);
         }
     }
 

@@ -69,6 +69,7 @@ where
     epsilon: f64,
     preproc_in: Float,
     preproc_out: Float,
+    prefix_factor: Float,
 }
 
 impl<B, const S: bool> SearchSolver<B, S>
@@ -99,6 +100,7 @@ where
             epsilon,
             preproc_in: f128!(0.0),
             preproc_out: f128!(1.0),
+            prefix_factor: f128!(1.0),
         }
     }
     
@@ -311,22 +313,21 @@ where
         }
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
-        let ub = &self.preproc_out + solution.1.clone()*&self.preproc_in;
-        let lb: Float = self.preproc_in.clone() * solution.0;
+        let ub: Float = 1.0 - (&self.preproc_out + solution.1.clone()*&self.preproc_in) / &self.prefix_factor;
+        let lb: Float = (self.preproc_in.clone() * solution.0) / &self.prefix_factor;
         let proba: Float = (ub*lb).sqrt();
         self.restore();
         ProblemSolution::Ok(proba)
     }
     
-    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) -> Float {
-        let mut prefix_proba = f128!(1.0);
+    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) {
+        self.prefix_factor.assign(1.0);
         for (variable, value) in propagation.iter().copied() {
             self.propagator.add_to_propagation_stack(variable, value, None);
             if self.graph[variable].is_probabilitic() && value {
-                prefix_proba *= self.graph[variable].weight().unwrap();
+                self.prefix_factor *= self.graph[variable].weight().unwrap();
             }
         }
-        prefix_proba
     }
 
     pub fn update_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
