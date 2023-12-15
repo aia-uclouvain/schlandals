@@ -275,7 +275,9 @@ where
         ((p_in, target - p_out), level - 1)
     }
 
-    pub fn preproc(&mut self) -> Result<(), Unsat>{
+    pub fn preproc(&mut self) -> Result<(), Unsat> {
+        self.preproc_out.assign(1.0);
+        self.preproc_in.assign(0.0);
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
             return Err(Unsat);
@@ -309,7 +311,7 @@ where
         }
         let (solution, _) = self._solve(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0));
         self.statistics.print();
-        let ub: Float = 1.0 - (self.preproc_out.clone() + solution.1.clone() * &self.preproc_in);
+        let ub = &self.preproc_out + solution.1.clone()*&self.preproc_in;
         let lb: Float = self.preproc_in.clone() * solution.0;
         let proba: Float = (ub*lb).sqrt();
         self.restore();
