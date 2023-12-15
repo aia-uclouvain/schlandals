@@ -118,7 +118,7 @@ impl Node{
             number_inputs: 0,
             layer: 0,
             to_remove: true,
-            path_value: f128!(0.0),
+            path_value: f128!(1.0),
             propagation: vec![],
         }
     }
