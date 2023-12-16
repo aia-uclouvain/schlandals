@@ -41,6 +41,7 @@ pub struct Distribution {
     /// 
     constrained: ReversibleBool,
     remaining: ReversibleF64,
+    branching_candidate: bool,
 }
 
 impl Distribution {
@@ -55,6 +56,7 @@ impl Distribution {
             number_false: state.manage_usize(0),
             constrained: state.manage_bool(true),
             remaining: state.manage_f64(1.0),
+            branching_candidate: true,
         }
     }
     
@@ -107,6 +109,14 @@ impl Distribution {
     pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
         let new_value = state.get_f64(self.remaining) - removed;
         state.set_f64(self.remaining, new_value);
+    }
+
+    pub fn set_branching_candidate(&mut self, value: bool) {
+        self.branching_candidate = value;
+    }
+
+    pub fn is_branching_candidate(&self) -> bool {
+        self.branching_candidate
     }
 
     // --- ITERATOR --- //

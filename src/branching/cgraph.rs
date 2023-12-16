@@ -33,7 +33,7 @@ impl BranchingDecision for MinInDegree {
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
     ) -> Option<DistributionIndex> {
-        let mut best_clause: Option<ClauseIndex> = None;
+        let mut selected : Option<DistributionIndex> = None;
         let mut best_score = usize::MAX;
         let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
@@ -41,19 +41,18 @@ impl BranchingDecision for MinInDegree {
                 let score = g[clause].number_constrained_parents(state);
                 let tie = g[clause].number_parents();
                 if score < best_score || (score == best_score && tie < best_tie) {
-                    best_score = score;
-                    best_tie = tie;
-                    best_clause = Some(clause);
+                    match g[clause].get_constrained_distribution(state, g) {
+                        Some(d) => {
+                            selected = Some(d);
+                            best_score = score;
+                            best_tie = tie;
+                        },
+                        None => (),
+                    }
                 }
             }
         }
-        
-        match best_clause {
-            Some(clause) => {
-                g[clause].get_constrained_distribution(state, g)
-            },
-            None => None
-        }
+        selected
     }
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
@@ -80,7 +79,7 @@ impl BranchingDecision for MinOutDegree {
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
     ) -> Option<DistributionIndex> {
-        let mut best_clause: Option<ClauseIndex> = None;
+        let mut selected : Option<DistributionIndex> = None;
         let mut best_score = usize::MAX;
         let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
@@ -88,19 +87,18 @@ impl BranchingDecision for MinOutDegree {
                 let score = g[clause].number_constrained_children(state);
                 let tie = g[clause].number_children();
                 if score < best_score || (score == best_score && tie < best_tie) {
-                    best_score = score;
-                    best_tie = tie;
-                    best_clause = Some(clause);
+                    match g[clause].get_constrained_distribution(state, g) {
+                        Some(d) => {
+                            selected = Some(d);
+                            best_score = score;
+                            best_tie = tie;
+                        },
+                        None => (),
+                    }
                 }
             }
         }
-        
-        match best_clause {
-            Some(clause) => {
-                g[clause].get_constrained_distribution(state, g)
-            },
-            None => None
-        }
+        selected
     }
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}
@@ -121,24 +119,23 @@ impl BranchingDecision for MaxDegree {
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
     ) -> Option<DistributionIndex> {
-        let mut best_clause: Option<ClauseIndex> = None;
+        let mut selected : Option<DistributionIndex> = None;
         let mut best_score = 0;
         for clause in component_extractor.component_iter(component) {
             if g[clause].is_constrained(state) && !g[clause].is_learned() && g[clause].has_probabilistic(state) {
-                let score = g[clause].number_constrained_parents(state) + g[clause].number_constrained_children(state);
+                let score = g[clause].number_constrained_children(state) + g[clause].number_constrained_parents(state);
                 if score > best_score {
-                    best_score = score;
-                    best_clause = Some(clause);
+                    match g[clause].get_constrained_distribution(state, g) {
+                        Some(d) => {
+                            selected = Some(d);
+                            best_score = score;
+                        },
+                        None => (),
+                    }
                 }
             }
         }
-        
-        match best_clause {
-            Some(clause) => {
-                g[clause].get_constrained_distribution(state, g)
-            },
-            None => None
-        }
+        selected
     }
     
     fn init(&mut self, _g: &Graph, _state: &StateManager) {}

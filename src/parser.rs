@@ -42,7 +42,7 @@
 //!        variable appearing in the implicant must be negated.
 //!     2. The head of the implications can not be a probabilistic variable
 
-use crate::core::graph::{Graph, VariableIndex};
+use crate::core::graph::{Graph, VariableIndex, DistributionIndex};
 use super::core::literal::Literal;
 use search_trail::StateManager;
 use std::fs::File;
@@ -87,6 +87,14 @@ pub fn graph_from_ppidimacs(
         match l {
             Err(e) => panic!("Problem while reading file: {}", e),
             Ok(line) => {
+                if line.starts_with("c p learn") {
+                    for distribution in g.distributions_iter() {
+                        g[distribution].set_branching_candidate(false);
+                    }
+                    for distribution in line.split_whitespace().skip(3).map(|s| DistributionIndex(s.parse::<usize>().unwrap() - 1)) {
+                        g[distribution].set_branching_candidate(true);
+                    }
+                }
                 if !line.starts_with('c') && !line.starts_with('p') {
                     // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
                     for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
