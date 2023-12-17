@@ -360,16 +360,7 @@ impl Dac {
             }
         }
         if let Some(ref mut s) = self.solver {
-            match s {
-                Solver::SMinInDegree(ref mut solver) => solver.reset_cache(),
-                Solver::SMinOutDegree(ref mut solver) => solver.reset_cache(),
-                Solver::SMaxDegree(ref mut solver) => solver.reset_cache(),
-                Solver::SVSIDS(ref mut solver) => solver.reset_cache(),
-                Solver::QMinInDegree(ref mut solver) => solver.reset_cache(),
-                Solver::QMinOutDegree(ref mut solver) => solver.reset_cache(),
-                Solver::QMaxDegree(ref mut solver) => solver.reset_cache(),
-                Solver::QVSIDS(ref mut solver) => solver.reset_cache(),
-            }
+            s.reset_cache();
         }
     }
 

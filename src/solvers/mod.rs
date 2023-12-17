@@ -48,6 +48,7 @@ pub enum Solver {
 }
 
 impl Solver {
+
     pub fn solve(&mut self) -> ProblemSolution {
         match self {
             Solver::SMinInDegree(solver) => solver.solve(),
@@ -148,6 +149,19 @@ impl Solver {
             Solver::QMinOutDegree(ref mut solver) => solver.update_distributions(distributions),
             Solver::QMaxDegree(ref mut solver) => solver.update_distributions(distributions),
             Solver::QVSIDS(ref mut solver) => solver.update_distributions(distributions),
+        }
+    }
+
+    pub fn reset_cache(&mut self) {
+        match self {
+            Solver::SMinInDegree(ref mut solver) => solver.reset_cache(),
+            Solver::SMinOutDegree(ref mut solver) => solver.reset_cache(),
+            Solver::SMaxDegree(ref mut solver) => solver.reset_cache(),
+            Solver::SVSIDS(ref mut solver) => solver.reset_cache(),
+            Solver::QMinInDegree(ref mut solver) => solver.reset_cache(),
+            Solver::QMinOutDegree(ref mut solver) => solver.reset_cache(),
+            Solver::QMaxDegree(ref mut solver) => solver.reset_cache(),
+            Solver::QVSIDS(ref mut solver) => solver.reset_cache(),
         }
     }
 }
