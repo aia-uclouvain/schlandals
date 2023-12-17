@@ -311,6 +311,9 @@ impl ComponentExtractor {
     ) -> impl Iterator<Item = ClauseIndex> + '_ {
         let start = self.components[component.0].start;
         let end = start + self.components[component.0].size;
+        if end > self.clauses.len() {
+            println!("Size of component {:?} exceed size of number of clauses", component);
+        }
         self.clauses[start..end].iter().copied()
     }
     
@@ -343,10 +346,7 @@ impl ComponentExtractor {
         }
         self.clause_positions.push(start);
         for comp in self.components.iter_mut() {
-            if comp.start == start {
-                comp.size += 1;
-                comp.start += 1;
-            } else if comp.start < start && comp.start + comp.size > start {
+            if comp.start <= start && comp.start + comp.size > start {
                 comp.size += 1;
             } else if comp.start > start {
                 comp.start += 1;
