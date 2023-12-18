@@ -77,9 +77,10 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
         FileType::CNF => {
             let number_distribution = distributions_from_cnf(&input).len();
             let limit = (ratio * number_distribution as f64).ceil() as usize;
-            let compiler = make_compiler!(&input, branching, limit);
+            let mut compiler = make_compiler!(&input, branching, limit);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
+                dac.optimize_structure();
                 dac.evaluate();
                 if let Some(f) = dotfile {
                     let out = dac.as_graphviz();

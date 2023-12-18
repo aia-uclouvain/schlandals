@@ -99,6 +99,12 @@ impl Dac {
         self[node].add_output(output);
         self[output].add_input(node);
     }
+
+    pub fn optimize_structure(&mut self) {
+        self.remove_dead_ends();
+        self.reduce();
+        self.layerize();
+    }
     
     fn swap(&mut self, new: &mut [usize], old: &mut [usize], i: usize, j: usize) {
         self.nodes.swap(i, j);
@@ -466,6 +472,20 @@ impl Dac {
     pub fn has_cutoff_nodes(&self) -> bool {
         // TODO: Use a flag
         self.nodes.iter().find(|n| n.is_node_incomplete()).is_some()
+    }
+
+    /// Returns true if the DAC contains a partial node that can be extended with the given
+    /// distribution, false otherwise
+    pub fn has_partial_node_with_distribution(&self, distribution: DistributionIndex) -> Option<NodeIndex> {
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            if self[node].get_layer() > 0 {
+                break;
+            }
+            if self[node].has_distribution(distribution) {
+                return Some(node);
+            }
+        }
+        None
     }
 }
 

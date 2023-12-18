@@ -37,6 +37,7 @@ use crate::Branching;
 use crate::Loss;
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
+use crate::core::graph::DistributionIndex;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -125,7 +126,7 @@ impl <const S: bool> Learner<S>
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
-        let dacs = inputs.par_iter().map(| input| {
+        let mut dacs = inputs.par_iter().map(|input| {
             // We compile the input. This can either be a .cnf file or a fdac file.
             // If the file is a fdac file, then we read directly from it
             let mut d = match type_of_input(input) {
@@ -138,17 +139,18 @@ impl <const S: bool> Learner<S>
                     // TODO: Maybe use a fixed threshold for easy instance
                     let learned = (ratio_learn * number_distribution as f64).ceil() as usize;
                     //println!("Number of distributions: {}, learned: {}", number_distribution, learned);
-                    let compiler = make_compiler!(input, branching, learned);
-                    compile!(compiler)
+                    let mut compiler = make_compiler!(input, branching, learned);
+                    let dac = compile!(compiler);
+                    (dac, Some(compiler))
                 },
                 FileType::FDAC => {
                     println!("Reading {}", input.to_str().unwrap());
                     // The query has already been compiled, we just read from the file.
-                    Some(Dac::from_file(input))
+                    (Some(Dac::from_file(input)), None)
                 }
             };
             // We handle the compiled circuit, if present.
-            if let Some(ref mut dac) = d.as_mut() {
+            if let Some(ref mut dac) = d.0.as_mut() {
                 if dac.has_cutoff_nodes() {
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
@@ -159,12 +161,12 @@ impl <const S: bool> Learner<S>
             }
             d
         }).collect::<Vec<_>>();
-        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count());
+        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.0.is_some()).count());
         let mut learner = Self { 
             dacs: vec![], 
             unsoftmaxed_distributions, 
             gradients: grads,
-            is_distribution_learned: vec![true; distributions.len()],
+            is_distribution_learned: vec![false; distributions.len()],
             lr: 0.0,
             expected_distribution: distributions,
             expected_outputs: vec![],
@@ -174,24 +176,55 @@ impl <const S: bool> Learner<S>
             ratio_learn,
         };
 
-        for (i, dac) in dacs.into_iter().enumerate() {
-            if let Some(dac) = dac {
-                learner.dacs.push(dac);
-                learner.expected_outputs.push(expected_outputs[i]);
-            }
-        }
-        if ratio_learn < 1.0 {
-            learner.is_distribution_learned = vec![false; learner.expected_distribution.len()];
-            for dac_i in 0..learner.dacs.len() {
-                for (d, _) in learner.dacs[dac_i].distribution_mapping.keys(){
+        for (dac_opt, _) in dacs.iter() {
+            if let Some(dac) = dac_opt.as_ref() {
+                for (d, _) in dac.distribution_mapping.keys() {
                     learner.is_distribution_learned[d.0] = true;
                     learner.unsoftmaxed_distributions[d.0] = rand_init[d.0].clone();
                 }
             }
         }
-        else {
-            learner.unsoftmaxed_distributions = rand_init;
+
+        let mut dac_id = 0;
+        for distribution in (0..learner.is_distribution_learned.len()).map(DistributionIndex) {
+            if learner.is_distribution_learned[distribution.0] {
+                continue;
+            }
+            // We must learn the distribution, we try to insert it into a dac
+            let end = dac_id;
+            loop {
+                let (ref mut dac_opt, ref mut compiler_opt) = &mut dacs[dac_id];
+                if let Some(dac) = dac_opt {
+                    if let Some(partial_node) = dac.has_partial_node_with_distribution(distribution) {
+                        let compiler = compiler_opt.as_mut().unwrap();
+                        compiler.extend_partial_node_with(partial_node, dac, distribution);
+                        dac_id = (dac_id + 1) % dacs.len();
+                        learner.is_distribution_learned[distribution.0] = true;
+                        learner.unsoftmaxed_distributions[distribution.0] = rand_init[distribution.0].clone();
+                        break;
+                    }
+                }
+                dac_id = (dac_id + 1) % dacs.len();
+                if dac_id == end {
+                    break;
+                }
+            }
         }
+
+        for dac in dacs.iter_mut() {
+            if let Some(dac) = dac.0.as_mut() {
+                dac.optimize_structure();
+            }
+        }
+
+        for (i, dac) in dacs.into_iter().enumerate() {
+            if let Some(dac) = dac.0 {
+                learner.dacs.push(dac);
+                learner.expected_outputs.push(expected_outputs[i]);
+            }
+        }
+
+
         // Send the randomized distributions to the solvers
         learner.update_distributions();
 

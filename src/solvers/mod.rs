@@ -16,7 +16,9 @@
 
 
 use rug::Float;
-use crate::{branching::*, core::graph::VariableIndex};
+use crate::branching::*;
+use crate::diagrams::dac::dac::{Dac, NodeIndex};
+use crate::core::graph::{VariableIndex, DistributionIndex};
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -276,6 +278,18 @@ pub enum Compiler {
     VSIDS(DACCompiler<VSIDS>),
 }
 
+impl Compiler {
+    pub fn extend_partial_node_with(&mut self, node: NodeIndex, dac: &mut Dac, distribution: DistributionIndex) {
+        match self {
+            Compiler::VSIDS(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
+            Compiler::MinInDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
+            Compiler::MinOutDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
+            Compiler::MaxDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
+        }
+    }
+
+}
+
 macro_rules! make_compiler {
     ($i:expr, $b:expr, $r:expr) => {
         {
@@ -304,10 +318,10 @@ macro_rules! make_compiler {
 macro_rules! compile {
     ($c:expr) => {
         match $c {
-            Compiler::MinInDegree(mut c) => c.compile(),
-            Compiler::MinOutDegree(mut c) => c.compile(),
-            Compiler::MaxDegree(mut c) => c.compile(),
-            Compiler::VSIDS(mut c) => c.compile(),
+            Compiler::MinInDegree(ref mut c) => c.compile(),
+            Compiler::MinOutDegree(ref mut c) => c.compile(),
+            Compiler::MaxDegree(ref mut c) => c.compile(),
+            Compiler::VSIDS(ref mut c) => c.compile(),
         }
     }
 }

@@ -16,7 +16,7 @@
 
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, Graph, ClauseIndex};
+use crate::core::graph::{DistributionIndex, Graph};
 use super::BranchingDecision;
 
 /// This heuristic selects the clause with the minimum in degree. In case of tie, it selects the clause

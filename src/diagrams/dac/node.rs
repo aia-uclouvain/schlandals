@@ -27,9 +27,10 @@
 use rustc_hash::FxHashSet;
 
 use rug::{Assign, Float};
-use crate::core::graph::VariableIndex;
+use crate::core::graph::{DistributionIndex, VariableIndex};
 use super::dac::NodeIndex;
 use crate::common::*;
+use bitvec::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeNode {
@@ -80,10 +81,13 @@ pub struct Node {
     layer: usize,
     /// Should the node be removed as post-processing ?
     to_remove: bool,
-    // Gradient computation, the value of the path from the root
+    /// Gradient computation, the value of the path from the root
     path_value: Float,
-    // Propagation path
+    /// Propagation path
     propagation: Vec<(VariableIndex, bool)>,
+    /// If the node has been partially compiled, store the distributions it contains in the
+    /// sub-problem it represent
+    distributions: Option<BitVec>,
 }
 
 impl Node{
@@ -103,6 +107,7 @@ impl Node{
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            distributions: None,
         }
     }
 
@@ -120,6 +125,7 @@ impl Node{
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            distributions: None,
         }
     }
 
@@ -137,6 +143,7 @@ impl Node{
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            distributions: None,
         }
     }
 
@@ -229,6 +236,29 @@ impl Node{
     /// propagations to reach the node are stored in the `propagation field`.
     pub fn is_node_incomplete(&self) -> bool {
         !self.propagation.is_empty()
+    }
+
+    /// Adds the distributions to the pool of distribution in the partial node
+    pub fn add_distributions(&mut self, number_distributions: usize, distributions: impl Iterator<Item = DistributionIndex>) {
+        let mut bv = BitVec::new();
+        for _ in 0..number_distributions {
+            bv.push(false);
+        }
+        for d in distributions {
+            *bv.get_mut(d.0).unwrap() = true;
+        }
+        self.distributions = Some(bv);
+    }
+
+    /// Returns true if the node is partial and can branch on the given distribution, false
+    /// otherwise
+    pub fn has_distribution(&self, distribution: DistributionIndex) -> bool {
+        match &self.distributions {
+            Some(bv) => {
+                bv[distribution.0]
+            },
+            None => false,
+        }
     }
 
     /// Returns true iff the node has some output

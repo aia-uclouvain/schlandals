@@ -172,6 +172,7 @@ where
                                 for (variable, value) in  self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| self.graph[*l].is_probabilitic() && self.graph[*l].reason(&self.state).is_none()) {
                                     dac[child].add_to_propagation(variable, value);
                                 }
+                                dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
                                 sum_children.push(child);
                             }
                         }
@@ -223,11 +224,44 @@ where
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
             Some(_) => {
-                dac.remove_dead_ends();
-                dac.reduce();
-                dac.layerize();
                 Some(dac)
             }
         }
+    }
+
+    pub fn extend_partial_node_with(&mut self, node: NodeIndex, dac: &mut Dac, distribution: DistributionIndex) {
+        debug_assert!(dac[node].is_sum());
+        self.state.save_state();
+        let propagations = dac[node].get_propagation().clone();
+        for (variable, value) in propagations.iter().copied() {
+            self.propagator.add_to_propagation_stack(variable, value, None);
+        }
+        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
+            Ok(_) => {
+                let mut children: Vec<NodeIndex> = vec![];
+                for variable in self.graph[distribution].iter_variables() {
+                    self.state.save_state();
+                    match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 1) {
+                        Err(_) => { },
+                        Ok(_) => {
+                            if let Some(child) = self.expand_prod_node(dac, ComponentIndex(0), 2) {
+                                children.push(child);
+                            }
+                        }
+                    }
+                    self.restore();
+                }
+                if !children.is_empty() {
+                    let node = dac.add_sum_node();
+                    for child in children {
+                        dac.add_node_output(child, node);
+                    }
+                }
+            },
+            Err(_) => {
+                panic!("Trying to extend with UNSAT node");
+            },
+        }
+        self.state.restore_state();
     }
 }
