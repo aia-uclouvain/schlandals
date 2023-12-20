@@ -72,12 +72,10 @@ impl std::fmt::Display for Loss {
     }
 }
 
-pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac>{
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac>{
     match type_of_input(&input) {
         FileType::CNF => {
-            let number_distribution = distributions_from_cnf(&input).len();
-            let limit = (ratio * number_distribution as f64).ceil() as usize;
-            let mut compiler = make_compiler!(&input, branching, limit);
+            let mut compiler = make_compiler!(&input, branching, false);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.optimize_structure();
@@ -111,7 +109,7 @@ pub fn compile(input: PathBuf, branching: Branching, ratio: f64, fdac: Option<Pa
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:i64, rlearned: f64, epsilon: f64, loss: Loss, jobs: usize) {    
+            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -124,15 +122,15 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
     if log { 
-        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, outfolder, rlearned, jobs);
+        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, outfolder, jobs);
         learner.train(nepochs, lr, loss, timeout);
     } else {
-        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, outfolder, rlearned, jobs);
+        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, outfolder, jobs);
         learner.train(nepochs, lr, loss, timeout);
     }
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, statistics);
+    let solver = make_solver!(&input, branching, epsilon, memory, statistics, false);
     solve_search!(solver)
 }

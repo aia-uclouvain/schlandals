@@ -169,11 +169,11 @@ impl Solver {
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr, $l:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state);
+            let graph = graph_from_ppidimacs($i, &mut state, $l);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
@@ -291,24 +291,24 @@ impl Compiler {
 }
 
 macro_rules! make_compiler {
-    ($i:expr, $b:expr, $r:expr) => {
+    ($i:expr, $b:expr, $l:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state);
+            let graph = graph_from_ppidimacs($i, &mut state, $l);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             match $b {
                 Branching::MinInDegree => {
-                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, $r))
+                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator))
                 },
                 Branching::MinOutDegree => {
-                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, $r))
+                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator))
                 },
                 Branching::MaxDegree => {
-                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, $r))
+                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator))
                 },
                 Branching::VSIDS => {
-                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, $r))
+                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator))
                 },
             }
         }

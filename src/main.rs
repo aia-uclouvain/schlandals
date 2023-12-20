@@ -53,10 +53,6 @@ enum Command {
         /// How to branch
         #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
         branching: schlandals::Branching,
-        /// The ratio of distribution to branch on before stopping the compilation of a branch.
-        /// By default make a full compilation
-        #[clap(long, default_value_t=1.0)]
-        ratio: f64,
         /// If present, store a textual representation of the compiled circuit
         #[clap(long)]
         fdac: Option<PathBuf>,
@@ -87,9 +83,6 @@ enum Command {
         /// If present, define the learning timeout
         #[clap(long, default_value_t=i64::MAX)]
         timeout: i64,
-        /// If present, do an approximate learner on the given ratio of distributions.
-        #[clap(long, default_value_t=1.0)]
-        rlearned: f64,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
         #[clap(short, long, default_value_t=0.0)]
         epsilon: f64,
@@ -116,11 +109,11 @@ fn main() {
                 Ok(p) => println!("{}", p),
             };
         },
-        Command::Compile { input, branching, ratio, fdac, dotfile} => {
-            schlandals::compile(input, branching, ratio, fdac, dotfile);
+        Command::Compile { input, branching, fdac, dotfile} => {
+            schlandals::compile(input, branching, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, rlearned, epsilon, loss, jobs} => {
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, rlearned, epsilon, loss, jobs);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs);
         }
     }
 }

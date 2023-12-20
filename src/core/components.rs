@@ -311,9 +311,6 @@ impl ComponentExtractor {
     ) -> impl Iterator<Item = ClauseIndex> + '_ {
         let start = self.components[component.0].start;
         let end = start + self.components[component.0].size;
-        if end > self.clauses.len() {
-            println!("Size of component {:?} exceed size of number of clauses", component);
-        }
         self.clauses[start..end].iter().copied()
     }
     

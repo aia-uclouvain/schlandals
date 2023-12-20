@@ -31,7 +31,6 @@ use search_trail::StateManager;
 use crate::branching::*;
 use crate::parser::*;
 use crate::propagator::Propagator;
-use crate::preprocess::Preprocessor;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
 use crate::Loss;
@@ -56,7 +55,6 @@ pub struct Learner<const S: bool>
     log: Logger<S>,
     outfolder: Option<PathBuf>,
     epsilon: f64,
-    ratio_learn: f64,
 }
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
@@ -89,26 +87,9 @@ fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac
 
 impl <const S: bool> Learner<S>
 {
-
-    fn get_number_needed_distributions(input: &PathBuf, branching: Branching) -> usize {
-        let mut state = StateManager::default();
-        let mut propagator = Propagator::new(&mut state);
-        let mut graph = graph_from_ppidimacs(&input, &mut state);
-        let mut component_extractor = ComponentExtractor::new(&graph, &mut state);
-        propagator.init(graph.number_clauses());
-        let mut branching_heuristic: Box<dyn BranchingDecision> = match branching {
-            Branching::MinInDegree => Box::<MinInDegree>::default(),
-            Branching::MinOutDegree => Box::<MinOutDegree>::default(),
-            Branching::MaxDegree => Box::<MaxDegree>::default(),
-            Branching::VSIDS => Box::<VSIDS>::default(),
-        };
-        Preprocessor::new(&mut graph, &mut state, branching_heuristic.as_mut(), &mut propagator, &mut component_extractor).preprocess(false);
-        graph.distributions_iter().filter(|d| graph[*d].is_constrained(&state)).count()
-    }
-
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, ratio_learn:f64, jobs:usize) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
@@ -135,11 +116,7 @@ impl <const S: bool> Learner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let number_distribution = Self::get_number_needed_distributions(input, branching);
-                    // TODO: Maybe use a fixed threshold for easy instance
-                    let learned = (ratio_learn * number_distribution as f64).ceil() as usize;
-                    //println!("Number of distributions: {}, learned: {}", number_distribution, learned);
-                    let mut compiler = make_compiler!(input, branching, learned);
+                    let mut compiler = make_compiler!(input, branching, true);
                     let dac = compile!(compiler);
                     (dac, Some(compiler))
                 },
@@ -155,7 +132,7 @@ impl <const S: bool> Learner<S>
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
                     // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, false);
+                    let solver = make_solver!(input, branching, epsilon, None, false, false);
                     dac.set_solver(solver);
                 }
             }
@@ -173,7 +150,6 @@ impl <const S: bool> Learner<S>
             log: logger,
             outfolder,
             epsilon,
-            ratio_learn,
         };
 
         for (dac_opt, _) in dacs.iter() {
@@ -275,7 +251,7 @@ impl <const S: bool> Learner<S>
     }
 
     pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64) {
-        self.log.log_epoch(loss, lr, self.epsilon, self.ratio_learn);
+        self.log.log_epoch(loss, lr, self.epsilon);
     }
 
     // --- Setters --- //
@@ -363,7 +339,7 @@ impl <const S: bool> Learner<S>
     fn training_to_file(& self) {
         let mut out_writer = match &self.outfolder {
             Some(x) => {
-                Box::new(File::create(x.join(format!("learn_e{}_r{}.out", self.epsilon, self.ratio_learn))).unwrap()) as Box<dyn Write>
+                Box::new(File::create(x.join(format!("learn_e{}.out", self.epsilon))).unwrap()) as Box<dyn Write>
             }
             None => Box::new(io::stdout()) as Box<dyn Write>,
         };
@@ -406,7 +382,7 @@ impl <const S: bool> Learner<S>
             self.compute_gradients(&dac_grad);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
-            self.log.log_epoch(&dac_loss, self.lr, self.epsilon, self.ratio_learn);
+            self.log.log_epoch(&dac_loss, self.lr, self.epsilon);
             let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
             if (avg_loss-prev_loss).abs()<delta_early_stop {
                 count_no_improve += 1;
@@ -415,18 +391,16 @@ impl <const S: bool> Learner<S>
                 count_no_improve = 0;
             }
             if (avg_loss < stopping_criterion) || count_no_improve>=patience {
-                if self.ratio_learn < 1.0 {
-                    let predictions = self.evaluate(true);
-                    (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
-                    avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
-                    if (avg_loss-prev_loss).abs()>delta_early_stop {
-                        count_no_improve = 0;
-                    }
-                    if avg_loss < stopping_criterion || count_no_improve>=patience{
-                        println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
-                        break;
-                    }
-                } else {
+                // TODO: Before we checked if the learned ratio was < 1.0 and launched only in that
+                // case the additional evaluation. Should probabily do something of the like with
+                // the cut-off nodes int he DACs?
+                let predictions = self.evaluate(true);
+                (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
+                avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+                if (avg_loss-prev_loss).abs()>delta_early_stop {
+                    count_no_improve = 0;
+                }
+                if avg_loss < stopping_criterion || count_no_improve>=patience{
                     println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                     break;
                 }

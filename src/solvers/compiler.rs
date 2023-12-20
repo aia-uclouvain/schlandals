@@ -54,8 +54,6 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
-    /// limit on the number of distributions in all branches
-    limit: usize,
     /// Current number of distributions in the branch
     distribution_count: ReversibleUsize,
 }
@@ -70,7 +68,6 @@ where
         component_extractor: ComponentExtractor,
         branching_heuristic: Box<B>,
         propagator: Propagator,
-        limit: usize,
     ) -> Self {
         let cache = FxHashMap::default();
         let distribution_count = state.manage_usize(0);
@@ -81,7 +78,6 @@ where
             branching_heuristic,
             propagator,
             cache,
-            limit,
             distribution_count,
         }
     }
@@ -153,18 +149,16 @@ where
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 match self.cache.get(&bit_repr) {
                     None => {
-                        if self.state.get_usize(self.distribution_count) < self.limit {
-                            if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
-                                self.state.increment_usize(self.distribution_count);
-                                if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
-                                    sum_children.push(child);
-                                    self.cache.insert(bit_repr, Some(child));
-                                } else {
-                                    self.cache.insert(bit_repr, None);
-                                    prod_node = None;
-                                    sum_children.clear();
-                                    break;
-                                }
+                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
+                            self.state.increment_usize(self.distribution_count);
+                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
+                                sum_children.push(child);
+                                self.cache.insert(bit_repr, Some(child));
+                            } else {
+                                self.cache.insert(bit_repr, None);
+                                prod_node = None;
+                                sum_children.clear();
+                                break;
                             }
                         } else {
                             if self.component_extractor.component_distribution_iter(sub_component).find(|d| self.graph[*d].is_constrained(&self.state)).is_some() {
