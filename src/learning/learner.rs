@@ -37,15 +37,17 @@ use crate::Loss;
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
 use crate::core::graph::DistributionIndex;
+use crate::diagrams::semiring::SemiRing;
+use rayon::prelude::*;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DacIndex(pub usize);
-use rayon::prelude::*;
 
-pub struct Learner<const S: bool>
+pub struct Learner<R, const S: bool>
+    where R: SemiRing
 {
-    dacs: Vec<Dac>,
+    dacs: Vec<Dac<R>>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     is_distribution_learned: Vec<bool>,
@@ -85,7 +87,8 @@ fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac
     (dac_loss, dac_grad)
 }
 
-impl <const S: bool> Learner<S>
+impl <R, const S: bool> Learner<R, S>
+    where R: SemiRing
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
@@ -242,7 +245,7 @@ impl <const S: bool> Learner<S>
         self.dacs.len()
     }
 
-    pub fn get_dac_i(&self, i: usize) -> &Dac {
+    pub fn get_dac_i(&self, i: usize) -> &Dac<R> {
         &self.dacs[i]
     }
 
@@ -289,7 +292,7 @@ impl <const S: bool> Learner<S>
             for node in self.dacs[dac_id].iter_rev() {
                 let start = self.dacs[dac_id][node].get_input_start();
                 let end = start + self.dacs[dac_id][node].get_number_inputs();
-                let value = self.dacs[dac_id][node].get_value();
+                let value = self.dacs[dac_id][node].get_value().to_f64();
                 let path_val = self.dacs[dac_id][node].get_path_value();
 
                 // Update the path value for the children sum, product nodes 
@@ -298,7 +301,7 @@ impl <const S: bool> Learner<S>
                     let child = self.dacs[dac_id].get_input_at(child_index);
                     match self.dacs[dac_id][child].get_type() {
                         TypeNode::Sum => {
-                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value();
+                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
                             self.dacs[dac_id][child].set_path_value(val)
                         },
                         TypeNode::Product => {
@@ -308,7 +311,7 @@ impl <const S: bool> Learner<S>
                             // Compute the gradient for children that are leaf distributions
                             let mut factor = path_val.clone() * gradient_loss[dac_id];
                             if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
-                                factor *= &value;
+                                factor *= value;
                                 factor /= self.get_probability(d, v);
                             }
                             // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
@@ -415,8 +418,10 @@ impl <const S: bool> Learner<S>
 }
 
 // --- Indexing the graph with dac indexes --- //
-impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> {
-    type Output = Dac;
+impl <R, const S: bool> std::ops::Index<DacIndex> for Learner<R, S> 
+    where R: SemiRing
+{
+    type Output = Dac<R>;
 
     fn index(&self, index: DacIndex) -> &Self::Output {
         &self.dacs[index.0]
@@ -427,7 +432,8 @@ impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> {
 
 // TODO: Implementing Display for outputting the distributions is maybe not adequate, but need to
 // think about that
-impl <const S: bool> fmt::Display for Learner<S>
+impl <R, const S: bool> fmt::Display for Learner<R, S>
+    where R: SemiRing
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for distribution in self.expected_distribution.iter() {
@@ -437,7 +443,8 @@ impl <const S: bool> fmt::Display for Learner<S>
     }
 }
 
-impl <const S: bool> Learner<S>
+impl <R, const S: bool> Learner<R, S>
+    where R: SemiRing
 {
     pub fn to_folder(&self) {
         if let Some(f) = &self.outfolder {

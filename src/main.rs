@@ -93,6 +93,8 @@ enum Command {
         /// Number of threads to use for the evaluation of the DACs
         #[clap(long, default_value_t=1, short)]
         jobs: usize,
+        #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
+        semiring: schlandals::Semiring,
     }
 }
 
@@ -112,8 +114,8 @@ fn main() {
         Command::Compile { input, branching, fdac, dotfile} => {
             schlandals::compile(input, branching, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs} => {
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring);
         }
     }
 }

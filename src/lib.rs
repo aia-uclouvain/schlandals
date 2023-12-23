@@ -16,12 +16,13 @@
 
 use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
-use learning::{LogLearner, QuietLearner};
+use learning::*;
 use diagrams::dac::dac::Dac;
 use solvers::compiler::DACCompiler;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
+use rug::Float;
 
 use crate::core::components::ComponentExtractor;
 use crate::branching::*;
@@ -63,16 +64,15 @@ pub enum Loss {
     MAE,
     MSE,
 }
-impl std::fmt::Display for Loss {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Loss::MAE => write!(f, "MAE (Mean Absolute Error)"),
-            Loss::MSE => write!(f, "MSE (Mean Squared Error)"),
-        }
-    }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Semiring {
+    Probability,
+    Tensor,
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac>{
+
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac<Float>>{
     match type_of_input(&input) {
         FileType::CNF => {
             let mut compiler = make_compiler!(&input, branching, false);
@@ -109,7 +109,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize) {    
+            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -121,16 +121,21 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    if log { 
-        let mut learner = LogLearner::new(inputs, expected, epsilon, branching, outfolder, jobs);
-        learner.train(nepochs, lr, loss, timeout);
-    } else {
-        let mut learner = QuietLearner::new(inputs, expected, epsilon, branching, outfolder, jobs);
-        learner.train(nepochs, lr, loss, timeout);
-    }
+    let mut learner = Learn::new(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring);
+    learner.train(nepochs, lr, loss, timeout);
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, statistics, false);
     solve_search!(solver)
+}
+
+
+impl std::fmt::Display for Loss {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Loss::MAE => write!(f, "MAE (Mean Absolute Error)"),
+            Loss::MSE => write!(f, "MSE (Mean Squared Error)"),
+        }
+    }
 }

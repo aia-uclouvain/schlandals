@@ -19,6 +19,7 @@ use rug::Float;
 use crate::branching::*;
 use crate::diagrams::dac::dac::{Dac, NodeIndex};
 use crate::core::graph::{VariableIndex, DistributionIndex};
+use crate::diagrams::semiring::*;
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -279,7 +280,9 @@ pub enum Compiler {
 }
 
 impl Compiler {
-    pub fn extend_partial_node_with(&mut self, node: NodeIndex, dac: &mut Dac, distribution: DistributionIndex) {
+    pub fn extend_partial_node_with<R>(&mut self, node: NodeIndex, dac: &mut Dac<R>, distribution: DistributionIndex)
+        where R: SemiRing
+    {
         match self {
             Compiler::VSIDS(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
             Compiler::MinInDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),

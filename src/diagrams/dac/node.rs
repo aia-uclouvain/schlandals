@@ -26,8 +26,9 @@
 
 use rustc_hash::FxHashSet;
 
-use rug::{Assign, Float};
+use rug::Float;
 use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::diagrams::semiring::*;
 use super::dac::NodeIndex;
 use crate::common::*;
 use bitvec::prelude::*;
@@ -59,10 +60,12 @@ impl TypeNode {
 }
 
 /// A node structur that represents both internal and distribution nodes.
-pub struct Node {
+pub struct Node<R>
+    where R: SemiRing
+{
     /// Value of the node. Initialized at 1.0 for product, at 0.0 for sum and at a specific value for distribution nodes.
     /// For product and sum nodes, after the evaluation it is equal to the product (sum) of its input values.
-    value: Float,
+    value: R,
     /// Outputs of the node. Only used during the creation. These values are moved to the DAC structure before evaluation
     outputs: Vec<NodeIndex>,
     /// Inputs of the node. Only used during the creation to minimize the size of the circuit
@@ -90,12 +93,13 @@ pub struct Node {
     distributions: Option<BitVec>,
 }
 
-impl Node{
-
+impl<R> Node<R>
+    where R: SemiRing
+{
     /// Returns a new product node
     pub fn product() -> Self {
         Node {
-            value: f128!(1.0),
+            value: R::one(),
             outputs: vec![],
             inputs: FxHashSet::default(),
             typenode: TypeNode::Product,
@@ -113,7 +117,7 @@ impl Node{
 
     pub fn sum() -> Self {
         Node {
-            value: f128!(1.0),
+            value: R::zero(),
             outputs: vec![],
             inputs: FxHashSet::default(),
             typenode: TypeNode::Sum,
@@ -131,7 +135,7 @@ impl Node{
 
     pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
         Node {
-            value: f128!(probability),
+            value: R::from_float(probability),
             outputs: vec![],
             inputs: FxHashSet::default(),
             typenode: TypeNode::Distribution {d: distribution, v: value},
@@ -163,21 +167,8 @@ impl Node{
     }
 
     /// Returns the value of the node
-    pub fn get_value(&self) -> Float{
-        self.value.clone()
-    }
-
-    /// Apply the value given the type of node. If the node is a product node, multiply the value
-    /// of the node by the given value. If the node is a sum node, adds the given value to the
-    /// value of the node.
-    /// The node can not be a distribution/partial node
-    pub fn apply_value(&mut self, value: &Float) {
-        debug_assert!(!self.is_distribution() && !self.is_node_incomplete());
-        if self.is_product() {
-            self.value *= value;
-        } else if self.is_sum() {
-            self.value += value;
-        }
+    pub fn get_value(&self) -> &R {
+        &self.value
     }
 
     // Return the path value of the node. The path value of a node is the accumulated product of
@@ -192,37 +183,37 @@ impl Node{
     }
     
     /// Returns the start of the outputs of the nodes
-    pub fn get_output_start(&self) -> usize{
+    pub fn get_output_start(&self) -> usize {
         self.output_start
     }
     
     /// Returns the number of output the node has
-    pub fn get_number_outputs(&self) -> usize{
+    pub fn get_number_outputs(&self) -> usize {
         self.number_outputs
     }
 
     /// Returns the start of the input of the node
-    pub fn get_input_start(&self) -> usize{
+    pub fn get_input_start(&self) -> usize {
         self.input_start
     }
 
     /// Returns the number of input the node has
-    pub fn get_number_inputs(&self) -> usize{
+    pub fn get_number_inputs(&self) -> usize {
         self.number_inputs
     }
 
     /// Returns the layer of the node
-    pub fn get_layer(&self) -> usize{
+    pub fn get_layer(&self) -> usize {
         self.layer
     }
 
     /// Returns true if the node must be removed
-    pub fn is_to_remove(&self) -> bool{
+    pub fn is_to_remove(&self) -> bool {
         self.to_remove
     }
 
     /// Returns the propagations that need to be done to reach the node
-    pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)>{
+    pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)> {
         &self.propagation
     }
 
@@ -279,8 +270,8 @@ impl Node{
     }
 
     /// Sets the value of the node to the given float
-    pub fn set_value(&mut self, value: f64){
-        self.value.assign(value);
+    pub fn set_value(&mut self, value: R){
+        self.value = value;
     }
 
     /// Sets the path value of the node to the given float

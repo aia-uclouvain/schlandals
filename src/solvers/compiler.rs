@@ -31,10 +31,12 @@ use search_trail::{StateManager, SaveAndRestore, ReversibleUsize, UsizeManager};
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
 use crate::branching::BranchingDecision;
+use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
 use crate::diagrams::dac::dac::{NodeIndex, Dac};
+use std::ops::{AddAssign, MulAssign};
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -87,7 +89,9 @@ where
         self.state.restore_state();
     }
 
-    fn expand_sum_node(&mut self, dac: &mut Dac, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> {
+    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> 
+        where R: SemiRing + AddAssign + MulAssign + Send
+    {
 
         let mut children: Vec<NodeIndex> = vec![];
         for variable in self.graph[distribution].iter_variables() {
@@ -113,7 +117,9 @@ where
         }
     }
     
-    fn expand_prod_node(&mut self, dac: &mut Dac, component: ComponentIndex, level: isize) -> Option<NodeIndex> {        
+    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize) -> Option<NodeIndex>
+        where R: SemiRing + AddAssign + MulAssign + Send
+    {        
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for literal in self.propagator.assignments_iter(&self.state) {
@@ -199,7 +205,9 @@ where
         prod_node
     }
 
-    pub fn compile(&mut self) -> Option<Dac> {
+    pub fn compile<R>(&mut self) -> Option<Dac<R>>
+        where R: SemiRing + AddAssign + MulAssign + Send
+    {
 
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
@@ -223,7 +231,9 @@ where
         }
     }
 
-    pub fn extend_partial_node_with(&mut self, node: NodeIndex, dac: &mut Dac, distribution: DistributionIndex) {
+    pub fn extend_partial_node_with<R>(&mut self, node: NodeIndex, dac: &mut Dac<R>, distribution: DistributionIndex)
+        where R: SemiRing + AddAssign + MulAssign + Send
+    {
         debug_assert!(dac[node].is_sum());
         self.state.save_state();
         let propagations = dac[node].get_propagation().clone();

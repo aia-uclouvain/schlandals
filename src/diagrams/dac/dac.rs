@@ -27,11 +27,12 @@
 use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
 use rustc_hash::FxHashMap;
 
-use rug::Float;
 use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::diagrams::semiring::*;
 use crate::solvers::*;
 
 use super::node::*;
+use rug::Float;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeIndex(pub usize);
@@ -49,9 +50,11 @@ pub struct LayerIndex(usize);
 ///       the next node to be evaluated is i+1 and is likely to be stored in cache.
 ///     - When a node sends its value to its outputs, the same optimization happens (as loading the first output is likely to implies that
 ///       the following outputs are in cache).
-pub struct Dac {
+pub struct Dac<R>
+    where R: SemiRing
+{
     /// Internal nodes of the circuit
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<Node<R>>,
     /// Outputs of the internal nodes
     outputs: Vec<NodeIndex>,
     /// Inputs of the internal nodes
@@ -62,7 +65,9 @@ pub struct Dac {
     solver: Option<Solver>,
 }
 
-impl Dac {
+impl<R> Dac<R>
+    where R: SemiRing
+{
 
     /// Creates a new empty DAC. An input node is created for each distribution in the graph.
     pub fn new() -> Self {
@@ -326,7 +331,7 @@ impl Dac {
     pub fn reset_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                self[node].set_value(distributions[d][v]);
+                self[node].set_value(R::from_float(distributions[d][v]));
             }
             // All the distributions are at layer 0
             if self[node].get_layer() > 0 {
@@ -338,16 +343,6 @@ impl Dac {
         }
     }
 
-    /// Sends the value of the node to its parents
-    fn send_value(&mut self, node: NodeIndex, value: Float) {
-        let start = self.nodes[node.0].get_output_start();
-        let end = start + self.nodes[node.0].get_number_outputs();
-        for i in start..end {
-            let output = self.outputs[i];
-            self[output].apply_value(&value);
-        }
-    }
-
     pub fn reset(&mut self, eval_approx: bool) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if self[node].is_node_incomplete() {
@@ -355,12 +350,12 @@ impl Dac {
                     let propagations = self[node].get_propagation().clone();
                     let s = self.solver.as_mut().unwrap();
                     let value = s.solve_partial(&propagations);
-                    self[node].set_value(value);
+                    self[node].set_value(R::from_float(value));
                 }
             } else {
                 match self[node].get_type() {
-                    TypeNode::Product => self[node].set_value(1.0),
-                    TypeNode::Sum => self[node].set_value(0.0),
+                    TypeNode::Product => self[node].set_value(R::one()),
+                    TypeNode::Sum => self[node].set_value(R::zero()),
                     _ => (),
                 }
             }
@@ -371,9 +366,28 @@ impl Dac {
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self) -> Float {
+    pub fn evaluate(&mut self) -> &R {
         for node in (0..self.nodes.len()).map(NodeIndex) {
-            self.send_value(node, self[node].get_value());
+            if self[node].get_layer() == 0 {
+                continue;
+            }
+            let start = self.nodes[node.0].get_input_start();
+            let end = start + self.nodes[node.0].get_number_inputs();
+            if self[node].is_product() {
+                let mut value = R::one();
+                for child_id in start..end {
+                    let child = self.inputs[child_id];
+                    value.mul_assign_ref(self[child].get_value())
+                }
+                self[node].set_value(value);
+            } else {
+                let mut value = R::zero();
+                for child_id in start..end {
+                    let child = self.inputs[child_id];
+                    value.add_assign_ref(self[child].get_value());
+                }
+                self[node].set_value(value);
+            }
         }
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().get_value()
@@ -387,7 +401,7 @@ impl Dac {
     /// Returns the probability of the circuit. If the circuit has not been evaluated,
     /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
     /// sum node
-    pub fn get_circuit_probability(&self) -> Float {
+    pub fn get_circuit_probability(&self) -> &R {
         self.nodes.last().unwrap().get_value()
     }
     
@@ -491,7 +505,9 @@ impl Dac {
 
 // --- ITERATOR ---
 
-impl Dac {
+impl<R> Dac<R>
+    where R: SemiRing
+{
     pub fn iter(&self) -> impl Iterator<Item = NodeIndex> {
         (0..self.nodes.len()).map(NodeIndex)
     }
@@ -504,15 +520,19 @@ impl Dac {
 
 // --- Indexing the circuit --- 
 
-impl std::ops::Index<NodeIndex> for Dac {
-    type Output = Node;
+impl<R> std::ops::Index<NodeIndex> for Dac<R>
+    where R: SemiRing
+{
+    type Output = Node<R>;
 
     fn index(&self, index: NodeIndex) -> &Self::Output {
         &self.nodes[index.0]
     }
 }
 
-impl std::ops::IndexMut<NodeIndex> for Dac {
+impl<R> std::ops::IndexMut<NodeIndex> for Dac<R>
+    where R: SemiRing
+{
     fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
         &mut self.nodes[index.0]
     }
@@ -521,7 +541,9 @@ impl std::ops::IndexMut<NodeIndex> for Dac {
 // Various methods for dumping the compiled diagram, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
 
 // Visualization as graphviz DOT file
-impl Dac {
+impl<R> Dac<R>
+    where R: SemiRing
+{
     
     fn distribution_node_id(&self, node: NodeIndex) -> usize {
         node.0
@@ -547,7 +569,7 @@ impl Dac {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
                 if self[node].has_output() {
                     let id = self.distribution_node_id(node);
-                    out.push_str(&Dac::node(id, &dist_node_attributes, &format!("id{} d{} v{} ({:.4})", id, d, v, self[node].get_value())));
+                    out.push_str(&Dac::<Float>::node(id, &dist_node_attributes, &format!("id{} d{} v{} ({:.4})", id, d, v, self[node].get_value().to_f64())));
                 }
             }
         }
@@ -555,11 +577,11 @@ impl Dac {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = self.sp_node_id(node);
             if self.nodes[node.0].get_propagation().len() > 0 {
-                out.push_str(&Dac::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value())));
+                out.push_str(&Dac::<Float>::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value().to_f64())));
             } else if self[node].is_product() {
-                out.push_str(&Dac::node(id, &prod_node_attributes, &format!("X ({:.3})", self[node].get_value())));
+                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3})", self[node].get_value().to_f64())));
             } else if self[node].is_sum() {
-                out.push_str(&Dac::node(id, &sum_node_attributes, &format!("+ ({:.3})", self[node].get_value())));
+                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3})", self[node].get_value().to_f64())));
             }
         }
         
@@ -571,7 +593,7 @@ impl Dac {
             for output_i in out_start..out_end {
                 let output = self.outputs[output_i];
                 let to = self.sp_node_id(output);
-                out.push_str(&Dac::edge(from, to, None));
+                out.push_str(&Dac::<Float>::edge(from, to, None));
             }
         }
         out.push_str("}\n");
@@ -594,7 +616,9 @@ impl Dac {
 
 // Custom text format for the network
 
-impl fmt::Display for Dac {
+impl<R> fmt::Display for Dac<R>
+    where R: SemiRing
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "outputs")?;
         for output in self.outputs.iter().copied() {
@@ -619,7 +643,9 @@ impl fmt::Display for Dac {
     }
 }
 
-impl Dac {
+impl<R> Dac<R>
+    where R: SemiRing
+{
 
     pub fn from_file(filepath: &PathBuf) -> Self {
         let mut dac = Self {
@@ -658,7 +684,7 @@ impl Dac {
                 let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
                 let d = values[0];
                 let v = values[1];
-                let mut node = Node::distribution(d, v, 0.5);
+                let mut node: Node<Float> = Node::distribution(d, v, 0.5);
                 node.set_output_start(values[2]);
                 node.set_number_outputs(values[3]);
                 node.set_input_start(values[4]);
