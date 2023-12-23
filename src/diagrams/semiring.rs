@@ -26,6 +26,8 @@ pub trait SemiRing: AddAssign + MulAssign + Send + Sized {
     fn to_f64(&self) -> f64;
     fn add_assign_ref(&mut self, other: &Self);
     fn mul_assign_ref(&mut self, other: &Self);
+    fn backpropagating_gradient(&self) -> bool;
+    fn gradient(&mut self, loss: f64);
 }
 
 impl SemiRing for Float {
@@ -52,6 +54,14 @@ impl SemiRing for Float {
     fn mul_assign_ref(&mut self, other: &Self) {
         *self *= other;
     }
+
+    fn backpropagating_gradient(&self) -> bool {
+        true
+    }
+
+    fn gradient(&mut self, _loss: f64) {
+        
+    }
 }
 
 impl SemiRing for Tensor {
@@ -64,7 +74,7 @@ impl SemiRing for Tensor {
     }
 
     fn from_float(value: f64) -> Self {
-        Tensor::from(value)
+        Tensor::from_slice(&[value])
     }
 
     fn to_f64(&self) -> f64 {
@@ -77,5 +87,13 @@ impl SemiRing for Tensor {
 
     fn mul_assign_ref(&mut self, other: &Self) {
         *self *= other;
+    }
+
+    fn backpropagating_gradient(&self) -> bool {
+        false
+    }
+
+    fn gradient(&mut self, loss: f64) {
+        self.backward();
     }
 }

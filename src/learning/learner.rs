@@ -288,44 +288,48 @@ impl <R, const S: bool> Learner<R, S>
     pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
         for dac_id in 0..self.dacs.len() {
-            // Iterate on all nodes from the DAC, top-down way
-            for node in self.dacs[dac_id].iter_rev() {
-                let start = self.dacs[dac_id][node].get_input_start();
-                let end = start + self.dacs[dac_id][node].get_number_inputs();
-                let value = self.dacs[dac_id][node].get_value().to_f64();
-                let path_val = self.dacs[dac_id][node].get_path_value();
+            if self.dacs[dac_id].gradient_backpropagate() {
+                // Iterate on all nodes from the DAC, top-down way
+                for node in self.dacs[dac_id].iter_rev() {
+                    let start = self.dacs[dac_id][node].get_input_start();
+                    let end = start + self.dacs[dac_id][node].get_number_inputs();
+                    let value = self.dacs[dac_id][node].get_value().to_f64();
+                    let path_val = self.dacs[dac_id][node].get_path_value();
 
-                // Update the path value for the children sum, product nodes 
-                // and compute the gradient for the children leaf distributions
-                for child_index in start..end {
-                    let child = self.dacs[dac_id].get_input_at(child_index);
-                    match self.dacs[dac_id][child].get_type() {
-                        TypeNode::Sum => {
-                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
-                            self.dacs[dac_id][child].set_path_value(val)
-                        },
-                        TypeNode::Product => {
-                            self.dacs[dac_id][child].set_path_value(path_val.clone());
-                        },
-                        TypeNode::Distribution { d, v } => {
-                            // Compute the gradient for children that are leaf distributions
-                            let mut factor = path_val.clone() * gradient_loss[dac_id];
-                            if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
-                                factor *= value;
-                                factor /= self.get_probability(d, v);
-                            }
-                            // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
-                            let mut sum_other_w = f128!(0.0);
-                            let child_w = self.get_probability(d, v);
-                            for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
-                                let weight = self.get_probability(d, params);
-                                self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
-                                sum_other_w += weight.clone();
-                            }
-                            self.gradients[d][v] += factor * child_w * sum_other_w;
-                        },
+                    // Update the path value for the children sum, product nodes 
+                    // and compute the gradient for the children leaf distributions
+                    for child_index in start..end {
+                        let child = self.dacs[dac_id].get_input_at(child_index);
+                        match self.dacs[dac_id][child].get_type() {
+                            TypeNode::Sum => {
+                                let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
+                                self.dacs[dac_id][child].set_path_value(val)
+                            },
+                            TypeNode::Product => {
+                                self.dacs[dac_id][child].set_path_value(path_val.clone());
+                            },
+                            TypeNode::Distribution { d, v } => {
+                                // Compute the gradient for children that are leaf distributions
+                                let mut factor = path_val.clone() * gradient_loss[dac_id];
+                                if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
+                                    factor *= value;
+                                    factor /= self.get_probability(d, v);
+                                }
+                                // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
+                                let mut sum_other_w = f128!(0.0);
+                                let child_w = self.get_probability(d, v);
+                                for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
+                                    let weight = self.get_probability(d, params);
+                                    self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
+                                    sum_other_w += weight.clone();
+                                }
+                                self.gradients[d][v] += factor * child_w * sum_other_w;
+                            },
+                        }
                     }
                 }
+            } else {
+                self.dacs[dac_id].gradient(gradient_loss[dac_id]);
             }
         }
     }

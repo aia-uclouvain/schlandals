@@ -171,6 +171,10 @@ impl<R> Node<R>
         &self.value
     }
 
+    pub fn get_value_mut(&mut self) -> &mut R {
+        &mut self.value
+    }
+
     // Return the path value of the node. The path value of a node is the accumulated product of
     // the value of the nodes from the root of the circuit to the node.
     pub fn get_path_value(&self) -> Float{

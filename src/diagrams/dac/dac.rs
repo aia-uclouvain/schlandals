@@ -501,6 +501,15 @@ impl<R> Dac<R>
         }
         None
     }
+
+    pub fn gradient_backpropagate(&self) -> bool {
+        self.nodes.last().unwrap().get_value().backpropagating_gradient()
+    }
+
+    pub fn gradient(&mut self, loss: f64) {
+        self.nodes.last_mut().unwrap().get_value_mut().gradient(loss);
+    }
+
 }
 
 // --- ITERATOR ---
