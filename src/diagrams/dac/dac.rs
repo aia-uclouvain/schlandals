@@ -33,6 +33,8 @@ use crate::solvers::*;
 
 use super::node::*;
 use rug::Float;
+use crate::Loss;
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeIndex(pub usize);
@@ -331,7 +333,7 @@ impl<R> Dac<R>
     pub fn reset_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                self[node].set_value(R::from_float(distributions[d][v]));
+                self[node].set_value(R::from_f64(distributions[d][v], true));
             }
             // All the distributions are at layer 0
             if self[node].get_layer() > 0 {
@@ -350,7 +352,7 @@ impl<R> Dac<R>
                     let propagations = self[node].get_propagation().clone();
                     let s = self.solver.as_mut().unwrap();
                     let value = s.solve_partial(&propagations);
-                    self[node].set_value(R::from_float(value));
+                    self[node].set_value(R::from_f64(value, false));
                 }
             } else {
                 match self[node].get_type() {
@@ -506,8 +508,8 @@ impl<R> Dac<R>
         self.nodes.last().unwrap().get_value().backpropagating_gradient()
     }
 
-    pub fn gradient(&mut self, loss: f64) {
-        self.nodes.last_mut().unwrap().get_value_mut().gradient(loss);
+    pub fn gradient(&mut self, loss: Loss, target: f64) {
+        self.nodes.last_mut().unwrap().get_value_mut().do_backward(loss, target);
     }
 
 }

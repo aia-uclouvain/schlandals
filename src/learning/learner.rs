@@ -285,7 +285,7 @@ impl <R, const S: bool> Learner<R, S>
     // --- Gradient computation --- //
 
     // Compute the gradient of the distributions, from the different DAC queries
-    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
+    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>, loss: Loss) {
         self.zero_grads();
         for dac_id in 0..self.dacs.len() {
             if self.dacs[dac_id].gradient_backpropagate() {
@@ -329,7 +329,17 @@ impl <R, const S: bool> Learner<R, S>
                     }
                 }
             } else {
-                self.dacs[dac_id].gradient(gradient_loss[dac_id]);
+                self.dacs[dac_id].gradient(loss, self.expected_outputs[dac_id]);
+                for node in self.dacs[dac_id].iter() {
+                    if self.dacs[dac_id][node].get_layer() > 0 {
+                        break;
+                    }
+
+                    if let TypeNode::Distribution { d, v } = self.dacs[dac_id][node].get_type() {
+                        self.gradients[d][v] += self.dacs[dac_id][node].get_value().gradient();
+                    }
+                }
+
             }
         }
     }
@@ -386,7 +396,7 @@ impl <R, const S: bool> Learner<R, S>
                 }
             } */
             (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
-            self.compute_gradients(&dac_grad);
+            self.compute_gradients(&dac_grad, loss);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
             self.log.log_epoch(&dac_loss, self.lr, self.epsilon);

@@ -135,7 +135,7 @@ impl<R> Node<R>
 
     pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
         Node {
-            value: R::from_float(probability),
+            value: R::from_f64(probability, true),
             outputs: vec![],
             inputs: FxHashSet::default(),
             typenode: TypeNode::Distribution {d: distribution, v: value},

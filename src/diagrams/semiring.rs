@@ -18,28 +18,31 @@ use rug::Float;
 use tch::Tensor;
 use crate::common::f128;
 use std::ops::{AddAssign, MulAssign};
+use crate::Loss;
+use tch::Reduction;
 
-pub trait SemiRing: AddAssign + MulAssign + Send + Sized {
-    fn one() -> Self;
-    fn zero() -> Self;
-    fn from_float(value: f64) -> Self;
+pub trait SemiRing: AddAssign + MulAssign + Send + Sized + std::fmt::Display {
+
+    fn one() -> Self {
+        Self::from_f64(1.0, false)
+    }
+
+    fn zero() -> Self {
+        Self::from_f64(0.0, false)
+    }
+
+    fn from_f64(value: f64, require_grad: bool) -> Self;
     fn to_f64(&self) -> f64;
     fn add_assign_ref(&mut self, other: &Self);
     fn mul_assign_ref(&mut self, other: &Self);
     fn backpropagating_gradient(&self) -> bool;
-    fn gradient(&mut self, loss: f64);
+    fn do_backward(&mut self, loss: Loss, target: f64);
+    fn gradient(&self) -> f64;
 }
 
 impl SemiRing for Float {
-    fn one() -> Self {
-        f128!(1.0)
-    }
 
-    fn zero() -> Self {
-        f128!(0.0)
-    }
-
-    fn from_float(value: f64) -> Self {
+    fn from_f64(value: f64, _require_grad: bool) -> Self {
         f128!(value)
     }
 
@@ -59,22 +62,20 @@ impl SemiRing for Float {
         true
     }
 
-    fn gradient(&mut self, _loss: f64) {
+    fn do_backward(&mut self, _loss: Loss, _target: f64) {
         
+    }
+
+    fn gradient(&self) -> f64 {
+        0.0
     }
 }
 
 impl SemiRing for Tensor {
-    fn one() -> Self {
-        Tensor::from_float(1.0)
-    }
 
-    fn zero() -> Self {
-        Tensor::from_float(0.0)
-    }
-
-    fn from_float(value: f64) -> Self {
-        Tensor::from_slice(&[value])
+    fn from_f64(value: f64, require_grad: bool) -> Self {
+        let t = Tensor::from_slice(&[value]);
+        t.set_requires_grad(require_grad)
     }
 
     fn to_f64(&self) -> f64 {
@@ -93,7 +94,21 @@ impl SemiRing for Tensor {
         false
     }
 
-    fn gradient(&mut self, loss: f64) {
-        self.backward();
+    fn do_backward(&mut self, loss: Loss, target: f64) {
+        let y = Self::from_f64(target, false);
+        match loss {
+            Loss::MAE => {
+                let loss = self.f_l1_loss(&y, Reduction::Mean).unwrap();
+                loss.backward();
+            },
+            Loss::MSE => {
+                let loss = self.mse_loss(&y, Reduction::Mean);
+                loss.backward();
+            },
+        };
+    }
+
+    fn gradient(&self) -> f64 {
+        self.f_grad().unwrap().f_double_value(&[0]).unwrap()
     }
 }
