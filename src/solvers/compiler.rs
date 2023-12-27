@@ -225,9 +225,7 @@ where
         let mut dac = Dac::new();
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
-            Some(_) => {
-                Some(dac)
-            }
+            Some(_) => Some(dac),
         }
     }
 

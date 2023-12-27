@@ -135,7 +135,7 @@ impl<R> Node<R>
 
     pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
         Node {
-            value: R::from_f64(probability, true),
+            value: R::from_f64(probability),
             outputs: vec![],
             inputs: FxHashSet::default(),
             typenode: TypeNode::Distribution {d: distribution, v: value},
@@ -275,7 +275,11 @@ impl<R> Node<R>
 
     /// Sets the value of the node to the given float
     pub fn set_value(&mut self, value: R){
-        self.value = value;
+        self.value = value
+    }
+
+    pub fn assign(&mut self, value: &R) {
+        self.value.set_value(value);
     }
 
     /// Sets the path value of the node to the given float

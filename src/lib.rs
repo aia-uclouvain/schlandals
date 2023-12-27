@@ -16,7 +16,9 @@
 
 use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
-use learning::*;
+use learning::learner::Learner;
+use learning::Learning;
+use learning::tensor_learner::TensorLearner;
 use diagrams::dac::dac::Dac;
 use solvers::compiler::DACCompiler;
 use sysinfo::{SystemExt, System};
@@ -108,6 +110,25 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     }
 }
 
+pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring) -> Box<dyn Learning> {
+    match semiring {
+        Semiring::Probability => {
+            if log {
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+            } else {
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+            }
+        },
+        Semiring::Tensor => {
+            if log {
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+            } else {
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+            }
+        }
+    }
+}
+
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
             log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring) {    
     // Sets the number of threads for rayon
@@ -121,7 +142,7 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    let mut learner = Learn::new(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring);
+    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring);
     learner.train(nepochs, lr, loss, timeout);
 }
 

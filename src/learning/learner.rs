@@ -23,7 +23,6 @@ use rand::SeedableRng;
 use rug::{Assign, Float};
 use rand::rngs::StdRng;
 use rand::Rng;
-use crate::common::*;
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
@@ -37,17 +36,29 @@ use crate::Loss;
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
 use crate::core::graph::DistributionIndex;
-use crate::diagrams::semiring::SemiRing;
 use rayon::prelude::*;
+use super::Learning;
+use crate::common::f128;
+
+/// Calculates the softmax (the normalized exponential) function, which is a generalization of the
+/// logistic function to multiple dimensions.
+///
+/// Takes in a vector of real numbers and normalizes it to a probability distribution such that
+/// each of the components are in the interval (0, 1) and the components add up to 1. Larger input
+/// components correspond to larger probabilities.
+/// From https://docs.rs/compute/latest/src/compute/functions/statistical.rs.html#43-46
+pub fn softmax(x: &[f64]) -> Vec<Float> {
+    let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
+    x.iter().map(|i| f128!(i.exp() / sum_exp)).collect()
+}
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DacIndex(pub usize);
 
-pub struct Learner<R, const S: bool>
-    where R: SemiRing
+pub struct Learner<const S: bool>
 {
-    dacs: Vec<Dac<R>>,
+    dacs: Vec<Dac<Float>>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     is_distribution_learned: Vec<bool>,
@@ -57,18 +68,6 @@ pub struct Learner<R, const S: bool>
     log: Logger<S>,
     outfolder: Option<PathBuf>,
     epsilon: f64,
-}
-
-/// Calculates the softmax (the normalized exponential) function, which is a generalization of the
-/// logistic function to multiple dimensions.
-///
-/// Takes in a vector of real numbers and normalizes it to a probability distribution such that
-/// each of the components are in the interval (0, 1) and the components add up to 1. Larger input
-/// components correspond to larger probabilities.
-/// From https://docs.rs/compute/latest/src/compute/functions/statistical.rs.html#43-46
-pub fn softmax(x: &[f64]) -> Vec<f64> {
-    let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
-    x.iter().map(|i| i.exp() / sum_exp).collect()
 }
 
 fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac_loss: Vec<f64>, mut dac_grad: Vec<f64>) -> (Vec<f64>, Vec<f64>) {
@@ -87,8 +86,7 @@ fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac
     (dac_loss, dac_grad)
 }
 
-impl <R, const S: bool> Learner<R, S>
-    where R: SemiRing
+impl <const S: bool> Learner<S>
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
@@ -121,6 +119,7 @@ impl <R, const S: bool> Learner<R, S>
                     // query.
                     let mut compiler = make_compiler!(input, branching, true);
                     let dac = compile!(compiler);
+                    println!("Is dac none ? {}", dac.is_some());
                     (dac, Some(compiler))
                 },
                 FileType::FDAC => {
@@ -213,16 +212,16 @@ impl <R, const S: bool> Learner<R, S>
     }
 
     // --- Getters --- //
-    fn get_softmaxed(&self, distribution: usize) -> Vec<f64> {
+    fn get_softmaxed(&self, distribution: usize) -> Vec<Float> {
         softmax(&self.unsoftmaxed_distributions[distribution])
     }
 
     pub fn get_probability(&self, distribution: usize, index: usize) -> f64 {
-        self.get_softmaxed(distribution)[index]
+        self.get_softmaxed(distribution)[index].to_f64()
     }
 
-    pub fn get_softmaxed_array(&self) -> Vec<Vec<f64>> {
-        let mut softmaxed: Vec<Vec<f64>> = vec![];
+    pub fn get_softmaxed_array(&self) -> Vec<Vec<Float>> {
+        let mut softmaxed: Vec<Vec<Float>> = vec![];
         for distribution in self.unsoftmaxed_distributions.iter() {
             softmaxed.push(softmax(distribution));
         }
@@ -245,7 +244,7 @@ impl <R, const S: bool> Learner<R, S>
         self.dacs.len()
     }
 
-    pub fn get_dac_i(&self, i: usize) -> &Dac<R> {
+    pub fn get_dac_i(&self, i: usize) -> &Dac<Float> {
         &self.dacs[i]
     }
 
@@ -276,7 +275,9 @@ impl <R, const S: bool> Learner<R, S>
             dac.reset_distributions(&softmaxed);
         }
         self.dacs.par_iter_mut().for_each(|d| {
-            d.reset(eval_approx);
+            if eval_approx {
+                d.reset_approx(eval_approx);
+            }
             d.evaluate();
         });
         self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect::<Vec<f64>>()
@@ -285,61 +286,47 @@ impl <R, const S: bool> Learner<R, S>
     // --- Gradient computation --- //
 
     // Compute the gradient of the distributions, from the different DAC queries
-    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>, loss: Loss) {
+    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
         for dac_id in 0..self.dacs.len() {
-            if self.dacs[dac_id].gradient_backpropagate() {
-                // Iterate on all nodes from the DAC, top-down way
-                for node in self.dacs[dac_id].iter_rev() {
-                    let start = self.dacs[dac_id][node].get_input_start();
-                    let end = start + self.dacs[dac_id][node].get_number_inputs();
-                    let value = self.dacs[dac_id][node].get_value().to_f64();
-                    let path_val = self.dacs[dac_id][node].get_path_value();
+            // Iterate on all nodes from the DAC, top-down way
+            for node in self.dacs[dac_id].iter_rev() {
+                let start = self.dacs[dac_id][node].get_input_start();
+                let end = start + self.dacs[dac_id][node].get_number_inputs();
+                let value = self.dacs[dac_id][node].get_value().to_f64();
+                let path_val = self.dacs[dac_id][node].get_path_value();
 
-                    // Update the path value for the children sum, product nodes 
-                    // and compute the gradient for the children leaf distributions
-                    for child_index in start..end {
-                        let child = self.dacs[dac_id].get_input_at(child_index);
-                        match self.dacs[dac_id][child].get_type() {
-                            TypeNode::Sum => {
-                                let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
-                                self.dacs[dac_id][child].set_path_value(val)
-                            },
-                            TypeNode::Product => {
-                                self.dacs[dac_id][child].set_path_value(path_val.clone());
-                            },
-                            TypeNode::Distribution { d, v } => {
-                                // Compute the gradient for children that are leaf distributions
-                                let mut factor = path_val.clone() * gradient_loss[dac_id];
-                                if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
-                                    factor *= value;
-                                    factor /= self.get_probability(d, v);
-                                }
-                                // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
-                                let mut sum_other_w = f128!(0.0);
-                                let child_w = self.get_probability(d, v);
-                                for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
-                                    let weight = self.get_probability(d, params);
-                                    self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
-                                    sum_other_w += weight.clone();
-                                }
-                                self.gradients[d][v] += factor * child_w * sum_other_w;
-                            },
-                        }
+                // Update the path value for the children sum, product nodes 
+                // and compute the gradient for the children leaf distributions
+                for child_index in start..end {
+                    let child = self.dacs[dac_id].get_input_at(child_index);
+                    match self.dacs[dac_id][child].get_type() {
+                        TypeNode::Sum => {
+                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
+                            self.dacs[dac_id][child].set_path_value(val)
+                        },
+                        TypeNode::Product => {
+                            self.dacs[dac_id][child].set_path_value(path_val.clone());
+                        },
+                        TypeNode::Distribution { d, v } => {
+                            // Compute the gradient for children that are leaf distributions
+                            let mut factor = path_val.clone() * gradient_loss[dac_id];
+                            if let TypeNode::Product = self.dacs[dac_id][node].get_type() {
+                                factor *= value;
+                                factor /= self.get_probability(d, v);
+                            }
+                            // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
+                            let mut sum_other_w = f128!(0.0);
+                            let child_w = self.get_probability(d, v);
+                            for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|p| *p != v) {
+                                let weight = self.get_probability(d, params);
+                                self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
+                                sum_other_w += weight.clone();
+                            }
+                            self.gradients[d][v] += factor * child_w * sum_other_w;
+                        },
                     }
                 }
-            } else {
-                self.dacs[dac_id].gradient(loss, self.expected_outputs[dac_id]);
-                for node in self.dacs[dac_id].iter() {
-                    if self.dacs[dac_id][node].get_layer() > 0 {
-                        break;
-                    }
-
-                    if let TypeNode::Distribution { d, v } = self.dacs[dac_id][node].get_type() {
-                        self.gradients[d][v] += self.dacs[dac_id][node].get_value().gradient();
-                    }
-                }
-
             }
         }
     }
@@ -366,8 +353,11 @@ impl <R, const S: bool> Learner<R, S>
         }
         
     }
+}
 
-    pub fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
+impl<const S: bool> Learning for Learner<S> {
+
+    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
         self.lr = init_lr;
         let lr_drop: f64 = 0.75;
         let epoch_drop = 100.0;
@@ -396,7 +386,7 @@ impl <R, const S: bool> Learner<R, S>
                 }
             } */
             (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
-            self.compute_gradients(&dac_grad, loss);
+            self.compute_gradients(&dac_grad);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
             self.log.log_epoch(&dac_loss, self.lr, self.epsilon);
@@ -432,10 +422,9 @@ impl <R, const S: bool> Learner<R, S>
 }
 
 // --- Indexing the graph with dac indexes --- //
-impl <R, const S: bool> std::ops::Index<DacIndex> for Learner<R, S> 
-    where R: SemiRing
+impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> 
 {
-    type Output = Dac<R>;
+    type Output = Dac<Float>;
 
     fn index(&self, index: DacIndex) -> &Self::Output {
         &self.dacs[index.0]
@@ -446,8 +435,7 @@ impl <R, const S: bool> std::ops::Index<DacIndex> for Learner<R, S>
 
 // TODO: Implementing Display for outputting the distributions is maybe not adequate, but need to
 // think about that
-impl <R, const S: bool> fmt::Display for Learner<R, S>
-    where R: SemiRing
+impl <const S: bool> fmt::Display for Learner<S>
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for distribution in self.expected_distribution.iter() {
@@ -457,8 +445,7 @@ impl <R, const S: bool> fmt::Display for Learner<R, S>
     }
 }
 
-impl <R, const S: bool> Learner<R, S>
-    where R: SemiRing
+impl <const S: bool> Learner<S>
 {
     pub fn to_folder(&self) {
         if let Some(f) = &self.outfolder {

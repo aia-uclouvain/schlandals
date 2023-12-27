@@ -33,8 +33,6 @@ use crate::solvers::*;
 
 use super::node::*;
 use rug::Float;
-use crate::Loss;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeIndex(pub usize);
@@ -330,10 +328,11 @@ impl<R> Dac<R>
     // --- Evaluation ---- //
 
     /// Updates the values of the distributions
-    pub fn reset_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
+    pub fn reset_distributions(&mut self, distributions: &Vec<Vec<R>>) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                self[node].set_value(R::from_f64(distributions[d][v], true));
+                let value = R::copy(&distributions[d][v]);
+                self[node].set_value(value);
             }
             // All the distributions are at layer 0
             if self[node].get_layer() > 0 {
@@ -341,24 +340,25 @@ impl<R> Dac<R>
             }
         }
         if let Some(ref mut s) = self.solver {
-            s.update_distributions(distributions);
+            let mut d_f64: Vec<Vec<f64>> = vec![];
+            for d in distributions.iter() {
+                d_f64.push(d.iter().map(|e| e.to_f64()).collect());
+            }
+            s.update_distributions(&d_f64);
         }
     }
 
-    pub fn reset(&mut self, eval_approx: bool) {
+    pub fn reset_approx(&mut self, eval_approx: bool) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
+            if self[node].get_layer() > 0 {
+                break;
+            }
             if self[node].is_node_incomplete() {
                 if eval_approx {
                     let propagations = self[node].get_propagation().clone();
                     let s = self.solver.as_mut().unwrap();
                     let value = s.solve_partial(&propagations);
-                    self[node].set_value(R::from_f64(value, false));
-                }
-            } else {
-                match self[node].get_type() {
-                    TypeNode::Product => self[node].set_value(R::one()),
-                    TypeNode::Sum => self[node].set_value(R::zero()),
-                    _ => (),
+                    self[node].set_value(R::from_f64(value));
                 }
             }
         }
@@ -376,18 +376,16 @@ impl<R> Dac<R>
             let start = self.nodes[node.0].get_input_start();
             let end = start + self.nodes[node.0].get_number_inputs();
             if self[node].is_product() {
-                let mut value = R::one();
-                for child_id in start..end {
-                    let child = self.inputs[child_id];
-                    value.mul_assign_ref(self[child].get_value())
-                }
+                let value = R::mul_children((start..end).map(|idx| {
+                    let child = self.inputs[idx];
+                    self[child].get_value()
+                }));
                 self[node].set_value(value);
             } else {
-                let mut value = R::zero();
-                for child_id in start..end {
-                    let child = self.inputs[child_id];
-                    value.add_assign_ref(self[child].get_value());
-                }
+                let value = R::sum_children((start..end).map(|idx| {
+                    let child = self.inputs[idx];
+                    self[child].get_value()
+                }));
                 self[node].set_value(value);
             }
         }
@@ -504,12 +502,8 @@ impl<R> Dac<R>
         None
     }
 
-    pub fn gradient_backpropagate(&self) -> bool {
-        self.nodes.last().unwrap().get_value().backpropagating_gradient()
-    }
-
-    pub fn gradient(&mut self, loss: Loss, target: f64) {
-        self.nodes.last_mut().unwrap().get_value_mut().do_backward(loss, target);
+    pub fn root(&self) -> &R {
+        self.nodes.last().unwrap().get_value()
     }
 
 }

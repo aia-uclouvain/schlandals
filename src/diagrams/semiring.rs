@@ -18,31 +18,31 @@ use rug::Float;
 use tch::Tensor;
 use crate::common::f128;
 use std::ops::{AddAssign, MulAssign};
-use crate::Loss;
-use tch::Reduction;
+use rug::Assign;
 
 pub trait SemiRing: AddAssign + MulAssign + Send + Sized + std::fmt::Display {
 
     fn one() -> Self {
-        Self::from_f64(1.0, false)
+        Self::from_f64(1.0)
     }
 
     fn zero() -> Self {
-        Self::from_f64(0.0, false)
+        Self::from_f64(0.0)
     }
 
-    fn from_f64(value: f64, require_grad: bool) -> Self;
+    fn from_f64(value: f64) -> Self;
     fn to_f64(&self) -> f64;
-    fn add_assign_ref(&mut self, other: &Self);
-    fn mul_assign_ref(&mut self, other: &Self);
-    fn backpropagating_gradient(&self) -> bool;
-    fn do_backward(&mut self, loss: Loss, target: f64);
-    fn gradient(&self) -> f64;
+    fn set_value(&mut self, value: &Self);
+    fn copy(from: &Self) -> Self;
+    fn sum_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self
+        where Self: 'a;
+    fn mul_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self
+        where Self: 'a;
 }
 
 impl SemiRing for Float {
 
-    fn from_f64(value: f64, _require_grad: bool) -> Self {
+    fn from_f64(value: f64) -> Self {
         f128!(value)
     }
 
@@ -50,65 +50,58 @@ impl SemiRing for Float {
         self.to_f64()
     }
 
-    fn add_assign_ref(&mut self, other: &Self) {
-        *self += other;
-    }
-    
-    fn mul_assign_ref(&mut self, other: &Self) {
-        *self *= other;
+    fn set_value(&mut self, value: &Float) {
+        self.assign(value);
     }
 
-    fn backpropagating_gradient(&self) -> bool {
-        true
+    fn copy(from: &Self) -> Self {
+        from.clone()
     }
 
-    fn do_backward(&mut self, _loss: Loss, _target: f64) {
-        
+    fn sum_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self {
+        let mut v = Self::zero();
+        for child in children {
+            v += child;
+        }
+        v
     }
 
-    fn gradient(&self) -> f64 {
-        0.0
+    fn mul_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self {
+        let mut v = Self::one();
+        for child in children {
+            v *= child;
+        }
+        v
     }
 }
 
 impl SemiRing for Tensor {
 
-    fn from_f64(value: f64, require_grad: bool) -> Self {
-        let t = Tensor::from_slice(&[value]);
-        t.set_requires_grad(require_grad)
+    fn from_f64(value: f64) -> Self {
+        Tensor::from_slice(&[value])
     }
 
     fn to_f64(&self) -> f64 {
         self.f_double_value(&[0]).unwrap()
     }
 
-    fn add_assign_ref(&mut self, other: &Self) {
-        *self += other;
+    fn set_value(&mut self, value: &Tensor) {
+        self.copy_(value);
     }
 
-    fn mul_assign_ref(&mut self, other: &Self) {
-        *self *= other;
+    fn copy(other: &Self) -> Self {
+        Tensor::copy(other)
     }
 
-    fn backpropagating_gradient(&self) -> bool {
-        false
+    fn sum_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self {
+        children.sum()
     }
 
-    fn do_backward(&mut self, loss: Loss, target: f64) {
-        let y = Self::from_f64(target, false);
-        match loss {
-            Loss::MAE => {
-                let loss = self.f_l1_loss(&y, Reduction::Mean).unwrap();
-                loss.backward();
-            },
-            Loss::MSE => {
-                let loss = self.mse_loss(&y, Reduction::Mean);
-                loss.backward();
-            },
-        };
-    }
-
-    fn gradient(&self) -> f64 {
-        self.f_grad().unwrap().f_double_value(&[0]).unwrap()
+    fn mul_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self {
+        let mut value = Self::one();
+        for child in children {
+            value *= child;
+        }
+        value
     }
 }
