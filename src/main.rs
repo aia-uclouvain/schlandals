@@ -93,8 +93,13 @@ enum Command {
         /// Number of threads to use for the evaluation of the DACs
         #[clap(long, default_value_t=1, short)]
         jobs: usize,
+        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
+        /// to compute the gradients. If `probability`, use custom efficient backpropagations
         #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
         semiring: schlandals::Semiring,
+        /// The optimizer to use if `tensor` is selected as semiring
+        #[clap(long, short, default_value_t=schlandals::Optimizer::Adam, value_enum)]
+        optimizer: schlandals::Optimizer,
     }
 }
 
@@ -114,8 +119,8 @@ fn main() {
         Command::Compile { input, branching, fdac, dotfile} => {
             schlandals::compile(input, branching, fdac, dotfile);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring} => {
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring);
+        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
+            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring, optimizer);
         }
     }
 }

@@ -73,6 +73,11 @@ pub enum Semiring {
     Tensor,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Optimizer {
+    Adam,
+    SGD,
+}
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac<Float>>{
     match type_of_input(&input) {
@@ -110,7 +115,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     }
 }
 
-pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring) -> Box<dyn Learning> {
+pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, optimizer: Optimizer) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
@@ -121,16 +126,16 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
         },
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer))
             }
         }
     }
 }
 
 pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring) {    
+            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring, optimizer: Optimizer) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -142,7 +147,7 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring);
+    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, optimizer);
     learner.train(nepochs, lr, loss, timeout);
 }
 

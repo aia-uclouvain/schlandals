@@ -30,7 +30,7 @@ use crate::parser::*;
 use crate::propagator::Propagator;
 use crate::core::components::ComponentExtractor;
 use crate::Branching;
-use crate::Loss;
+use crate::{Optimizer as OptChoice, Loss};
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
 use crate::core::graph::DistributionIndex;
@@ -40,7 +40,7 @@ use std::f64::consts::E;
 use crate::diagrams::semiring::SemiRing;
 
 use tch::{Kind, nn, Device, Tensor, IndexOp, Reduction};
-use tch::nn::{OptimizerConfig, Adam, Optimizer};
+use tch::nn::{OptimizerConfig, Adam, Sgd, Optimizer};
 
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
@@ -63,7 +63,7 @@ impl <const S: bool> TensorLearner<S>
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, optimizer: OptChoice) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
@@ -150,7 +150,10 @@ impl <const S: bool> TensorLearner<S>
             }
         }).collect::<Vec<Tensor>>();
 
-        let optimizer = Adam::default().build(&vs, 1e-4).unwrap();
+        let optimizer = match optimizer {
+            OptChoice::Adam => Adam::default().build(&vs, 1e-4).unwrap(),
+            OptChoice::SGD => Sgd::default().build(&vs, 1e-4).unwrap(),
+        };
 
         let mut s_dacs: Vec<Dac<Tensor>> = vec![];
         let mut expected: Vec<Tensor> = vec![];
