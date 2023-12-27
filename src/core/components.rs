@@ -329,6 +329,11 @@ impl ComponentExtractor {
         let end = start + self.components[component.0].number_distribution;
         self.distributions[start..end].iter().copied()
     }
+
+    /// Returns the number of distributions in the component
+    pub fn component_number_distribution(&self, component: ComponentIndex) -> usize {
+        self.components[component.0].number_distribution
+    }
     
     /// Adds a clause to a component. This function is called when the solver encounters an UNSAT and needs to learn a clause.
     /// During this process we ensure that the learned clause is horn and can be safely added in the component for further detections.

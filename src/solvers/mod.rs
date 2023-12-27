@@ -291,6 +291,14 @@ impl Compiler {
         }
     }
 
+    pub fn set_partial_mode_on(&mut self) {
+        match self {
+            Compiler::VSIDS(ref mut compiler) => compiler.set_partial(true),
+            Compiler::MinInDegree(ref mut compiler) => compiler.set_partial(true),
+            Compiler::MinOutDegree(ref mut compiler) => compiler.set_partial(true),
+            Compiler::MaxDegree(ref mut compiler) => compiler.set_partial(true),
+        }
+    }
 }
 
 macro_rules! make_compiler {

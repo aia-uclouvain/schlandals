@@ -26,7 +26,7 @@
 
 
 use rustc_hash::FxHashMap;
-use search_trail::{StateManager, SaveAndRestore, ReversibleUsize, UsizeManager};
+use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::graph::*;
@@ -56,8 +56,11 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
-    /// Current number of distributions in the branch
-    distribution_count: ReversibleUsize,
+    /// The total number of distributions that are constrained for this query
+    number_constrained_distribution: usize,
+    /// If true, allows the compiler to compile partially the diagram and run an approximate solver
+    /// to estimate the probability of the partially compiled node
+    partial: bool,
 }
 
 impl<B> DACCompiler<B>
@@ -66,13 +69,12 @@ where
 {
     pub fn new(
         graph: Graph,
-        mut state: StateManager,
+        state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: Box<B>,
         propagator: Propagator,
     ) -> Self {
         let cache = FxHashMap::default();
-        let distribution_count = state.manage_usize(0);
         Self {
             graph,
             state,
@@ -80,8 +82,13 @@ where
             branching_heuristic,
             propagator,
             cache,
-            distribution_count,
+            number_constrained_distribution: 0,
+            partial: false,
         }
+    }
+
+    pub fn set_partial(&mut self, value: bool) {
+        self.partial = value;
     }
 
     fn restore(&mut self) {
@@ -155,8 +162,12 @@ where
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 match self.cache.get(&bit_repr) {
                     None => {
-                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
-                            self.state.increment_usize(self.distribution_count);
+                        let number_distribution_component = self.component_extractor.component_number_distribution(sub_component);
+                        let ratio_distrib = (self.number_constrained_distribution - number_distribution_component) as f64 / level as f64;
+                        let should_approximate = self.partial && level >= (0.25 * self.number_constrained_distribution as f64) as isize && ratio_distrib <= 2.0;
+                        let branching = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component);
+                        if !should_approximate && branching.is_some() {
+                            let distribution = branching.unwrap();
                             if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
                                 sum_children.push(child);
                                 self.cache.insert(bit_repr, Some(child));
@@ -221,6 +232,7 @@ where
         if preproc.is_none() {
             return None;
         }
+        self.number_constrained_distribution = self.graph.distributions_iter().filter(|d| self.graph[*d].is_constrained(&self.state)).count();
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
