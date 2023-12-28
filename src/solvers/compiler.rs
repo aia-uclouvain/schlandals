@@ -36,7 +36,6 @@ use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
 use crate::diagrams::dac::dac::{NodeIndex, Dac};
-use std::ops::{AddAssign, MulAssign};
 
 /// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
 /// and has a constant parameter that tells if statistics must be recorded or not.
@@ -56,8 +55,6 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
-    /// The total number of distributions that are constrained for this query
-    number_constrained_distribution: usize,
     /// If true, allows the compiler to compile partially the diagram and run an approximate solver
     /// to estimate the probability of the partially compiled node
     partial: bool,
@@ -82,7 +79,6 @@ where
             branching_heuristic,
             propagator,
             cache,
-            number_constrained_distribution: 0,
             partial: false,
         }
     }
@@ -96,8 +92,8 @@ where
         self.state.restore_state();
     }
 
-    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> 
-        where R: SemiRing + AddAssign + MulAssign + Send
+    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize, number_constrained_distribution: usize) -> Option<NodeIndex> 
+        where R: SemiRing
     {
 
         let mut children: Vec<NodeIndex> = vec![];
@@ -106,7 +102,7 @@ where
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, number_constrained_distribution) {
                         children.push(child);
                     }
                 }
@@ -124,8 +120,8 @@ where
         }
     }
     
-    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize) -> Option<NodeIndex>
-        where R: SemiRing + AddAssign + MulAssign + Send
+    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, number_constrained_distribution: usize) -> Option<NodeIndex>
+        where R: SemiRing
     {        
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
@@ -158,16 +154,18 @@ where
         };
         let mut sum_children: Vec<NodeIndex> = vec![];
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
+            let distributions_in_components = self.component_extractor.components_iter(&self.state).map(|c| self.component_extractor.component_number_distribution(c)).sum::<usize>();
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 if !self.cache.contains_key(&bit_repr) {
+                    let distribution_in_branches = number_constrained_distribution - distributions_in_components + self.component_extractor.component_number_distribution(sub_component);
                     let number_distribution_component = self.component_extractor.component_number_distribution(sub_component);
-                    let ratio_distrib = (self.number_constrained_distribution - number_distribution_component) as f64 / level as f64;
-                    let should_approximate = self.partial && level >= (0.25 * self.number_constrained_distribution as f64) as isize && ratio_distrib <= 2.0;
+                    let ratio_distrib = (distribution_in_branches - number_distribution_component) as f64 / level as f64;
+                    let should_approximate = self.partial && level >= (0.1 * distribution_in_branches as f64) as isize && ratio_distrib <= 2.0;
                     let branching = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component);
                     if !should_approximate && branching.is_some() {
                         let distribution = branching.unwrap();
-                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
+                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, distribution_in_branches) {
                             sum_children.push(child);
                             self.cache.insert(bit_repr, Some(child));
                         } else {
@@ -219,7 +217,7 @@ where
     }
 
     pub fn compile<R>(&mut self) -> Option<Dac<R>>
-        where R: SemiRing + AddAssign + MulAssign + Send
+        where R: SemiRing
     {
 
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
@@ -234,17 +232,17 @@ where
         if preproc.is_none() {
             return None;
         }
-        self.number_constrained_distribution = self.graph.distributions_iter().filter(|d| self.graph[*d].is_constrained(&self.state)).count();
+        let number_constrained_distribution = self.graph.distributions_iter().filter(|d| self.graph[*d].is_constrained(&self.state)).count();
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, number_constrained_distribution) {
             None => None,
             Some(_) => Some(dac),
         }
     }
 
     pub fn extend_partial_node_with<R>(&mut self, node: NodeIndex, dac: &mut Dac<R>, distribution: DistributionIndex)
-        where R: SemiRing + AddAssign + MulAssign + Send
+        where R: SemiRing
     {
         debug_assert!(dac[node].is_sum());
         self.state.save_state();
@@ -260,7 +258,7 @@ where
                     match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 1) {
                         Err(_) => { },
                         Ok(_) => {
-                            if let Some(child) = self.expand_prod_node(dac, ComponentIndex(0), 2) {
+                            if let Some(child) = self.expand_prod_node(dac, ComponentIndex(0), 2, 0) {
                                 children.push(child);
                             }
                         }
