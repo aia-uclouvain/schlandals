@@ -16,6 +16,7 @@
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::process;
 
 
 #[derive(Debug, Parser)]
@@ -120,6 +121,10 @@ fn main() {
             schlandals::compile(input, branching, fdac, dotfile);
         },
         Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
+            if do_log && outfolder.is_none() {
+                eprintln!("Error: if do-log is set, then outfolder should be specified");
+                process::exit(1);
+            }
             schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring, optimizer);
         }
     }

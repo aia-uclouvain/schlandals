@@ -122,7 +122,6 @@ impl <const S: bool> Learner<S>
                         compiler.set_partial_mode_on();
                     }
                     let dac = compile!(compiler);
-                    println!("Is dac none ? {}", dac.is_some());
                     (dac, Some(compiler))
                 },
                 FileType::FDAC => {

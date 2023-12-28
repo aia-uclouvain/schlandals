@@ -238,6 +238,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
 
     fn train(&mut self, nepochs:usize, _init_lr:f64, loss: Loss, timeout:i64,) {
         self.log.start();
+        let mut dac_loss = vec![0.0; self.dacs.len()];
         let start = chrono::Local::now();
         let eval_approx_freq = 500;
         for e in 0..nepochs {
@@ -246,18 +247,21 @@ impl<const S: bool> Learning for TensorLearner<S> {
             self.evaluate(e % eval_approx_freq == 0);
             if do_print {
                 for i in 0..self.dacs.len() {
-                    println!("{} {}", i, self.dacs[i].root().to_f64());
+                    println!("{} {} {}", i, self.dacs[i].root().to_f64(), self.expected_outputs[i].to_f64());
                 }
             }
-            let mut loss_epoch = Tensor::from_slice(&[0.0]);
+            let mut loss_epoch = Tensor::from(0.0);
             for i in 0..self.dacs.len() {
-                match loss {
-                    Loss::MAE => loss_epoch += self.dacs[i].root().l1_loss(&self.expected_outputs[i], Reduction::Mean),
-                    Loss::MSE => loss_epoch += self.dacs[i].root().mse_loss(&self.expected_outputs[i], Reduction::Mean),
+                let loss_i = match loss {
+                    Loss::MAE => self.dacs[i].root().l1_loss(&self.expected_outputs[i], Reduction::Mean),
+                    Loss::MSE => self.dacs[i].root().mse_loss(&self.expected_outputs[i], Reduction::Mean),
                 };
+                dac_loss[i] = loss_i.to_f64();
+                loss_epoch += loss_i;
             }
             loss_epoch /= self.dacs.len() as f64;
             self.optimizer.backward_step(&loss_epoch);
+            self.log.log_epoch(&dac_loss, 0.0, self.epsilon);
         }
     }
 }

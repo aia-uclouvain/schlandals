@@ -78,11 +78,11 @@ impl SemiRing for Float {
 impl SemiRing for Tensor {
 
     fn from_f64(value: f64) -> Self {
-        Tensor::from_slice(&[value])
+        Tensor::from(value)
     }
 
     fn to_f64(&self) -> f64 {
-        self.f_double_value(&[0]).unwrap()
+        self.f_double_value(&[]).unwrap()
     }
 
     fn set_value(&mut self, value: &Tensor) {
