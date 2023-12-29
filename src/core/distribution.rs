@@ -71,7 +71,7 @@ impl Distribution {
     pub fn decrement_constrained(&self, state: &mut StateManager) -> usize {
         self.number_clause - state.increment_usize(self.number_clause_unconstrained)
     }
-    
+
     /// Icrements the number of variable assigned to false in the distribution. This operation
     /// is reversed when the trail restore its state.
     pub fn increment_number_false(&self, state: &mut StateManager) -> usize {

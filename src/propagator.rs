@@ -228,11 +228,11 @@ impl Propagator {
             
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence() {
-                    g[clause].set_unconstrained(state);
+                    g.set_clause_unconstrained(clause, state);
                 }
             } else {
                 for clause in g[variable].iter_clauses_negative_occurence() {
-                    g[clause].set_unconstrained(state);
+                    g.set_clause_unconstrained(clause, state);
                 }
             }
             

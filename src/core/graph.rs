@@ -198,14 +198,16 @@ impl Graph {
             } else {
                 self[variable].add_clause_negative_occurence(cid);
                 if !is_learned {
-                for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
-                    clause.add_parent(parent, state);
-                    self[parent].add_child(cid, state);
+                    for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                        clause.add_parent(parent, state);
+                        self[parent].add_child(cid, state);
+                    }
                 }
             }
-            }
             if let Some(distribution) = self[literal.to_variable()].distribution() {
-                self[distribution].increment_clause();
+                if !is_learned {
+                    self[distribution].increment_clause();
+                }
             }
         }
         self.clauses.push(clause);

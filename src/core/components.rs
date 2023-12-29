@@ -313,6 +313,12 @@ impl ComponentExtractor {
         let end = start + self.components[component.0].size;
         self.clauses[start..end].iter().copied()
     }
+
+    pub fn find_constrained_distribution(&self, component: ComponentIndex, graph: &Graph, state: &StateManager) -> bool {
+        let start = self.components[component.0].start;
+        let end = start + self.components[component.0].size;
+        self.clauses[start..end].iter().copied().find(|c| graph[*c].is_constrained(state) && !graph[*c].is_learned() && graph[*c].has_probabilistic(state)).is_some()
+    }
     
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {

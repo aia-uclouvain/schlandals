@@ -174,8 +174,8 @@ where
                             sum_children.clear();
                             break;
                         }
-                    } else {
-                        if self.component_extractor.component_distribution_iter(sub_component).find(|d| self.graph[*d].is_constrained(&self.state)).is_some() {
+                    } else{
+                        if self.component_extractor.find_constrained_distribution(sub_component, &self.graph, &self.state) {
                             let child = dac.add_sum_node();
                             for (variable, value) in  self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| self.graph[*l].is_probabilitic() && self.graph[*l].reason(&self.state).is_none()) {
                                 dac[child].add_to_propagation(variable, value);
@@ -222,11 +222,6 @@ where
 
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
-        /* let mut probabilities: Vec<Vec<f64>>= vec![];
-        for distribution in self.graph.distributions_iter() {
-            let proba: Vec<f64>= self.graph[distribution].iter_variables().map(|v|self.graph[v].weight().unwrap()).collect();
-            probabilities.push(proba);
-        } */
         self.propagator.init(self.graph.number_clauses());
         let preproc = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor).preprocess(false);
         if preproc.is_none() {
