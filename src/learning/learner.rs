@@ -94,7 +94,7 @@ impl <const S: bool> Learner<S>
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
-        println!("distributions {:?}", distributions);
+        //println!("distributions {:?}", distributions);
         // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
@@ -208,7 +208,7 @@ impl <const S: bool> Learner<S>
         // Send the randomized distributions to the solvers
         learner.update_distributions();
 
-        println!("is_distrib_learned {:?}", learner.is_distribution_learned);
+        //println!("is_distrib_learned {:?}", learner.is_distribution_learned);
         learner.to_folder();
         learner
     }
@@ -450,7 +450,7 @@ impl <const S: bool> fmt::Display for Learner<S>
 impl <const S: bool> Learner<S>
 {
     pub fn to_folder(&self) {
-        if let Some(f) = &self.outfolder {
+        /*if let Some(f) = &self.outfolder {
             let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
             match outfile.write(format!("{}", self).as_bytes()) {
                 Ok(_) => (),
@@ -462,6 +462,6 @@ impl <const S: bool> Learner<S>
                     panic!("Could not write dac {} into file: {}", i, e);
                 }
             }
-        }
+        }*/
     }
 }

@@ -57,6 +57,7 @@ pub struct TensorLearner<const S: bool>
     outfolder: Option<PathBuf>,
     epsilon: f64,
     optimizer: Optimizer,
+    lr: f64,
 }
 
 impl <const S: bool> TensorLearner<S>
@@ -179,6 +180,7 @@ impl <const S: bool> TensorLearner<S>
             outfolder,
             epsilon,
             optimizer,
+            lr: 0.0,
         };
 
         learner.to_folder();
@@ -236,14 +238,27 @@ impl <const S: bool> TensorLearner<S>
 
 impl<const S: bool> Learning for TensorLearner<S> {
 
-    fn train(&mut self, nepochs:usize, _init_lr:f64, loss: Loss, timeout:i64,) {
-        self.log.start();
-        let mut dac_loss = vec![0.0; self.dacs.len()];
-        let start = chrono::Local::now();
+    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
+        self.lr = init_lr;
+        self.optimizer.set_lr(self.lr);
+        let lr_drop: f64 = 0.75;
+        let epoch_drop = 100.0;
+        let stopping_criterion = 0.0001;
+        let mut prev_loss = 1.0;
+        let delta_early_stop = 0.00001;
         let eval_approx_freq = 500;
+        let mut count_no_improve = 0;
+        let patience = 5;
+        self.log.start();
+        let start = chrono::Local::now();
+
+        let mut dac_loss = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
             let do_print = e % 500 == 0;
+            self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
+            self.optimizer.set_lr(self.lr);
+            if do_print{println!("\nEpoch {} lr {}", e, self.lr);}
             self.evaluate(e % eval_approx_freq == 0);
             if do_print {
                 for i in 0..self.dacs.len() {
@@ -262,6 +277,37 @@ impl<const S: bool> Learning for TensorLearner<S> {
             loss_epoch /= self.dacs.len() as f64;
             self.optimizer.backward_step(&loss_epoch);
             self.log.log_epoch(&dac_loss, 0.0, self.epsilon);
+            let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+            if (avg_loss-prev_loss).abs()<delta_early_stop {
+                count_no_improve += 1;
+            }
+            else {
+                count_no_improve = 0;
+            }
+            if (avg_loss < stopping_criterion) || count_no_improve>=patience {
+                // TODO: Before we checked if the learned ratio was < 1.0 and launched only in that
+                // case the additional evaluation. Should probabily do something of the like with
+                // the cut-off nodes int he DACs?
+                self.evaluate(true);
+                let mut loss_epoch = Tensor::from(0.0);
+                for i in 0..self.dacs.len() {
+                    let loss_i = match loss {
+                        Loss::MAE => self.dacs[i].root().l1_loss(&self.expected_outputs[i], Reduction::Mean),
+                        Loss::MSE => self.dacs[i].root().mse_loss(&self.expected_outputs[i], Reduction::Mean),
+                    };
+                    dac_loss[i] = loss_i.to_f64();
+                    loss_epoch += loss_i;
+                }
+                avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+                if (avg_loss-prev_loss).abs()>delta_early_stop {
+                    count_no_improve = 0;
+                }
+                if avg_loss < stopping_criterion || count_no_improve>=patience{
+                    println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                    break;
+                }
+            }
+            prev_loss = avg_loss;
         }
     }
 }
@@ -293,7 +339,7 @@ impl <const S: bool> fmt::Display for TensorLearner<S>
 impl <const S: bool> TensorLearner<S>
 {
     pub fn to_folder(&self) {
-        if let Some(f) = &self.outfolder {
+        /*if let Some(f) = &self.outfolder {
             let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
             match outfile.write(format!("{}", self).as_bytes()) {
                 Ok(_) => (),
@@ -305,6 +351,6 @@ impl <const S: bool> TensorLearner<S>
                     panic!("Could not write dac {} into file: {}", i, e);
                 }
             }
-        }
+        }*/
     }
 }
