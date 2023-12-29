@@ -144,7 +144,7 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
     for line in reader.lines().skip(1) {
         let l = line.unwrap();
         let mut split = l.split(",");
-        inputs.push(trainfile.parent().unwrap().join(split.next().unwrap().parse::<PathBuf>().unwrap()));
+        inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
     let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, optimizer);
