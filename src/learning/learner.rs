@@ -19,10 +19,7 @@ use std::path::PathBuf;
 use std::fs::File;
 
 use std::io::{self, Write};
-use rand::SeedableRng;
 use rug::{Assign, Float};
-use rand::rngs::StdRng;
-use rand::Rng;
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
@@ -98,13 +95,8 @@ impl <const S: bool> Learner<S>
         // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
-        let mut rand_init: Vec<Vec<f64>> = vec![];
-        let mut rand_gen = StdRng::seed_from_u64(18);
         for distribution in distributions.iter() {
-            // Computing a random initial value in case the distribution must be learned
-            let random_probabilities = (0..distribution.len()).map(|_| rand_gen.gen::<f64>().log(std::f64::consts::E)).collect::<Vec<f64>>();
             let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
-            rand_init.push(random_probabilities);
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
@@ -160,7 +152,6 @@ impl <const S: bool> Learner<S>
             if let Some(dac) = dac_opt.as_ref() {
                 for (d, _) in dac.distribution_mapping.keys() {
                     learner.is_distribution_learned[d.0] = true;
-                    learner.unsoftmaxed_distributions[d.0] = rand_init[d.0].clone();
                 }
             }
         }
@@ -180,7 +171,6 @@ impl <const S: bool> Learner<S>
                         compiler.extend_partial_node_with(partial_node, dac, distribution);
                         dac_id = (dac_id + 1) % dacs.len();
                         learner.is_distribution_learned[distribution.0] = true;
-                        learner.unsoftmaxed_distributions[distribution.0] = rand_init[distribution.0].clone();
                         break;
                     }
                 }
@@ -205,7 +195,7 @@ impl <const S: bool> Learner<S>
         }
 
 
-        // Send the randomized distributions to the solvers
+        // Send the initail distributions to the solvers
         learner.update_distributions();
 
         //println!("is_distrib_learned {:?}", learner.is_distribution_learned);
@@ -411,6 +401,7 @@ impl<const S: bool> Learning for Learner<S> {
                 }
                 if avg_loss < stopping_criterion || count_no_improve>=patience{
                     println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                    self.training_to_file();
                     break;
                 }
             }

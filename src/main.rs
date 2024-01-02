@@ -76,7 +76,7 @@ enum Command {
         #[clap(short, long, default_value_t=0.3)]
         lr: f64,
         /// Number of epochs
-        #[clap(long, default_value_t=2000)]
+        #[clap(long, default_value_t=6000)]
         nepochs: usize,
         /// If present, save a detailled csv of the training and use a codified output filename
         #[clap(long, short, action)]
@@ -99,7 +99,7 @@ enum Command {
         #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
         semiring: schlandals::Semiring,
         /// The optimizer to use if `tensor` is selected as semiring
-        #[clap(long, short, default_value_t=schlandals::Optimizer::Adam, value_enum)]
+        #[clap(long, short, default_value_t=schlandals::Optimizer::SGD, value_enum)]
         optimizer: schlandals::Optimizer,
     }
 }

@@ -17,11 +17,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::fs::File;
-
 use std::io::Write;
-use rand::SeedableRng;
-use rand::rngs::StdRng;
-use rand::Rng;
 use crate::diagrams::dac::dac::*;
 use super::logger::Logger;
 use search_trail::StateManager;
@@ -68,7 +64,6 @@ impl <const S: bool> TensorLearner<S>
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
-        println!("distributions {:?}", distributions);
         let mut dacs = inputs.par_iter().map(|input| {
             // We compile the input. This can either be a .cnf file or a fdac file.
             // If the file is a fdac file, then we read directly from it
@@ -142,16 +137,9 @@ impl <const S: bool> TensorLearner<S>
 
         let vs = nn::VarStore::new(Device::Cpu);
         let root = vs.root();
-        let mut rand_gen = StdRng::seed_from_u64(18);
-        let distribution_tensors = is_distribution_learned.iter().copied().enumerate().map(|(i, learned)| {
-            if learned {
-                let random_distribution = (0..distributions[i].len()).map(|_| rand_gen.gen::<f64>().log(E)).collect::<Vec<f64>>();
-                let t = Tensor::from_slice(&random_distribution).set_requires_grad(true);
-                root.var_copy(&format!("Distribution {}", i+1), &t)
-            } else {
-                let t = Tensor::from_slice(&distributions[i].iter().map(|d| d.log(E)).collect::<Vec<f64>>());
-                root.var_copy(&format!("Distribution {}", i+1), &t)
-            }
+        let distribution_tensors = distributions.iter().enumerate().map(|(i, distribution)| {
+            let t = Tensor::from_slice(&distribution.iter().map(|d| d.log(E)).collect::<Vec<f64>>());
+            root.var_copy(&format!("Distribution {}", i+1), &t)
         }).collect::<Vec<Tensor>>();
 
         let optimizer = match optimizer {
