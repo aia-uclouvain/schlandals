@@ -243,7 +243,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
         let mut dac_loss = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 500 == 0;
+            let do_print = e % 1000 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             self.optimizer.set_lr(self.lr);
             if do_print{println!("\nEpoch {} lr {}", e, self.lr);}
@@ -262,7 +262,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
                 dac_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;
             }
-            loss_epoch /= self.dacs.len() as f64;
+            //loss_epoch /= self.dacs.len() as f64;
             self.optimizer.backward_step(&loss_epoch);
             self.log.log_epoch(&dac_loss, 0.0, self.epsilon);
             let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;

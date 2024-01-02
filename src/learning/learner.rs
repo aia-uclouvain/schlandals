@@ -330,21 +330,6 @@ impl <const S: bool> Learner<S>
             }
         }
     }
-
-    // --- Training --- //
-    fn training_to_file(& self) {
-        let mut out_writer = match &self.outfolder {
-            Some(x) => {
-                Box::new(File::create(x.join(format!("learn_e{}.out", self.epsilon))).unwrap()) as Box<dyn Write>
-            }
-            None => Box::new(io::stdout()) as Box<dyn Write>,
-        };
-        writeln!(out_writer, "Obtained distributions:").unwrap();
-        for i in 0..self.unsoftmaxed_distributions.len() {
-            writeln!(out_writer, "Distribution {}: {:?}", i, self.get_softmaxed(i)).unwrap();
-        }
-        
-    }
 }
 
 impl<const S: bool> Learning for Learner<S> {
@@ -366,7 +351,7 @@ impl<const S: bool> Learning for Learner<S> {
         let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 500 == 0;
+            let do_print = e % 1000 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
             let predictions = self.evaluate(e % eval_approx_freq == 0);
@@ -401,7 +386,6 @@ impl<const S: bool> Learning for Learner<S> {
                 }
                 if avg_loss < stopping_criterion || count_no_improve>=patience{
                     println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
-                    self.training_to_file();
                     break;
                 }
             }
@@ -409,8 +393,6 @@ impl<const S: bool> Learning for Learner<S> {
             dac_loss.fill(0.0);
             dac_grad.fill(0.0);
         }
-
-        self.training_to_file();
     }
 }
 
