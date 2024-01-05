@@ -24,7 +24,8 @@
 //! It is also responsible for updating the cache and clearing it when the memory limit is reached.
 //! Finally it save and restore the states of the reversible variables used in the solver.
 
-use rustc_hash::FxHashMap;
+use rand::distributions;
+use rustc_hash::{FxHashMap, FxHashSet};
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
@@ -345,6 +346,37 @@ where
     pub fn reset_cache(&mut self) {
         self.cache.clear();
         self.cache.shrink_to_fit();
+    }
+
+    pub fn solve_partial(&mut self, propagations: &Vec<(VariableIndex, bool)>, clauses: &Vec<ClauseIndex>) -> f64 {
+        self.state.save_state();
+        let comp = self.component_extractor.create_component_from(clauses, &mut self.state);
+        self.add_to_propagation_stack(propagations);
+        let mut p = f128!(1.0);
+        match self.propagator.propagate(&mut self.graph, &mut self.state, comp, &mut self.component_extractor, 0, false) {
+            Err(_) => {
+                self.restore();
+                return 0.0
+            },
+            Ok(_) => {
+                p *= self.propagator.get_propagation_prob();
+            }
+        };
+        let mut distributions: FxHashSet<DistributionIndex> = FxHashSet::default();
+        for clause in self.component_extractor.component_iter(comp){
+            for v in self.graph[clause].iter_variables() {
+                if self.graph[v].is_probabilitic() && !self.graph[v].is_fixed(&self.state) {
+                    distributions.insert(self.graph[v].distribution().unwrap());
+                }
+            }
+        }
+        self.component_extractor.create_distribution_from(comp, distributions.iter().copied());
+        let (solution, _) = self._solve(comp, 1, (1.0 + self.epsilon).powf(2.0));
+        let ub: Float = 1.0 - (&self.preproc_out + solution.1.clone()*&self.preproc_in) / &self.prefix_factor;
+        let lb: Float = (self.preproc_in.clone() * solution.0) / &self.prefix_factor;
+        let proba: Float = (ub*lb).sqrt();
+        self.restore();
+        proba.to_f64()
     }
 
     #[inline]

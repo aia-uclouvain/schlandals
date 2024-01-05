@@ -104,7 +104,7 @@ impl Propagator {
     pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
         g[variable].set_reason(None, state);
         self.add_to_propagation_stack(variable, value, None);
-        self.propagate(g, state, component, extractor, level)
+        self.propagate(g, state, component, extractor, level, false)
     }
     
     /// Adds a clause to be processed as unconstrained
@@ -199,13 +199,15 @@ impl Propagator {
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, skip_additional: bool) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
         self.propagation_prob.assign(1.0);
-        
         while let Some((variable, value, reason)) = self.propagation_stack.pop() {
+            g[variable].set_assignment_position(self.assignments.len(), state);
+            self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
+            self.lit_flags.push(LitFlags::new());
             if let Some(v) = g[variable].value(state) {
                 if v == value {
                     continue;
@@ -221,9 +223,6 @@ impl Propagator {
                 extractor.add_clause_to_component(component, clause);
                 return PropagationResult::Err(backjump);
             }
-            g[variable].set_assignment_position(self.assignments.len(), state);
-            self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
-            self.lit_flags.push(LitFlags::new());
             g.set_variable(variable, value, level, reason, state);
             
             if value {
@@ -268,14 +267,15 @@ impl Propagator {
                 }
             }
         }
-
-        self.set_reachability(g, state, component, extractor);
-        for clause in extractor.component_iter(component) {
-            if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
-                self.add_unconstrained_clause(clause, g, state);
+        if !skip_additional{
+            self.set_reachability(g, state, component, extractor);
+            for clause in extractor.component_iter(component) {
+                if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
+                    self.add_unconstrained_clause(clause, g, state);
+                }
             }
+            self.propagate_unconstrained_clauses(g, state);
         }
-        self.propagate_unconstrained_clauses(g, state);
         PropagationResult::Ok(())
     }
 
@@ -519,7 +519,7 @@ impl Propagator {
     }
 
     pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
-        self.assignments.iter().skip(self.forced).copied()
+        self.assignments.iter().copied()
     }
 }
 

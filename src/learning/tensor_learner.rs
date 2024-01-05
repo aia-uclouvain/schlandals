@@ -88,6 +88,7 @@ impl <const S: bool> TensorLearner<S>
             };
             // We handle the compiled circuit, if present.
             if let Some(ref mut dac) = d.0.as_mut() {
+                dac.remove_dead_ends();
                 if dac.has_cutoff_nodes() {
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
@@ -100,45 +101,10 @@ impl <const S: bool> TensorLearner<S>
         }).collect::<Vec<_>>();
         let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.0.is_some()).count());
 
-        let mut is_distribution_learned = vec![false; distributions.len()];
-
-        for (dac_opt, _) in dacs.iter() {
-            if let Some(dac) = dac_opt.as_ref() {
-                for (d, _) in dac.distribution_mapping.keys() {
-                    is_distribution_learned[d.0] = true;
-                }
-            }
-        }
-
-        let mut dac_id = 0;
-        for distribution in (0..is_distribution_learned.len()).map(DistributionIndex) {
-            if is_distribution_learned[distribution.0] {
-                continue;
-            }
-            // We must learn the distribution, we try to insert it into a dac
-            let end = dac_id;
-            loop {
-                let (ref mut dac_opt, ref mut compiler_opt) = &mut dacs[dac_id];
-                if let Some(dac) = dac_opt {
-                    if let Some(partial_node) = dac.has_partial_node_with_distribution(distribution) {
-                        let compiler = compiler_opt.as_mut().unwrap();
-                        compiler.extend_partial_node_with(partial_node, dac, distribution);
-                        dac_id = (dac_id + 1) % dacs.len();
-                        is_distribution_learned[distribution.0] = true;
-                        break;
-                    }
-                }
-                dac_id = (dac_id + 1) % dacs.len();
-                if dac_id == end {
-                    break;
-                }
-            }
-        }
-
         let vs = nn::VarStore::new(Device::Cpu);
         let root = vs.root();
         let distribution_tensors = distributions.iter().enumerate().map(|(i, distribution)| {
-            let t = Tensor::from_slice(&distribution.iter().map(|d| d.log(E)).collect::<Vec<f64>>());
+            let t = Tensor::from_slice(&distribution.iter().map(|d| d.log(E)).collect::<Vec<f64>>()).requires_grad_(true);
             root.var_copy(&format!("Distribution {}", i+1), &t)
         }).collect::<Vec<Tensor>>();
 
@@ -150,9 +116,12 @@ impl <const S: bool> TensorLearner<S>
         let mut s_dacs: Vec<Dac<Tensor>> = vec![];
         let mut expected: Vec<Tensor> = vec![];
         while dacs.len() > 0 {
-            let (dac, _) = dacs.pop().unwrap();
+            let (dac, compiler) = dacs.pop().unwrap();
             let proba = expected_outputs.pop().unwrap();
             if let Some(mut d) = dac {
+                if let Some(mut comp) = compiler {
+                    comp.tag_unsat_partial_nodes(&mut d);
+                }
                 d.optimize_structure();
                 s_dacs.push(d);
                 expected.push(Tensor::from_f64(proba));

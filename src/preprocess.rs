@@ -69,10 +69,10 @@ where
         for clause in self.graph.clauses_iter() {
             if self.graph[clause].is_unit(self.state) {
                 let l = self.graph[clause].get_unit_assigment(self.state);
-                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), Some(Reason::Clause(clause)));
+                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), None);
             }
         }
-        match self.propagator.propagate(self.graph, self.state, ComponentIndex(0), self.component_extractor, 0) {
+        match self.propagator.propagate(self.graph, self.state, ComponentIndex(0), self.component_extractor, 0, false) {
             Err(_) => return None,
             Ok(_) => {
                 p *= self.propagator.get_propagation_prob();
@@ -84,7 +84,7 @@ where
                 self.propagator.add_to_propagation_stack(variable, value, None);
             }
             if !backbone.is_empty() {
-                self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0).unwrap();
+                self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, false).unwrap();
                 p *= self.propagator.get_propagation_prob().clone();
             }
         }

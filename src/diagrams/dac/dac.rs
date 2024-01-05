@@ -25,7 +25,9 @@
 //! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
 
 use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
+use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
+use bitvec::prelude::*;
 
 use crate::core::graph::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
@@ -63,6 +65,9 @@ pub struct Dac<R>
     pub distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
     /// An optional solver to evaluate nodes that have been cut due to partial compilation
     solver: Option<Solver>,
+    root: Option<NodeIndex>,
+    partial_nodes: Vec<NodeIndex>,
+    used_distributions: BitVec,
 }
 
 impl<R> Dac<R>
@@ -77,6 +82,9 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             solver: None,
+            root: None,
+            partial_nodes: vec![],
+            used_distributions: BitVec::new(),
         }
     }
 
@@ -232,7 +240,7 @@ impl<R> Dac<R>
     /// input) to the root of the DAC as to be removed.
     pub fn remove_dead_ends(&mut self) {
         let mut to_process: Vec<NodeIndex> = vec![];
-        to_process.push(NodeIndex(self.nodes.len()-1));
+        to_process.push(self.root.unwrap());
         while let Some(node) = to_process.pop() {
             if !self[node].is_to_remove() {
                 continue;
@@ -244,8 +252,43 @@ impl<R> Dac<R>
                 }
             }
         }
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            if self[node].is_node_incomplete() && self[node].is_unsat() {
+                self[node].set_to_remove(true);
+                for parent in self[node].iter_output() {
+                    to_process.push(self[node].get_output_at(parent));
+                }
+            }
+        }
+        while let Some(node) = to_process.pop() {
+            if self[node].is_to_remove() {
+                continue;
+            }
+            // If it is a sum, it must be removed only if it has at least one input that is not to be removed
+            if self[node].is_sum(){
+                let mut to_remove: bool = true;
+                for child in self[node].iter_input() {
+                    if !self[child].is_to_remove() {
+                        to_remove = false;
+                        break;
+                    }
+                }
+                if to_remove {
+                    self[node].set_to_remove(true);
+                    for parent in self[node].iter_output() {
+                        to_process.push(self[node].get_output_at(parent));
+                    }
+                }
+            }
+            // If it is a product, the unsat property is propagated to the parent, and the node is removed
+            else if self[node].is_product() {
+                self[node].set_to_remove(true);
+                for parent in self[node].iter_output() {
+                    to_process.push(self[node].get_output_at(parent));
+                }
+            }
+        }
     }
-    
     /// A node is said to be neutral if it is not to be removed, has only one input, and is not the root of the DAC.
     /// In such case it can be bypass (it does not change its input)
     fn is_neutral(&self, node: NodeIndex) -> bool {
@@ -356,8 +399,9 @@ impl<R> Dac<R>
             if self[node].is_node_incomplete() {
                 if eval_approx {
                     let propagations = self[node].get_propagation().clone();
+                    let clauses = self[node].get_clauses().clone();
                     let s = self.solver.as_mut().unwrap();
-                    let value = s.solve_partial(&propagations);
+                    let value = s.solve_partial(&propagations, &clauses);
                     self[node].set_value(R::from_f64(value));
                 }
             }
@@ -414,6 +458,14 @@ impl<R> Dac<R>
     pub fn get_output_at(&self, index: usize) -> NodeIndex {
         self.outputs[index]
     }
+
+    pub fn number_partial_nodes(&self) -> usize {
+        self.partial_nodes.len()
+    }
+
+    pub fn get_partial_node_at(&self, index: usize) -> NodeIndex {
+        self.partial_nodes[index]
+    }
     
     // Retruns, for a given distribution index and its value, the corresponding node index in the dac
     pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
@@ -463,6 +515,30 @@ impl<R> Dac<R>
         cnt
     }
 
+    pub fn set_root(&mut self, root: NodeIndex) {
+        self.root = Some(root);
+    }
+
+    pub fn add_to_partial_list(&mut self, node: NodeIndex) {
+        self.partial_nodes.push(node);
+    }
+
+    pub fn remove_partial_node(&mut self, node: NodeIndex) {
+        let idx = self.partial_nodes.iter().position(|x| *x == node).unwrap();
+        self.partial_nodes.swap_remove(idx);
+        self[node].clear_incomplete();
+    }
+
+    pub fn set_number_used_distributions(&mut self, number: usize) {
+        self.used_distributions.resize(number, false);
+    }
+    pub fn set_used_distribution(&mut self, distribution: DistributionIndex) {
+        *self.used_distributions.get_mut(distribution.0).unwrap() = true;
+    }
+
+    pub fn use_distribution(&self, distribution: DistributionIndex) -> bool {
+        self.used_distributions[distribution.0]
+    }
     // --- QUERIES --- //
     
     /// Returns the number of computational nodes in the circuit
@@ -484,18 +560,14 @@ impl<R> Dac<R>
     /// Returns true iff the circuit has some nodes that have been cut-of during expansion.
     /// These node contains the propagations that have been done
     pub fn has_cutoff_nodes(&self) -> bool {
-        // TODO: Use a flag
-        self.nodes.iter().find(|n| n.is_node_incomplete()).is_some()
+        !self.partial_nodes.is_empty()
     }
 
     /// Returns true if the DAC contains a partial node that can be extended with the given
     /// distribution, false otherwise
     pub fn has_partial_node_with_distribution(&self, distribution: DistributionIndex) -> Option<NodeIndex> {
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].get_layer() > 0 {
-                break;
-            }
-            if self[node].has_distribution(distribution) {
+        for node in self.partial_nodes.iter().copied() {
+            if !self[node].is_to_remove() && self[node].has_distribution(distribution) {
                 return Some(node);
             }
         }
@@ -659,6 +731,9 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             solver: None,
+            root: None,
+            partial_nodes: vec![],
+            used_distributions: BitVec::new(),
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);

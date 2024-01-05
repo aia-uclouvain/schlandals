@@ -25,11 +25,12 @@
 //! Finally it save and restore the states of the reversible variables used in the solver.
 
 
-use rustc_hash::FxHashMap;
-use search_trail::{StateManager, SaveAndRestore};
+use rustc_hash::{FxHashMap, FxHashSet};
+use search_trail::{StateManager, SaveAndRestore, UsizeManager};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::*;
+use crate::core::literal::Literal;
+use crate::core::{graph::*, variable};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
@@ -58,6 +59,8 @@ where
     /// If true, allows the compiler to compile partially the diagram and run an approximate solver
     /// to estimate the probability of the partially compiled node
     partial: bool,
+    number_constrained_distribution: usize,
+
 }
 
 impl<B> DACCompiler<B>
@@ -80,6 +83,7 @@ where
             propagator,
             cache,
             partial: false,
+            number_constrained_distribution: 0,
         }
     }
 
@@ -92,7 +96,7 @@ where
         self.state.restore_state();
     }
 
-    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize, number_constrained_distribution: usize) -> Option<NodeIndex> 
+    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> 
         where R: SemiRing
     {
 
@@ -102,7 +106,7 @@ where
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, number_constrained_distribution) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1) {
                         children.push(child);
                     }
                 }
@@ -120,11 +124,17 @@ where
         }
     }
     
-    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, number_constrained_distribution: usize) -> Option<NodeIndex>
+    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize) -> Option<NodeIndex>
         where R: SemiRing
-    {        
+    {   
+        if level == 1 {
+            dac.set_number_used_distributions(self.graph.number_distributions());
+        }
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
+            if level==1 {
+                dac.set_root(node);
+            }
             for literal in self.propagator.assignments_iter(&self.state) {
                 let variable = literal.to_variable();
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
@@ -154,18 +164,18 @@ where
         };
         let mut sum_children: Vec<NodeIndex> = vec![];
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
-            let distributions_in_components = self.component_extractor.components_iter(&self.state).map(|c| self.component_extractor.component_number_distribution(c)).sum::<usize>();
             for sub_component in self.component_extractor.components_iter(&self.state) {
+                if level ==1 {
+                    for distribution in self.component_extractor.component_distribution_iter(sub_component) {
+                    dac.set_used_distribution(distribution);
+                    }
+                }
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 if !self.cache.contains_key(&bit_repr) {
-                    let distribution_in_branches = number_constrained_distribution - distributions_in_components + self.component_extractor.component_number_distribution(sub_component);
-                    let number_distribution_component = self.component_extractor.component_number_distribution(sub_component);
-                    let ratio_distrib = (distribution_in_branches - number_distribution_component) as f64 / level as f64;
-                    let should_approximate = self.partial && level >= (0.1 * distribution_in_branches as f64) as isize && ratio_distrib <= 2.0;
                     let branching = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component);
-                    if !should_approximate && branching.is_some() {
+                    if branching.is_some() {
                         let distribution = branching.unwrap();
-                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, distribution_in_branches) {
+                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
                             sum_children.push(child);
                             self.cache.insert(bit_repr, Some(child));
                         } else {
@@ -174,15 +184,18 @@ where
                             sum_children.clear();
                             break;
                         }
-                    } else{
-                        if self.component_extractor.find_constrained_distribution(sub_component, &self.graph, &self.state) {
-                            let child = dac.add_sum_node();
-                            for (variable, value) in  self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| self.graph[*l].is_probabilitic() && self.graph[*l].reason(&self.state).is_none()) {
-                                dac[child].add_to_propagation(variable, value);
-                            }
-                            dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
-                            sum_children.push(child);
+                    } else if self.component_extractor.component_iter(sub_component).find(|clause| self.graph[*clause].is_constrained(&self.state)).is_some() {
+                        // TODO : check if this is correct
+                        let child = dac.add_sum_node();
+                        for (variable, value) in self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| (self.graph[*l].reason(&self.state).is_none())) {
+                            dac[child].add_to_propagation(variable, value);
                         }
+                        for clause in self.component_extractor.component_iter(sub_component) {
+                            dac[child].add_to_clauses(clause);
+                        }
+                        dac.add_to_partial_list(child);
+                        dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
+                        sum_children.push(child);
                     }
                 } else {
                     match self.cache.get(&bit_repr) {
@@ -207,6 +220,9 @@ where
         }
         if !sum_children.is_empty() && prod_node.is_none() {
             prod_node = Some(dac.add_prod_node());
+            if level==1 {
+                dac.set_root(prod_node.unwrap());
+            }
         }
         if let Some(node) = prod_node {
             for child in sum_children {
@@ -219,7 +235,7 @@ where
     pub fn compile<R>(&mut self) -> Option<Dac<R>>
         where R: SemiRing
     {
-
+        self.state.save_state();
         // First set the number of clause in the propagator. This can not be done at the initialization of the propagator
         // because we need it to parse the input file as some variables might be detected as always being true or false.
         self.propagator.init(self.graph.number_clauses());
@@ -227,50 +243,59 @@ where
         if preproc.is_none() {
             return None;
         }
-        let number_constrained_distribution = self.graph.distributions_iter().filter(|d| self.graph[*d].is_constrained(&self.state)).count();
+        let mut unfixed_set: FxHashSet<DistributionIndex> = FxHashSet::default();
+        for clause in self.graph.clauses_iter() {
+            if self.graph[clause].is_constrained(&self.state){
+                for variable in self.graph[clause].iter_probabilistic_variables() {
+                    if !self.graph[variable].is_fixed(&self.state) {
+                        unfixed_set.insert(self.graph[variable].distribution().unwrap());
+                    }
+                }
+            }
+        }
+        self.number_constrained_distribution = unfixed_set.len();
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, number_constrained_distribution) {
+        let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
             Some(_) => Some(dac),
-        }
+        };
+        self.restore();
+        ret
     }
-
-    pub fn extend_partial_node_with<R>(&mut self, node: NodeIndex, dac: &mut Dac<R>, distribution: DistributionIndex)
+    
+    pub fn tag_unsat_partial_nodes<R>(&mut self, dac:&mut Dac<R>)
         where R: SemiRing
     {
-        debug_assert!(dac[node].is_sum());
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for node_i in 0..dac.number_partial_nodes() {
+                let node = dac.get_partial_node_at(node_i);
+                println!("testing unsatiness of node {}", node.0);
+                if !dac[node].is_unsat() && dac[node].is_node_incomplete(){
+                    if self.is_partial_node_unsat(&dac, node){
+                        println!("unsat node {}", node.0);
+                        changed = true;
+                        dac[node].set_unsat();
+                    }
+                }
+            }
+            println!("changed {}", changed);
+        }
+    }
+    pub fn is_partial_node_unsat<R>(&mut self, dac:&Dac<R>, node: NodeIndex) -> bool 
+        where R: SemiRing
+    {
         self.state.save_state();
-        let propagations = dac[node].get_propagation().clone();
-        for (variable, value) in propagations.iter().copied() {
+        let propagations = dac[node].get_propagation();
+        for (variable, value) in propagations.iter().copied().rev() {
             self.propagator.add_to_propagation_stack(variable, value, None);
         }
-        match self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
-            Ok(_) => {
-                let mut children: Vec<NodeIndex> = vec![];
-                for variable in self.graph[distribution].iter_variables() {
-                    self.state.save_state();
-                    match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 1) {
-                        Err(_) => { },
-                        Ok(_) => {
-                            if let Some(child) = self.expand_prod_node(dac, ComponentIndex(0), 2, 0) {
-                                children.push(child);
-                            }
-                        }
-                    }
-                    self.restore();
-                }
-                if !children.is_empty() {
-                    let node = dac.add_sum_node();
-                    for child in children {
-                        dac.add_node_output(child, node);
-                    }
-                }
-            },
-            Err(_) => {
-                panic!("Trying to extend with UNSAT node");
-            },
-        }
-        self.state.restore_state();
+        println!("about to propagate");
+        let res = self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, true).is_err();
+        println!("propagated"); 
+        self.restore();
+        res
     }
 }

@@ -362,6 +362,48 @@ impl ComponentExtractor {
         }
     }
 
+    pub fn create_component_from(&mut self, clauses: &Vec<ClauseIndex>, state: &mut StateManager) -> ComponentIndex {
+        let start = 0;
+        let size = clauses.len();
+        let distribution_start = 0;
+        let number_distribution = 0;
+        let hash = 0;
+        let max_probability = 1.0;
+        let end = state.get_usize(self.limit);
+        self.components.truncate(end);
+        self.exploration_stack.clear();
+        self.seen_var.fill(false);
+        state.set_usize(self.base, end);
+        for (i, clause) in clauses.iter().copied().enumerate() {
+            let current_pos = self.clause_positions[clause.0];
+            let new_pos = i;
+            let moved_node = self.clauses[new_pos];
+            self.clauses.as_mut_slice().swap(new_pos, current_pos);
+            self.clause_positions[clause.0] = new_pos;
+            self.clause_positions[moved_node.0] = current_pos;
+        }
+        let component = Component{start, size, distribution_start, number_distribution, hash, max_probability};
+        self.components.push(component);
+        state.set_usize(self.limit, self.components.len());
+        ComponentIndex(self.components.len() - 1)
+    }
+
+    pub fn create_distribution_from(&mut self, component: ComponentIndex, distributions: impl Iterator<Item = DistributionIndex>) {
+        let start = 0;
+        let mut number_distribution = 0;
+        for (i, distribution) in distributions.enumerate() {
+            let current_pos = self.distribution_positions[distribution.0];
+            let new_pos = i;
+            let moved_node = self.distributions[new_pos];
+            self.distributions.as_mut_slice().swap(new_pos, current_pos);
+            self.distribution_positions[distribution.0] = new_pos;
+            self.distribution_positions[moved_node.0] = current_pos;
+            number_distribution += 1;
+        }
+        self.components[component.0].distribution_start = start;
+        self.components[component.0].number_distribution = number_distribution;
+    }
+
 }
 
 impl std::ops::Index<ComponentIndex> for ComponentExtractor {

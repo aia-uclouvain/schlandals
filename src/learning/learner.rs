@@ -58,7 +58,6 @@ pub struct Learner<const S: bool>
     dacs: Vec<Dac<Float>>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
-    is_distribution_learned: Vec<bool>,
     lr: f64,
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
@@ -91,8 +90,6 @@ impl <const S: bool> Learner<S>
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
-        //println!("distributions {:?}", distributions);
-        // TODO what about fdist files ?
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
         for distribution in distributions.iter() {
@@ -139,7 +136,6 @@ impl <const S: bool> Learner<S>
             dacs: vec![], 
             unsoftmaxed_distributions, 
             gradients: grads,
-            is_distribution_learned: vec![false; distributions.len()],
             lr: 0.0,
             expected_distribution: distributions,
             expected_outputs: vec![],
@@ -148,42 +144,13 @@ impl <const S: bool> Learner<S>
             epsilon,
         };
 
-        for (dac_opt, _) in dacs.iter() {
-            if let Some(dac) = dac_opt.as_ref() {
-                for (d, _) in dac.distribution_mapping.keys() {
-                    learner.is_distribution_learned[d.0] = true;
+        for (dac, compiler) in dacs.iter_mut() {
+            if let Some(dac) = dac.as_mut() {
+                if let Some(comp) = compiler {
+                    comp.tag_unsat_partial_nodes(dac);
                 }
-            }
-        }
-
-        let mut dac_id = 0;
-        for distribution in (0..learner.is_distribution_learned.len()).map(DistributionIndex) {
-            if learner.is_distribution_learned[distribution.0] {
-                continue;
-            }
-            // We must learn the distribution, we try to insert it into a dac
-            let end = dac_id;
-            loop {
-                let (ref mut dac_opt, ref mut compiler_opt) = &mut dacs[dac_id];
-                if let Some(dac) = dac_opt {
-                    if let Some(partial_node) = dac.has_partial_node_with_distribution(distribution) {
-                        let compiler = compiler_opt.as_mut().unwrap();
-                        compiler.extend_partial_node_with(partial_node, dac, distribution);
-                        dac_id = (dac_id + 1) % dacs.len();
-                        learner.is_distribution_learned[distribution.0] = true;
-                        break;
-                    }
-                }
-                dac_id = (dac_id + 1) % dacs.len();
-                if dac_id == end {
-                    break;
-                }
-            }
-        }
-
-        for dac in dacs.iter_mut() {
-            if let Some(dac) = dac.0.as_mut() {
                 dac.optimize_structure();
+                println!("dac\n{}", dac.as_graphviz());
             }
         }
 
@@ -193,12 +160,6 @@ impl <const S: bool> Learner<S>
                 learner.expected_outputs.push(expected_outputs[i]);
             }
         }
-
-
-        // Send the initail distributions to the solvers
-        learner.update_distributions();
-
-        //println!("is_distrib_learned {:?}", learner.is_distribution_learned);
         learner.to_folder();
         learner
     }

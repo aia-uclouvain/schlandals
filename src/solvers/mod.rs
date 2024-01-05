@@ -18,7 +18,7 @@
 use rug::Float;
 use crate::branching::*;
 use crate::diagrams::dac::dac::{Dac, NodeIndex};
-use crate::core::graph::{VariableIndex, DistributionIndex};
+use crate::core::graph::{VariableIndex, DistributionIndex, ClauseIndex};
 use crate::diagrams::semiring::*;
 
 
@@ -65,79 +65,31 @@ impl Solver {
         }
     }
 
-    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>) -> f64 {
+    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>, clauses:&Vec<ClauseIndex>) -> f64 {
         match self {
             Solver::SMinInDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::SMinOutDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::SMaxDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::SVSIDS(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::QMinInDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::QMinOutDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::QMaxDegree(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
             Solver::QVSIDS(ref mut solver) => {
-                solver.add_to_propagation_stack(propagations);
-                match solver.solve() {
-                    Ok(p) => {
-                        p.to_f64()
-                    },
-                    Err(_) => {0.0}, // TODO what do we do if we can not evaluate the node ?
-                }
+                solver.solve_partial(propagations, clauses)
             },
         }
     }
@@ -280,23 +232,21 @@ pub enum Compiler {
 }
 
 impl Compiler {
-    pub fn extend_partial_node_with<R>(&mut self, node: NodeIndex, dac: &mut Dac<R>, distribution: DistributionIndex)
-        where R: SemiRing
-    {
-        match self {
-            Compiler::VSIDS(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
-            Compiler::MinInDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
-            Compiler::MinOutDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
-            Compiler::MaxDegree(ref mut compiler) => compiler.extend_partial_node_with(node, dac, distribution),
-        }
-    }
-
     pub fn set_partial_mode_on(&mut self) {
         match self {
             Compiler::VSIDS(ref mut compiler) => compiler.set_partial(true),
             Compiler::MinInDegree(ref mut compiler) => compiler.set_partial(true),
             Compiler::MinOutDegree(ref mut compiler) => compiler.set_partial(true),
             Compiler::MaxDegree(ref mut compiler) => compiler.set_partial(true),
+        }
+    }
+
+    pub fn tag_unsat_partial_nodes<R:SemiRing>(&mut self, dac: &mut Dac<R>) {
+        match self {
+            Compiler::VSIDS(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
+            Compiler::MinInDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
+            Compiler::MinOutDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
+            Compiler::MaxDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
         }
     }
 }

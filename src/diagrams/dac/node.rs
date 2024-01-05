@@ -27,7 +27,7 @@
 use rustc_hash::FxHashSet;
 
 use rug::Float;
-use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::core::graph::{DistributionIndex, VariableIndex, ClauseIndex};
 use crate::diagrams::semiring::*;
 use super::dac::NodeIndex;
 use crate::common::*;
@@ -88,9 +88,11 @@ pub struct Node<R>
     path_value: Float,
     /// Propagation path
     propagation: Vec<(VariableIndex, bool)>,
+    clauses: Vec<ClauseIndex>,
     /// If the node has been partially compiled, store the distributions it contains in the
     /// sub-problem it represent
     distributions: Option<BitVec>,
+    is_unsat: bool,
 }
 
 impl<R> Node<R>
@@ -111,7 +113,9 @@ impl<R> Node<R>
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            clauses: vec![],
             distributions: None,
+            is_unsat: false,
         }
     }
 
@@ -129,7 +133,9 @@ impl<R> Node<R>
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            clauses: vec![],
             distributions: None,
+            is_unsat: false,
         }
     }
 
@@ -147,7 +153,9 @@ impl<R> Node<R>
             to_remove: true,
             path_value: f128!(1.0),
             propagation: vec![],
+            clauses: vec![],
             distributions: None,
+            is_unsat: false,
         }
     }
 
@@ -216,6 +224,10 @@ impl<R> Node<R>
         self.to_remove
     }
 
+    pub fn is_unsat(&self) -> bool {
+        self.is_unsat
+    }
+
     /// Returns the propagations that need to be done to reach the node
     pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)> {
         &self.propagation
@@ -226,6 +238,18 @@ impl<R> Node<R>
         self.propagation.push((variable, value));
     }
 
+    pub fn add_to_clauses(&mut self, clause: ClauseIndex) {
+        self.clauses.push(clause);
+    }
+
+    pub fn get_clauses(&self) -> &Vec<ClauseIndex> {
+        &self.clauses
+    }
+
+    pub fn clear_incomplete(&mut self) {
+        self.propagation.clear();
+        self.clauses.clear();
+    }
     /// Returns true iff the node is incomplete. A node is incomplete if the compilation has been
     /// stopped while the sub-problem represented by the node was not solved. In that case, the
     /// propagations to reach the node are stored in the `propagation field`.
@@ -295,6 +319,10 @@ impl<R> Node<R>
     /// Sets the start of the output of the node
     pub fn set_output_start(&mut self, output_start: usize){
         self.output_start = output_start;
+    }
+
+    pub fn set_unsat(&mut self) {
+        self.is_unsat = true;
     }
 
     /// Sets the number of output of the node
