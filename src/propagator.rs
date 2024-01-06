@@ -205,9 +205,6 @@ impl Propagator {
         self.unconstrained_distributions.clear();
         self.propagation_prob.assign(1.0);
         while let Some((variable, value, reason)) = self.propagation_stack.pop() {
-            g[variable].set_assignment_position(self.assignments.len(), state);
-            self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
-            self.lit_flags.push(LitFlags::new());
             if let Some(v) = g[variable].value(state) {
                 if v == value {
                     continue;
@@ -223,6 +220,9 @@ impl Propagator {
                 extractor.add_clause_to_component(component, clause);
                 return PropagationResult::Err(backjump);
             }
+            g[variable].set_assignment_position(self.assignments.len(), state);
+            self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
+            self.lit_flags.push(LitFlags::new());
             g.set_variable(variable, value, level, reason, state);
             
             if value {

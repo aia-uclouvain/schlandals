@@ -27,10 +27,9 @@
 use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
 use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
-use bitvec::prelude::*;
 use crate::common::*;
 
-use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::core::{graph::{DistributionIndex, VariableIndex}, literal::Literal};
 use crate::diagrams::semiring::*;
 use crate::solvers::*;
 
@@ -232,6 +231,11 @@ impl<R> Dac<R>
             }
             self[node].clear_and_shrink_input();
         }
+
+        for i in 0..self.partial_nodes.len() {
+            self.partial_nodes[i] = NodeIndex(new_indexes[self.partial_nodes[i].0]);
+        }
+
         // Actually remove the nodes (and allocated space) from the nodes vector.
         self.nodes.truncate(end);
         self.nodes.shrink_to(end);
@@ -392,20 +396,14 @@ impl<R> Dac<R>
         }
     }
 
-    pub fn reset_approx(&mut self, eval_approx: bool) {
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].get_layer() > 0 {
-                break;
-            }
-            if self[node].is_node_incomplete() {
-                if eval_approx {
-                    let propagations = self[node].get_propagation().clone();
-                    let clauses = self[node].get_clauses().clone();
-                    let s = self.solver.as_mut().unwrap();
-                    let value = s.solve_partial(&propagations, &clauses);
-                    self[node].set_value(R::from_f64(value));
-                }
-            }
+    pub fn reset_approx(&mut self) {
+        for i in 0..self.partial_nodes.len() {
+            let node = self.partial_nodes[i];
+            let propagations = self[node].get_propagation().clone();
+            let clauses = self[node].get_clauses().clone();
+            let s = self.solver.as_mut().unwrap();
+            let value = s.solve_partial(&propagations, &clauses);
+            self[node].set_value(R::from_f64(value));
         }
         if let Some(ref mut s) = self.solver {
             s.reset_cache();
@@ -524,9 +522,10 @@ impl<R> Dac<R>
         self.partial_nodes.push(node);
     }
 
-    pub fn remove_partial_node(&mut self, node: NodeIndex) {
+    pub fn set_partial_node_unsat(&mut self, node: NodeIndex) {
         let idx = self.partial_nodes.iter().position(|x| *x == node).unwrap();
         self.partial_nodes.swap_remove(idx);
+        self[node].set_unsat();
         self[node].clear_incomplete();
     }
 
@@ -585,6 +584,13 @@ impl<R> Dac<R>
         self.nodes.last().unwrap().get_value()
     }
 
+    pub fn add_clause_to_solver(&mut self, mut clauses: Vec<Vec<Literal>>) {
+        if let Some(solver) = self.solver.as_mut() {
+            while let Some(clause) = clauses.pop() {
+                solver.transfer_learned_clause(clause);
+            }
+        }
+    }
 }
 
 // --- ITERATOR ---

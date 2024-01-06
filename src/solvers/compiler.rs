@@ -26,11 +26,11 @@
 
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use search_trail::{StateManager, SaveAndRestore, UsizeManager};
+use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
+use crate::core::graph::{DistributionIndex, ClauseIndex, Graph};
 use crate::core::literal::Literal;
-use crate::core::{graph::*, variable};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
@@ -258,7 +258,10 @@ where
         let mut dac = Dac::new();
         let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
             None => None,
-            Some(_) => Some(dac),
+            Some(_) => {
+                self.tag_unsat_partial_nodes(&mut dac);
+                Some(dac)
+            }
         };
         self.restore();
         ret
@@ -270,14 +273,15 @@ where
         let mut changed = true;
         while changed {
             changed = false;
-            for node_i in 0..dac.number_partial_nodes() {
+            // Since the nodes are removed from the vector of partial node, we traverse in reverse
+            // order so we do not mess up the indexes (the nodes are removed from the vector with
+            // swap_remove)
+            for node_i in (0..dac.number_partial_nodes()).rev() {
                 let node = dac.get_partial_node_at(node_i);
-                println!("testing unsatiness of node {}", node.0);
                 if !dac[node].is_unsat() && dac[node].is_node_incomplete(){
                     if self.is_partial_node_unsat(&dac, node){
-                        println!("unsat node {}", node.0);
                         changed = true;
-                        dac[node].set_unsat();
+                        dac.set_partial_node_unsat(node);
                     }
                 }
             }
@@ -291,10 +295,16 @@ where
         for (variable, value) in propagations.iter().copied().rev() {
             self.propagator.add_to_propagation_stack(variable, value, None);
         }
-        println!("about to propagate");
         let res = self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, true).is_err();
-        println!("propagated"); 
         self.restore();
         res
+    }
+
+    pub fn get_learned_clauses(&self) -> Vec<Vec<Literal>> {
+        self.graph.clauses_iter().filter(|c| self.graph[*c].is_learned()).map(|c| self.get_clause(c)).collect()
+    }
+
+    pub fn get_clause(&self, clause: ClauseIndex) -> Vec<Literal> {
+        self.graph[clause].iter().collect()
     }
 }

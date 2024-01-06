@@ -24,7 +24,6 @@
 //! It is also responsible for updating the cache and clearing it when the memory limit is reached.
 //! Finally it save and restore the states of the reversible variables used in the solver.
 
-use rand::distributions;
 use rustc_hash::{FxHashMap, FxHashSet};
 use search_trail::{StateManager, SaveAndRestore};
 
@@ -36,6 +35,7 @@ use crate::propagator::Propagator;
 use super::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
+use crate::core::literal::Literal;
 
 use rug::Float;
 use rug::Assign;
@@ -372,11 +372,17 @@ where
         }
         self.component_extractor.create_distribution_from(comp, distributions.iter().copied());
         let (solution, _) = self._solve(comp, 1, (1.0 + self.epsilon).powf(2.0));
-        let ub: Float = 1.0 - (&self.preproc_out + solution.1.clone()*&self.preproc_in) / &self.prefix_factor;
-        let lb: Float = (self.preproc_in.clone() * solution.0) / &self.prefix_factor;
-        let proba: Float = (ub*lb).sqrt();
+        let ub: Float = 1.0 - solution.1;
+        let lb: Float = solution.0 / &self.prefix_factor;
+        let proba: Float = (ub*lb).sqrt()*p;
         self.restore();
         proba.to_f64()
+    }
+
+    pub fn transfer_learned_clause(&mut self, clause: Vec<Literal>) {
+        let head = clause.iter().copied().find(|l| l.is_positive());
+        let cl = self.graph.add_clause(clause, head, &mut self.state, true);
+        self.component_extractor.add_clause_to_component(ComponentIndex(0), cl)
     }
 
     #[inline]

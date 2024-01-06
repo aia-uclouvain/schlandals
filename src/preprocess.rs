@@ -23,8 +23,6 @@ use crate::propagator::Propagator;
 use rug::Float;
 use crate::common::f128;
 
-use crate::core::variable::Reason;
-
 pub struct Preprocessor<'b, B>
 where
     B: BranchingDecision + ?Sized,

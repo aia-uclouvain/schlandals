@@ -16,8 +16,6 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::fs::File;
-use std::io::Write;
 use crate::diagrams::dac::dac::*;
 use super::logger::Logger;
 use search_trail::StateManager;
@@ -29,7 +27,6 @@ use crate::Branching;
 use crate::{Optimizer as OptChoice, Loss};
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
-use crate::core::graph::DistributionIndex;
 use rayon::prelude::*;
 use super::Learning;
 use std::f64::consts::E;
@@ -50,7 +47,6 @@ pub struct TensorLearner<const S: bool>
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<Tensor>,
     log: Logger<S>,
-    outfolder: Option<PathBuf>,
     epsilon: f64,
     optimizer: Optimizer,
     lr: f64,
@@ -73,7 +69,7 @@ impl <const S: bool> TensorLearner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let mut compiler = make_compiler!(input, branching, true);
+                    let mut compiler = make_compiler!(input, branching);
                     if epsilon > 0.0 {
                         compiler.set_partial_mode_on();
                     }
@@ -93,7 +89,7 @@ impl <const S: bool> TensorLearner<S>
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
                     // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, false, false);
+                    let solver = make_solver!(input, branching, epsilon, None, false);
                     dac.set_solver(solver);
                 }
             }
@@ -122,6 +118,8 @@ impl <const S: bool> TensorLearner<S>
                 if let Some(mut comp) = compiler {
                     comp.tag_unsat_partial_nodes(&mut d);
                 }
+                let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
+                d.add_clause_to_solver(clauses);
                 d.optimize_structure();
                 //println!("dac\n{}", d.as_graphviz());
                 s_dacs.push(d);
@@ -135,13 +133,10 @@ impl <const S: bool> TensorLearner<S>
             expected_distribution: distributions,
             expected_outputs: expected,
             log: logger,
-            outfolder,
             epsilon,
             optimizer,
             lr: 0.0,
         };
-
-        learner.to_folder();
         learner
     }
 
@@ -187,7 +182,7 @@ impl <const S: bool> TensorLearner<S>
         }
         self.dacs.par_iter_mut().for_each(|d| {
             if eval_approx {
-                d.reset_approx(eval_approx);
+                d.reset_approx();
             }
             d.evaluate();
         });
@@ -294,24 +289,5 @@ impl <const S: bool> fmt::Display for TensorLearner<S>
             writeln!(f, "d {} {}", distribution.len(), distribution.iter().map(|p| format!("{:.5}", p)).collect::<Vec<String>>().join(" "))?;
         }
         fmt::Result::Ok(())
-    }
-}
-
-impl <const S: bool> TensorLearner<S>
-{
-    pub fn to_folder(&self) {
-        /*if let Some(f) = &self.outfolder {
-            let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
-            match outfile.write(format!("{}", self).as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the distributions into the fdist file: {:?}", e),
-            }
-            for (i, dac) in self.dacs.iter().enumerate() {
-                let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
-                if let Err(e) = outfile.write(format!("{}", dac).as_bytes()) {
-                    panic!("Could not write dac {} into file: {}", i, e);
-                }
-            }
-        }*/
     }
 }
