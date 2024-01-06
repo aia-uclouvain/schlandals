@@ -112,13 +112,13 @@ impl <const S: bool> TensorLearner<S>
         let mut s_dacs: Vec<Dac<Tensor>> = vec![];
         let mut expected: Vec<Tensor> = vec![];
         while dacs.len() > 0 {
-            let (dac, compiler) = dacs.pop().unwrap();
+            let (dac, mut compiler) = dacs.pop().unwrap();
             let proba = expected_outputs.pop().unwrap();
             if let Some(mut d) = dac {
-                if let Some(mut comp) = compiler {
+                if let Some(comp) = compiler.as_mut() {
                     comp.tag_unsat_partial_nodes(&mut d);
                 }
-                let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
+                let clauses = if let Some(comp) = compiler { comp.get_learned_clause() } else { vec![] };
                 d.add_clause_to_solver(clauses);
                 d.optimize_structure();
                 //println!("dac\n{}", d.as_graphviz());
