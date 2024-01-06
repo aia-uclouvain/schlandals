@@ -17,8 +17,9 @@
 
 use rug::Float;
 use crate::branching::*;
-use crate::diagrams::dac::dac::{Dac, NodeIndex};
-use crate::core::graph::{VariableIndex, DistributionIndex, ClauseIndex};
+use crate::diagrams::dac::dac::Dac;
+use crate::core::graph::{VariableIndex, ClauseIndex};
+use crate::core::literal::Literal;
 use crate::diagrams::semiring::*;
 
 
@@ -119,14 +120,27 @@ impl Solver {
             Solver::QVSIDS(ref mut solver) => solver.reset_cache(),
         }
     }
+
+    pub fn transfer_learned_clause(&mut self, clause: Vec<Literal>) {
+        match self {
+            Solver::SMinInDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::SMinOutDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::SMaxDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::SVSIDS(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::QMinInDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::QMinOutDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::QMaxDegree(ref mut solver) => solver.transfer_learned_clause(clause),
+            Solver::QVSIDS(ref mut solver) => solver.transfer_learned_clause(clause),
+        }
+    }
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr, $l:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, $l);
+            let graph = graph_from_ppidimacs($i, &mut state);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
@@ -249,14 +263,25 @@ impl Compiler {
             Compiler::MaxDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
         }
     }
+
+    pub fn get_learned_clause(&self) -> Vec<Vec<Literal>> {
+        match self {
+            Compiler::VSIDS(ref compiler) => compiler.get_learned_clauses(),
+            Compiler::MinInDegree(ref compiler) => compiler.get_learned_clauses(),
+            Compiler::MinOutDegree(ref compiler) => compiler.get_learned_clauses(),
+            Compiler::MaxDegree(ref compiler) => compiler.get_learned_clauses(),
+        }
+    }
+
+
 }
 
 macro_rules! make_compiler {
-    ($i:expr, $b:expr, $l:expr) => {
+    ($i:expr, $b:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, $l);
+            let graph = graph_from_ppidimacs($i, &mut state);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             match $b {
                 Branching::MinInDegree => {

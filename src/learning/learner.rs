@@ -16,9 +16,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::fs::File;
 
-use std::io::{self, Write};
 use rug::{Assign, Float};
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
@@ -32,7 +30,6 @@ use crate::Branching;
 use crate::Loss;
 use crate::solvers::DACCompiler;
 use crate::solvers::*;
-use crate::core::graph::DistributionIndex;
 use rayon::prelude::*;
 use super::Learning;
 use crate::common::f128;
@@ -62,7 +59,6 @@ pub struct Learner<const S: bool>
     expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
     log: Logger<S>,
-    outfolder: Option<PathBuf>,
     epsilon: f64,
 }
 
@@ -106,7 +102,7 @@ impl <const S: bool> Learner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let mut compiler = make_compiler!(input, branching, true);
+                    let mut compiler = make_compiler!(input, branching);
                     if epsilon > 0.0 {
                         compiler.set_partial_mode_on();
                     }
@@ -125,7 +121,7 @@ impl <const S: bool> Learner<S>
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
                     // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, false, false);
+                    let solver = make_solver!(input, branching, epsilon, None, false);
                     dac.set_solver(solver);
                 }
             }
@@ -140,17 +136,17 @@ impl <const S: bool> Learner<S>
             expected_distribution: distributions,
             expected_outputs: vec![],
             log: logger,
-            outfolder,
             epsilon,
         };
 
-        for (dac, compiler) in dacs.iter_mut() {
-            if let Some(dac) = dac.as_mut() {
-                if let Some(comp) = compiler {
-                    comp.tag_unsat_partial_nodes(dac);
+        for (d, c) in dacs.iter_mut() {
+            if let Some(dac) = d {
+                if let Some(compiler) = c {
+                    compiler.tag_unsat_partial_nodes(dac);
                 }
+                let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
+                dac.add_clause_to_solver(clauses);
                 dac.optimize_structure();
-                println!("dac\n{}", dac.as_graphviz());
             }
         }
 
@@ -160,7 +156,6 @@ impl <const S: bool> Learner<S>
                 learner.expected_outputs.push(expected_outputs[i]);
             }
         }
-        learner.to_folder();
         learner
     }
 
@@ -229,7 +224,7 @@ impl <const S: bool> Learner<S>
         }
         self.dacs.par_iter_mut().for_each(|d| {
             if eval_approx {
-                d.reset_approx(eval_approx);
+                d.reset_approx();
             }
             d.evaluate();
         });
@@ -312,7 +307,7 @@ impl<const S: bool> Learning for Learner<S> {
         let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 1000 == 0;
+            let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
             let predictions = self.evaluate(e % eval_approx_freq == 0);
@@ -378,24 +373,5 @@ impl <const S: bool> fmt::Display for Learner<S>
             writeln!(f, "d {} {}", distribution.len(), distribution.iter().map(|p| format!("{:.5}", p)).collect::<Vec<String>>().join(" "))?;
         }
         fmt::Result::Ok(())
-    }
-}
-
-impl <const S: bool> Learner<S>
-{
-    pub fn to_folder(&self) {
-        /*if let Some(f) = &self.outfolder {
-            let mut outfile = File::create(f.join("distributions.fdist")).unwrap();
-            match outfile.write(format!("{}", self).as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the distributions into the fdist file: {:?}", e),
-            }
-            for (i, dac) in self.dacs.iter().enumerate() {
-                let mut outfile = File::create(f.join(format!("{}.fdac", i))).unwrap();
-                if let Err(e) = outfile.write(format!("{}", dac).as_bytes()) {
-                    panic!("Could not write dac {} into file: {}", i, e);
-                }
-            }
-        }*/
     }
 }

@@ -82,7 +82,7 @@ pub enum Optimizer {
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac<Float>>{
     match type_of_input(&input) {
         FileType::CNF => {
-            let mut compiler = make_compiler!(&input, branching, false);
+            let mut compiler = make_compiler!(&input, branching);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.optimize_structure();
@@ -152,7 +152,7 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, statistics, false);
+    let solver = make_solver!(&input, branching, epsilon, memory, statistics);
     solve_search!(solver)
 }
 
