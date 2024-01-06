@@ -123,6 +123,7 @@ impl <const S: bool> TensorLearner<S>
                     comp.tag_unsat_partial_nodes(&mut d);
                 }
                 d.optimize_structure();
+                //println!("dac\n{}", d.as_graphviz());
                 s_dacs.push(d);
                 expected.push(Tensor::from_f64(proba));
             }
@@ -212,7 +213,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
         let mut dac_loss = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 1000 == 0;
+            let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             self.optimizer.set_lr(self.lr);
             if do_print{println!("\nEpoch {} lr {}", e, self.lr);}
@@ -233,6 +234,9 @@ impl<const S: bool> Learning for TensorLearner<S> {
             }
             //loss_epoch /= self.dacs.len() as f64;
             self.optimizer.backward_step(&loss_epoch);
+            /* for d in self.distribution_tensors.iter() {
+                println!("tensor grad: {:?}", d.grad());
+            } */
             self.log.log_epoch(&dac_loss, 0.0, self.epsilon);
             let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
             if (avg_loss-prev_loss).abs()<delta_early_stop {

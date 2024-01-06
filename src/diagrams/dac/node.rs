@@ -311,6 +311,11 @@ impl<R> Node<R>
         self.path_value = value;
     }
 
+    /// Adds the given float to the path value of the node
+    pub fn add_to_path_value(&mut self, value: Float){
+        self.path_value += value;
+    }
+
     /// Sets the type of the node
     pub fn set_type(&mut self, typenode: TypeNode){
         self.typenode = typenode;

@@ -28,6 +28,7 @@ use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
 use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
 use bitvec::prelude::*;
+use crate::common::*;
 
 use crate::core::graph::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
@@ -539,6 +540,12 @@ impl<R> Dac<R>
     pub fn use_distribution(&self, distribution: DistributionIndex) -> bool {
         self.used_distributions[distribution.0]
     }
+
+    pub fn zero_paths(&mut self) {
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            self[node].set_path_value(f128!(0.0));
+        }
+    }
     // --- QUERIES --- //
     
     /// Returns the number of computational nodes in the circuit
@@ -656,9 +663,9 @@ impl<R> Dac<R>
             if self.nodes[node.0].get_propagation().len() > 0 {
                 out.push_str(&Dac::<Float>::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value().to_f64())));
             } else if self[node].is_product() {
-                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3})", self[node].get_value().to_f64())));
+                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3}) path {:3}", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
             } else if self[node].is_sum() {
-                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3})", self[node].get_value().to_f64())));
+                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3}) path {:3}", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
             }
         }
         

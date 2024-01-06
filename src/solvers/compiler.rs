@@ -281,7 +281,6 @@ where
                     }
                 }
             }
-            println!("changed {}", changed);
         }
     }
     pub fn is_partial_node_unsat<R>(&mut self, dac:&Dac<R>, node: NodeIndex) -> bool 
