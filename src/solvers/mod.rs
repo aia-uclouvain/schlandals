@@ -66,31 +66,31 @@ impl Solver {
         }
     }
 
-    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>, clauses:&Vec<ClauseIndex>) -> f64 {
+    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>, clauses:&Vec<ClauseIndex>, factor: f64) -> f64 {
         match self {
             Solver::SMinInDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::SMinOutDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::SMaxDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::SVSIDS(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::QMinInDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::QMinOutDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::QMaxDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
             Solver::QVSIDS(ref mut solver) => {
-                solver.solve_partial(propagations, clauses)
+                solver.solve_partial(propagations, clauses, factor)
             },
         }
     }
@@ -277,7 +277,7 @@ impl Compiler {
 }
 
 macro_rules! make_compiler {
-    ($i:expr, $b:expr) => {
+    ($i:expr, $b:expr, $e:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
@@ -285,16 +285,16 @@ macro_rules! make_compiler {
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             match $b {
                 Branching::MinInDegree => {
-                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator))
+                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, $e))
                 },
                 Branching::MinOutDegree => {
-                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator))
+                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, $e))
                 },
                 Branching::MaxDegree => {
-                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator))
+                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, $e))
                 },
                 Branching::VSIDS => {
-                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator))
+                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, $e))
                 },
             }
         }

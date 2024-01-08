@@ -60,6 +60,7 @@ where
     /// to estimate the probability of the partially compiled node
     partial: bool,
     number_constrained_distribution: usize,
+    epsilon: f64,
 
 }
 
@@ -73,6 +74,7 @@ where
         component_extractor: ComponentExtractor,
         branching_heuristic: Box<B>,
         propagator: Propagator,
+        epsilon: f64,
     ) -> Self {
         let cache = FxHashMap::default();
         Self {
@@ -84,6 +86,7 @@ where
             cache,
             partial: false,
             number_constrained_distribution: 0,
+            epsilon
         }
     }
 
@@ -96,7 +99,7 @@ where
         self.state.restore_state();
     }
 
-    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize) -> Option<NodeIndex> 
+    fn expand_sum_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize, bounding_factor: f64) -> Option<NodeIndex> 
         where R: SemiRing
     {
 
@@ -106,7 +109,7 @@ where
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(_) => { },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor) {
                         children.push(child);
                     }
                 }
@@ -124,7 +127,7 @@ where
         }
     }
     
-    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize) -> Option<NodeIndex>
+    fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<NodeIndex>
         where R: SemiRing
     {   
         if level == 1 {
@@ -164,6 +167,8 @@ where
         };
         let mut sum_children: Vec<NodeIndex> = vec![];
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
+            let number_component = self.component_extractor.number_components(&self.state);
+            let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
                 if level ==1 {
                     for distribution in self.component_extractor.component_distribution_iter(sub_component) {
@@ -175,7 +180,7 @@ where
                     let branching = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component);
                     if branching.is_some() {
                         let distribution = branching.unwrap();
-                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level) {
+                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
                             sum_children.push(child);
                             self.cache.insert(bit_repr, Some(child));
                         } else {
@@ -195,6 +200,7 @@ where
                         }
                         dac.add_to_partial_list(child);
                         dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
+                        dac[child].set_bounding_factor(new_bound_factor);
                         sum_children.push(child);
                     }
                 } else {
@@ -256,7 +262,7 @@ where
         self.number_constrained_distribution = unfixed_set.len();
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
-        let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1) {
+        let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
             None => None,
             Some(_) => {
                 self.tag_unsat_partial_nodes(&mut dac);

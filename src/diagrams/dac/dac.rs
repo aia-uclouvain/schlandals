@@ -401,8 +401,9 @@ impl<R> Dac<R>
             let node = self.partial_nodes[i];
             let propagations = self[node].get_propagation().clone();
             let clauses = self[node].get_clauses().clone();
+            let factor = self[node].get_bounding_factor();
             let s = self.solver.as_mut().unwrap();
-            let value = s.solve_partial(&propagations, &clauses);
+            let value = s.solve_partial(&propagations, &clauses, factor);
             self[node].set_value(R::from_f64(value));
         }
         if let Some(ref mut s) = self.solver {

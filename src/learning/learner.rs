@@ -102,7 +102,7 @@ impl <const S: bool> Learner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let mut compiler = make_compiler!(input, branching);
+                    let mut compiler = make_compiler!(input, branching, epsilon);
                     if epsilon > 0.0 {
                         compiler.set_partial_mode_on();
                     }
@@ -313,7 +313,7 @@ impl<const S: bool> Learning for Learner<S> {
         let mut dac_grad = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 500 == 0;
+            let do_print = e % 1 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
             let predictions = self.evaluate(e % eval_approx_freq == 0);

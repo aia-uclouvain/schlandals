@@ -82,7 +82,7 @@ pub enum Optimizer {
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Option<Dac<Float>>{
     match type_of_input(&input) {
         FileType::CNF => {
-            let mut compiler = make_compiler!(&input, branching);
+            let mut compiler = make_compiler!(&input, branching, 0.0);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.optimize_structure();
