@@ -141,11 +141,13 @@ impl <const S: bool> Learner<S>
 
         for (d, c) in dacs.iter_mut() {
             if let Some(dac) = d {
-                if let Some(compiler) = c {
-                    compiler.tag_unsat_partial_nodes(dac);
+                if epsilon > 0.0 {
+                    if let Some(compiler) = c {
+                        compiler.tag_unsat_partial_nodes(dac);
+                    }
+                    let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
+                    dac.add_clause_to_solver(clauses);
                 }
-                let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
-                dac.add_clause_to_solver(clauses);
                 dac.optimize_structure();
             }
         }
