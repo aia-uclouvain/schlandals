@@ -93,6 +93,7 @@ pub struct Node<R>
     /// sub-problem it represent
     distributions: Option<BitVec>,
     is_unsat: bool,
+    bounding_factor: f64,
 }
 
 impl<R> Node<R>
@@ -116,6 +117,7 @@ impl<R> Node<R>
             clauses: vec![],
             distributions: None,
             is_unsat: false,
+            bounding_factor: 1.0,
         }
     }
 
@@ -136,6 +138,7 @@ impl<R> Node<R>
             clauses: vec![],
             distributions: None,
             is_unsat: false,
+            bounding_factor: 1.0,
         }
     }
 
@@ -156,6 +159,7 @@ impl<R> Node<R>
             clauses: vec![],
             distributions: None,
             is_unsat: false,
+            bounding_factor: 1.0
         }
     }
 
@@ -328,6 +332,14 @@ impl<R> Node<R>
 
     pub fn set_unsat(&mut self) {
         self.is_unsat = true;
+    }
+
+    pub fn get_bounding_factor(&self) -> f64 {
+        self.bounding_factor
+    }
+
+    pub fn set_bounding_factor(&mut self, factor: f64) {
+        self.bounding_factor = factor;
     }
 
     /// Sets the number of output of the node

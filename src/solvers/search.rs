@@ -348,7 +348,7 @@ where
         self.cache.shrink_to_fit();
     }
 
-    pub fn solve_partial(&mut self, propagations: &Vec<(VariableIndex, bool)>, clauses: &Vec<ClauseIndex>) -> f64 {
+    pub fn solve_partial(&mut self, propagations: &Vec<(VariableIndex, bool)>, clauses: &Vec<ClauseIndex>, bounding_factor: f64) -> f64 {
         self.state.save_state();
         let comp = self.component_extractor.create_component_from(clauses, &mut self.state);
         self.add_to_propagation_stack(propagations);
@@ -371,7 +371,7 @@ where
             }
         }
         self.component_extractor.create_distribution_from(comp, distributions.iter().copied());
-        let (solution, _) = self._solve(comp, 1, (1.0 + self.epsilon).powf(2.0));
+        let (solution, _) = self._solve(comp, 1, bounding_factor);
         let ub: Float = 1.0 - solution.1;
         let lb: Float = solution.0 / &self.prefix_factor;
         let proba: Float = (ub*lb).sqrt()*p;
