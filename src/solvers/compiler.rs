@@ -189,7 +189,7 @@ where
                             sum_children.clear();
                             break;
                         }
-                    } else if self.component_extractor.component_iter(sub_component).find(|clause| self.graph[*clause].is_constrained(&self.state)).is_some() {
+                    } else if self.component_extractor.component_iter(sub_component).find(|clause| !self.graph[*clause].is_learned() && self.graph[*clause].has_probabilistic(&self.state)  && self.graph[*clause].is_constrained(&self.state)).is_some() {
                         // TODO : check if this is correct
                         let child = dac.add_sum_node();
                         for (variable, value) in self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| (self.graph[*l].reason(&self.state).is_none())) {
