@@ -24,7 +24,7 @@
 //! It is also responsible for updating the cache and clearing it when the memory limit is reached.
 //! Finally it save and restore the states of the reversible variables used in the solver.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
@@ -35,7 +35,6 @@ use crate::propagator::Propagator;
 use super::statistics::Statistics;
 use crate::common::*;
 use crate::PEAK_ALLOC;
-use crate::core::literal::Literal;
 
 use rug::Float;
 use rug::Assign;
@@ -321,69 +320,10 @@ where
         ProblemSolution::Ok(proba)
     }
     
-    pub fn add_to_propagation_stack(&mut self, propagation: &Vec<(VariableIndex, bool)>) {
-        self.prefix_factor.assign(1.0);
-        for (variable, value) in propagation.iter().copied() {
-            self.propagator.add_to_propagation_stack(variable, value, None);
-            if self.graph[variable].is_probabilitic() && value {
-                self.prefix_factor *= self.graph[variable].weight().unwrap();
-            }
-        }
-    }
-
-    pub fn update_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
-        for i in 0..distributions.len() {
-            for (j, v) in self.graph[DistributionIndex(i)].iter_variables().enumerate() {
-                self.graph[v].set_weight(distributions[i][j]);
-            }
-        }
-    }
-
     pub fn init(&mut self) {
         self.propagator.init(self.graph.number_clauses());
     }
 
-    pub fn reset_cache(&mut self) {
-        self.cache.clear();
-        self.cache.shrink_to_fit();
-    }
-
-    pub fn solve_partial(&mut self, propagations: &Vec<(VariableIndex, bool)>, clauses: &Vec<ClauseIndex>, bounding_factor: f64) -> f64 {
-        self.state.save_state();
-        let comp = self.component_extractor.create_component_from(clauses, &mut self.state);
-        self.add_to_propagation_stack(propagations);
-        let mut p = f128!(1.0);
-        match self.propagator.propagate(&mut self.graph, &mut self.state, comp, &mut self.component_extractor, 0, false) {
-            Err(_) => {
-                self.restore();
-                return 0.0
-            },
-            Ok(_) => {
-                p *= self.propagator.get_propagation_prob();
-            }
-        };
-        let mut distributions: FxHashSet<DistributionIndex> = FxHashSet::default();
-        for clause in self.component_extractor.component_iter(comp){
-            for v in self.graph[clause].iter_variables() {
-                if self.graph[v].is_probabilitic() && !self.graph[v].is_fixed(&self.state) {
-                    distributions.insert(self.graph[v].distribution().unwrap());
-                }
-            }
-        }
-        self.component_extractor.create_distribution_from(comp, distributions.iter().copied());
-        let (solution, _) = self._solve(comp, 1, bounding_factor);
-        let ub: Float = (1.0 - solution.1) / &self.prefix_factor;
-        let lb: Float = solution.0 / &self.prefix_factor;
-        let proba: Float = (ub*lb).sqrt()*p;
-        self.restore();
-        proba.to_f64()
-    }
-
-    pub fn transfer_learned_clause(&mut self, clause: Vec<Literal>) {
-        let head = clause.iter().copied().find(|l| l.is_positive());
-        let cl = self.graph.add_clause(clause, head, &mut self.state, true);
-        self.component_extractor.add_clause_to_component(ComponentIndex(0), cl)
-    }
 
     #[inline]
     fn are_bounds_tight_enough(&self, lb: Float, ub: Float, bound_factor: f64) -> bool {

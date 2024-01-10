@@ -29,9 +29,8 @@ use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
 use crate::common::*;
 
-use crate::core::{graph::{DistributionIndex, VariableIndex}, literal::Literal};
+use crate::core::graph::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
-use crate::solvers::*;
 
 use super::node::*;
 use rug::Float;
@@ -63,8 +62,6 @@ pub struct Dac<R>
     inputs: Vec<NodeIndex>,
     /// Mapping between the (distribution, value) and the node index for distribution nodes
     pub distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
-    /// An optional solver to evaluate nodes that have been cut due to partial compilation
-    solver: Option<Solver>,
     root: Option<NodeIndex>,
     partial_nodes: Vec<NodeIndex>,
     used_distributions: BitVec,
@@ -81,17 +78,12 @@ impl<R> Dac<R>
             outputs: vec![],
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
-            solver: None,
             root: None,
             partial_nodes: vec![],
             used_distributions: BitVec::new(),
         }
     }
 
-    pub fn set_solver(&mut self, solver: Solver) {
-        self.solver = Some(solver);
-    }
-    
     /// Adds a prod node to the circuit
     pub fn add_prod_node(&mut self) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
@@ -103,6 +95,12 @@ impl<R> Dac<R>
     pub fn add_sum_node(&mut self) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(Node::sum());
+        id
+    }
+
+    pub fn add_partial_node(&mut self, value: f64) -> NodeIndex {
+        let id = NodeIndex(self.nodes.len());
+        self.nodes.push(Node::partial(value));
         id
     }
 
@@ -136,7 +134,7 @@ impl<R> Dac<R>
                 // The distribution nodes are at layer 0
                 to_process.push((node, 0));
             }
-            if self[node].is_node_incomplete() {
+            if self[node].is_partial() {
                 to_process.push((node, 0));
             }
         }
@@ -257,43 +255,8 @@ impl<R> Dac<R>
                 }
             }
         }
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].is_node_incomplete() && self[node].is_unsat() {
-                self[node].set_to_remove(true);
-                for parent in self[node].iter_output() {
-                    to_process.push(self[node].get_output_at(parent));
-                }
-            }
-        }
-        while let Some(node) = to_process.pop() {
-            if self[node].is_to_remove() {
-                continue;
-            }
-            // If it is a sum, it must be removed only if it has at least one input that is not to be removed
-            if self[node].is_sum(){
-                let mut to_remove: bool = true;
-                for child in self[node].iter_input() {
-                    if !self[child].is_to_remove() {
-                        to_remove = false;
-                        break;
-                    }
-                }
-                if to_remove {
-                    self[node].set_to_remove(true);
-                    for parent in self[node].iter_output() {
-                        to_process.push(self[node].get_output_at(parent));
-                    }
-                }
-            }
-            // If it is a product, the unsat property is propagated to the parent, and the node is removed
-            else if self[node].is_product() {
-                self[node].set_to_remove(true);
-                for parent in self[node].iter_output() {
-                    to_process.push(self[node].get_output_at(parent));
-                }
-            }
-        }
     }
+
     /// A node is said to be neutral if it is not to be removed, has only one input, and is not the root of the DAC.
     /// In such case it can be bypass (it does not change its input)
     fn is_neutral(&self, node: NodeIndex) -> bool {
@@ -386,28 +349,6 @@ impl<R> Dac<R>
             if self[node].get_layer() > 0 {
                 break;
             }
-        }
-        if let Some(ref mut s) = self.solver {
-            let mut d_f64: Vec<Vec<f64>> = vec![];
-            for d in distributions.iter() {
-                d_f64.push(d.iter().map(|e| e.to_f64()).collect());
-            }
-            s.update_distributions(&d_f64);
-        }
-    }
-
-    pub fn reset_approx(&mut self) {
-        for i in 0..self.partial_nodes.len() {
-            let node = self.partial_nodes[i];
-            let propagations = self[node].get_propagation().clone();
-            let clauses = self[node].get_clauses().clone();
-            let factor = self[node].get_bounding_factor();
-            let s = self.solver.as_mut().unwrap();
-            let value = s.solve_partial(&propagations, &clauses, factor);
-            self[node].set_value(R::from_f64(value));
-        }
-        if let Some(ref mut s) = self.solver {
-            s.reset_cache();
         }
     }
 
@@ -522,19 +463,6 @@ impl<R> Dac<R>
         self.root = Some(root);
     }
 
-    /// Adds a node to the partial node list
-    pub fn add_to_partial_list(&mut self, node: NodeIndex) {
-        self.partial_nodes.push(node);
-    }
-
-    /// Marks the node as unsat and removes it from the partial node list
-    pub fn set_partial_node_unsat(&mut self, node: NodeIndex) {
-        let idx = self.partial_nodes.iter().position(|x| *x == node).unwrap();
-        self.partial_nodes.swap_remove(idx);
-        self[node].set_unsat();
-        self[node].clear_incomplete();
-    }
-
     pub fn set_number_used_distributions(&mut self, number: usize) {
         self.used_distributions.resize(number, false);
     }
@@ -575,27 +503,8 @@ impl<R> Dac<R>
         !self.partial_nodes.is_empty()
     }
 
-    /// Returns true if the DAC contains a partial node that can be extended with the given
-    /// distribution, false otherwise
-    pub fn has_partial_node_with_distribution(&self, distribution: DistributionIndex) -> Option<NodeIndex> {
-        for node in self.partial_nodes.iter().copied() {
-            if !self[node].is_to_remove() && self[node].has_distribution(distribution) {
-                return Some(node);
-            }
-        }
-        None
-    }
-
     pub fn root(&self) -> &R {
         self.nodes.last().unwrap().get_value()
-    }
-
-    pub fn add_clause_to_solver(&mut self, mut clauses: Vec<Vec<Literal>>) {
-        if let Some(solver) = self.solver.as_mut() {
-            while let Some(clause) = clauses.pop() {
-                solver.transfer_learned_clause(clause);
-            }
-        }
     }
 }
 
@@ -672,7 +581,7 @@ impl<R> Dac<R>
 
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = self.sp_node_id(node);
-            if self.nodes[node.0].get_propagation().len() > 0 {
+            if self[node].is_partial() {
                 out.push_str(&Dac::<Float>::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value().to_f64())));
             } else if self[node].is_product() {
                 out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3}) path({:.3})", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
@@ -730,10 +639,10 @@ impl<R> fmt::Display for Dac<R>
             match node.get_type() {
                 TypeNode::Product => write!(f, "x")?,
                 TypeNode::Sum => write!(f, "+")?,
+                TypeNode::Partial => write!(f, "p {}", node.get_value().to_f64())?,
                 TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
             write!(f, " {} {} {} {} ", node.get_output_start(), node.get_number_outputs(), node.get_input_start(), node.get_number_inputs())?;
-            writeln!(f, "{}", node.get_propagation().iter().map(|l| format!("{} {}", l.0.0, if l.1 { "t" } else { "f" })).collect::<Vec<String>>().join(" "))?;
         }
         fmt::Result::Ok(())
     }
@@ -749,7 +658,6 @@ impl<R> Dac<R>
             outputs: vec![],
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
-            solver: None,
             root: None,
             partial_nodes: vec![],
             used_distributions: BitVec::new(),

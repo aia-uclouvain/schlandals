@@ -29,14 +29,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, ClauseIndex, Graph};
-use crate::core::literal::Literal;
+use crate::core::graph::{DistributionIndex, Graph, VariableIndex};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
 use crate::diagrams::dac::dac::{NodeIndex, Dac};
+use super::Bounds;
+use rug::{Assign, Float};
 
 pub struct DACCompiler<B>
 where
@@ -56,7 +57,8 @@ where
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
     number_constrained_distribution: usize,
     epsilon: f64,
-
+    cache_partial: FxHashMap<CacheEntry, Bounds>,
+    distribution_out_vec: Vec<f64>,
 }
 
 impl<B> DACCompiler<B>
@@ -72,6 +74,7 @@ where
         epsilon: f64,
     ) -> Self {
         let cache = FxHashMap::default();
+        let distribution_out_vec = vec![0.0; graph.number_distributions()];
         Self {
             graph,
             state,
@@ -80,7 +83,9 @@ where
             propagator,
             cache,
             number_constrained_distribution: 0,
-            epsilon
+            epsilon,
+            cache_partial: FxHashMap::default(),
+            distribution_out_vec,
         }
     }
 
@@ -179,16 +184,9 @@ where
                                 break;
                             }
                         } else {
-                            let child = dac.add_sum_node();
-                            for (variable, value) in self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| (self.graph[*l].reason(&self.state).is_none())) {
-                                dac[child].add_to_propagation(variable, value);
-                            }
-                            for clause in self.component_extractor.component_iter(sub_component) {
-                                dac[child].add_to_clauses(clause);
-                            }
-                            dac.add_to_partial_list(child);
-                            dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
-                            dac[child].set_bounding_factor(new_bound_factor);
+                            let child_bound = self.get_cached_component_or_compute(sub_component, level, new_bound_factor).0;
+                            let child_value = (child_bound.0.clone() * child_bound.1.clone()).sqrt().to_f64();
+                            let child = dac.add_partial_node(child_value);
                             sum_children.push(child);
                         }
                     }
@@ -254,57 +252,174 @@ where
         let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
             None => None,
             Some(_) => {
-                self.tag_unsat_partial_nodes(&mut dac);
                 Some(dac)
             }
         };
         self.restore();
         ret
     }
-    
-    pub fn tag_unsat_partial_nodes<R>(&mut self, dac:&mut Dac<R>)
-        where R: SemiRing
-    {
-        let mut changed = true;
-        while changed {
-            changed = false;
-            // Since the nodes are removed from the vector of partial node, we traverse in reverse
-            // order so we do not mess up the indexes (the nodes are removed from the vector with
-            // swap_remove)
-            for node_i in (0..dac.number_partial_nodes()).rev() {
-                let node = dac.get_partial_node_at(node_i);
-                if !dac[node].is_unsat() && dac[node].is_node_incomplete(){
-                    if self.is_partial_node_unsat(&dac, node){
-                        changed = true;
-                        dac.set_partial_node_unsat(node);
-                    }
+
+    // ---- PARTIAL NODE COMPUTATION ----
+
+    pub fn _solve(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (Bounds, isize) {
+        // If the memory limit is reached, clear the cache.
+        self.state.save_state();
+        // Default solution with a probability/count of 1
+        // Since the probability are multiplied between the sub-components, it is neutral. And if
+        // there are no sub-components, this is the default solution.
+        let mut p_in = f128!(1.0);
+        let mut p_out = f128!(1.0);
+        let mut target = f128!(1.0);
+        for d in self.component_extractor.component_distribution_iter(component) {
+            if self.graph[d].is_constrained(&self.state) {
+                target *= self.graph[d].remaining(&self.state);
+            }
+        }
+        // First we detect the sub-components in the graph
+        if self
+            .component_extractor
+            .detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator)
+        {
+            let number_component = self.component_extractor.number_components(&self.state);
+            let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
+            for sub_component in self.component_extractor.components_iter(&self.state) {
+                let sub_target = self.component_extractor[sub_component].max_probability();
+                let (cache_solution, _) = self.get_cached_component_or_compute(sub_component, level, new_bound_factor);
+                p_in *= cache_solution.0;
+                p_out *= sub_target - cache_solution.1;
+            }
+        }
+        self.restore();
+        ((p_in, target - p_out), level - 1)
+    }
+
+    fn get_cached_component_or_compute(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (Bounds, isize) {
+        let bit_repr = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
+        match self.cache_partial.get(&bit_repr) {
+            None => {
+                let f = self.choose_and_branch(component, level, bound_factor);
+                self.cache_partial.insert(bit_repr, f.0.clone());
+                f
+            },
+            Some(f) => {
+                if self.are_bounds_tight_enough(f.0.clone(), 1.0 - f.1.clone(), bound_factor) {
+                    (f.clone(), level)
+                } else {
+                    let new_f = self.choose_and_branch(component, level, bound_factor);
+                    self.cache_partial.insert(bit_repr, new_f.0.clone());
+                    new_f
                 }
             }
         }
     }
-    pub fn is_partial_node_unsat<R>(&mut self, dac:&Dac<R>, node: NodeIndex) -> bool 
-        where R: SemiRing
-    {
-        self.state.save_state();
-        let propagations = dac[node].get_propagation();
-        for (variable, value) in propagations.iter().copied().rev() {
-            self.propagator.add_to_propagation_stack(variable, value, None);
+
+    fn get_probability_mass_from_assignment(&mut self, distribution: DistributionIndex, target: f64, component: ComponentIndex) -> (Float, Float) {
+        let mut added_proba = f128!(1.0);
+        let mut removed_proba = f128!(1.0);
+        let mut has_removed = false;
+        for distribution in self.component_extractor.component_distribution_iter(component) {
+            self.distribution_out_vec[distribution.0] = 0.0;
         }
-        let res = self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, true).is_err();
-        self.restore();
-        res
+        for v in self.propagator.assignments_iter(&self.state).map(|l| l.to_variable()) {
+            if self.graph[v].is_probabilitic() {
+                let d = self.graph[v].distribution().unwrap();
+                if self.graph[v].value(&self.state).unwrap() {
+                    added_proba *= self.graph[v].weight().unwrap();
+                } else if distribution != d {
+                    has_removed = true;
+                    self.distribution_out_vec[d.0] += self.graph[v].weight().unwrap();
+                }
+            }
+        }
+        if has_removed {
+            for distribution in self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution) {
+                let v = self.distribution_out_vec[distribution.0];
+                let remain_d = self.graph[distribution].remaining(&self.state);
+                removed_proba *= remain_d - v;
+                if v != 0.0 {
+                    self.graph[distribution].remove_probability_mass(v, &mut self.state);
+                }
+            }
+        } else {
+            removed_proba.assign(target);
+        }
+        (added_proba, target - removed_proba)
     }
 
-    pub fn get_learned_clauses(&self) -> Vec<Vec<Literal>> {
-        self.graph.clauses_iter().filter(|c| self.graph[*c].is_learned()).map(|c| self.get_clause(c)).collect()
+    /// Chooses a distribution to branch on using the heuristics of the solver and returns the
+    /// solution of the component.
+    /// The solution is the sum of the probability of the SAT children.
+    fn choose_and_branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64)-> (Bounds, isize) {
+        let decision = self.branching_heuristic.branch_on(
+            &self.graph,
+            &mut self.state,
+            &self.component_extractor,
+            component,
+        );
+        let target = self.component_extractor[component].max_probability();
+        if let Some(distribution) = decision {
+            let mut p_in = f128!(0.0);
+            let mut p_out = f128!(0.0);
+            let mut branches = self.graph[distribution].iter_variables().filter(|v| !self.graph[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>();
+            branches.sort_by(|v1, v2| {
+                let f1 = self.graph[*v1].weight().unwrap();
+                let f2 = self.graph[*v2].weight().unwrap();
+                f1.total_cmp(&f2)
+            });
+            let unsat_factor = target / self.graph[distribution].remaining(&self.state);
+            for variable in branches.iter().rev().copied() {
+                let v_weight = self.graph[variable].weight().unwrap();
+                self.state.save_state();
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
+                    Err(backtrack_level) => {
+                        self.branching_heuristic.update_distribution_score(distribution);
+                        self.branching_heuristic.decay_scores();
+                        self.restore();
+                        let mut f = f128!(1.0);
+                        for d in self.component_extractor.component_distribution_iter(component) {
+                            if d != distribution {
+                                f *= self.graph[d].remaining(&self.state);
+                            }
+                        }
+                        p_out += v_weight*unsat_factor;
+                        if backtrack_level != level {
+                            debug_assert!(p_in == 0.0);
+                            self.restore();
+                            return ((p_in, f128!(target)), backtrack_level);
+                        }
+                    },
+                    Ok(_) => {
+                        let (m_in, m_out) = self.get_probability_mass_from_assignment(distribution, target / self.graph[distribution].remaining(&self.state), component);
+                        p_out += v_weight * m_out;
+                        if m_in != 0.0 {
+                            let (child_sol, backtrack_level) = self._solve(component, level+1, bound_factor);
+                            p_in += child_sol.0 * &m_in;
+                            p_out += child_sol.1 * &m_in;
+                            if backtrack_level != level {
+                                self.restore();
+                                return ((f128!(0.0), f128!(target)), backtrack_level);
+                            }
+                            let lb = p_in.clone();
+                            let ub = target - p_out.clone();
+                            if self.are_bounds_tight_enough(lb, ub, bound_factor) {
+                                self.restore();
+                                return ((p_in, p_out), level);
+                            }
+                        }
+                        self.restore();
+                    }
+                };
+            }
+            ((p_in, p_out), level)
+        } else {
+            // The sub-formula is SAT, by definition return 1. In practice should not happen since in that case no components are returned in the detection
+            ((f128!(1.0), f128!(0.0)), level)
+        }
     }
 
-    pub fn get_clause(&self, clause: ClauseIndex) -> Vec<Literal> {
-        self.graph[clause].iter().collect()
+    #[inline]
+    fn are_bounds_tight_enough(&self, lb: Float, ub: Float, bound_factor: f64) -> bool {
+        ub <= lb.clone()*bound_factor
     }
 
-    /// Returns a boolean vector indicating which distributions are learned
-    pub fn get_learned_distributions(&self) -> Vec<bool> {
-        self.graph.distributions_iter().map(|d| self.graph[d].is_branching_candidate()).collect()
-    }
 }

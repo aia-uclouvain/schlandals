@@ -145,6 +145,32 @@ pub fn distributions_from_cnf(filepath: &PathBuf) -> Vec<Vec<f64>> {
     distributions
 }
 
+pub fn learned_distributions_from_cnf(filepath: &PathBuf) -> Vec<bool> {
+    let mut number_distributions = 0;
+    let mut learned_distributions: Vec<usize> = vec![];
+    let file = File::open(filepath).unwrap();
+    let reader = BufReader::new(&file);
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Problem while parsing the learned distributions: {}", e),
+            Ok(line) => {
+                if line.starts_with("c p distribution") {
+                    number_distributions += 1;
+                } else if line.starts_with("c p learn") {
+                    for d in line.split_whitespace().skip(3).map(|s| s.parse::<usize>().unwrap() - 1) {
+                        learned_distributions.push(d);
+                    }
+                }
+            }
+        }
+    }
+    let mut flags = vec![false; number_distributions];
+    for x in learned_distributions {
+        flags[x] = true;
+    }
+    flags
+}
+
 pub fn type_of_input(filepath: &PathBuf) -> FileType {
     let mut header = String::new();
     {

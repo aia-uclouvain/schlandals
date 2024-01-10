@@ -87,6 +87,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
             if let Some(ref mut dac) = &mut res {
                 dac.optimize_structure();
                 dac.evaluate();
+                println!("Dac probability {}", dac.get_circuit_probability());
                 if let Some(f) = dotfile {
                     let out = dac.as_graphviz();
                     let mut outfile = File::create(f).unwrap();

@@ -27,16 +27,15 @@
 use rustc_hash::FxHashSet;
 
 use rug::Float;
-use crate::core::graph::{DistributionIndex, VariableIndex, ClauseIndex};
 use crate::diagrams::semiring::*;
 use super::dac::NodeIndex;
 use crate::common::*;
-use bitvec::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeNode {
     Product,
     Sum,
+    Partial,
     Distribution {d: usize, v: usize},
 }
 
@@ -54,6 +53,7 @@ impl TypeNode {
         match self {
             TypeNode::Product => panic!("Product typenode has no value"),
             TypeNode::Sum => panic!("Sum typenode has no value"),
+            TypeNode::Partial => panic!("Partial typenode has no value"),
             TypeNode::Distribution{d:_,v} => *v,
         }
     }
@@ -86,14 +86,6 @@ pub struct Node<R>
     to_remove: bool,
     /// Gradient computation, the value of the path from the root
     path_value: Float,
-    /// Propagation path
-    propagation: Vec<(VariableIndex, bool)>,
-    clauses: Vec<ClauseIndex>,
-    /// If the node has been partially compiled, store the distributions it contains in the
-    /// sub-problem it represent
-    distributions: Option<BitVec>,
-    is_unsat: bool,
-    bounding_factor: f64,
 }
 
 impl<R> Node<R>
@@ -113,11 +105,6 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
-            propagation: vec![],
-            clauses: vec![],
-            distributions: None,
-            is_unsat: false,
-            bounding_factor: 1.0,
         }
     }
 
@@ -134,11 +121,22 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
-            propagation: vec![],
-            clauses: vec![],
-            distributions: None,
-            is_unsat: false,
-            bounding_factor: 1.0,
+        }
+    }
+
+    pub fn partial(value: f64) -> Self {
+        Node {
+            value: R::from_f64(value),
+            outputs: vec![],
+            inputs: FxHashSet::default(),
+            typenode: TypeNode::Partial,
+            output_start: 0,
+            number_outputs: 0,
+            input_start: 0,
+            number_inputs: 0,
+            layer: 0,
+            to_remove: true,
+            path_value: f128!(1.0),
         }
     }
 
@@ -155,11 +153,6 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
-            propagation: vec![],
-            clauses: vec![],
-            distributions: None,
-            is_unsat: false,
-            bounding_factor: 1.0
         }
     }
 
@@ -176,6 +169,11 @@ impl<R> Node<R>
     /// Returns true iff the node is a sum node
     pub fn is_sum(&self) -> bool {
         is_node_type!(self.typenode, TypeNode::Sum)
+    }
+
+    /// Returns true iff the node is a partial node
+    pub fn is_partial(&self) -> bool {
+        is_node_type!(self.typenode, TypeNode::Partial)
     }
 
     /// Returns the value of the node
@@ -228,62 +226,6 @@ impl<R> Node<R>
         self.to_remove
     }
 
-    pub fn is_unsat(&self) -> bool {
-        self.is_unsat
-    }
-
-    /// Returns the propagations that need to be done to reach the node
-    pub fn get_propagation(&self) -> &Vec<(VariableIndex, bool)> {
-        &self.propagation
-    }
-
-    /// Adds the pair (variable, value) to te propagation stack
-    pub fn add_to_propagation(&mut self, variable: VariableIndex, value: bool) {
-        self.propagation.push((variable, value));
-    }
-
-    pub fn add_to_clauses(&mut self, clause: ClauseIndex) {
-        self.clauses.push(clause);
-    }
-
-    pub fn get_clauses(&self) -> &Vec<ClauseIndex> {
-        &self.clauses
-    }
-
-    pub fn clear_incomplete(&mut self) {
-        self.propagation.clear();
-        self.clauses.clear();
-    }
-    /// Returns true iff the node is incomplete. A node is incomplete if the compilation has been
-    /// stopped while the sub-problem represented by the node was not solved. In that case, the
-    /// propagations to reach the node are stored in the `propagation field`.
-    pub fn is_node_incomplete(&self) -> bool {
-        !self.propagation.is_empty()
-    }
-
-    /// Adds the distributions to the pool of distribution in the partial node
-    pub fn add_distributions(&mut self, number_distributions: usize, distributions: impl Iterator<Item = DistributionIndex>) {
-        let mut bv = BitVec::new();
-        for _ in 0..number_distributions {
-            bv.push(false);
-        }
-        for d in distributions {
-            *bv.get_mut(d.0).unwrap() = true;
-        }
-        self.distributions = Some(bv);
-    }
-
-    /// Returns true if the node is partial and can branch on the given distribution, false
-    /// otherwise
-    pub fn has_distribution(&self, distribution: DistributionIndex) -> bool {
-        match &self.distributions {
-            Some(bv) => {
-                bv[distribution.0]
-            },
-            None => false,
-        }
-    }
-
     /// Returns true iff the node has some output
     pub fn has_output(&self) -> bool {
         self.number_outputs > 0
@@ -328,18 +270,6 @@ impl<R> Node<R>
     /// Sets the start of the output of the node
     pub fn set_output_start(&mut self, output_start: usize){
         self.output_start = output_start;
-    }
-
-    pub fn set_unsat(&mut self) {
-        self.is_unsat = true;
-    }
-
-    pub fn get_bounding_factor(&self) -> f64 {
-        self.bounding_factor
-    }
-
-    pub fn set_bounding_factor(&mut self, factor: f64) {
-        self.bounding_factor = factor;
     }
 
     /// Sets the number of output of the node

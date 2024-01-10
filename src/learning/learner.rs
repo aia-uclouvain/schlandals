@@ -105,38 +105,31 @@ impl <const S: bool> Learner<S>
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
-        let mut dacs = inputs.par_iter().map(|input| {
+        let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
+        let dacs = inputs.par_iter().map(|input| {
             // We compile the input. This can either be a .cnf file or a fdac file.
             // If the file is a fdac file, then we read directly from it
-            let mut d = match type_of_input(input) {
+            match type_of_input(input) {
                 FileType::CNF => {
                     println!("Compiling {}", input.to_str().unwrap());
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
                     let mut compiler = make_compiler!(input, branching, epsilon);
-                    let dac = compile!(compiler);
-                    (dac, Some(compiler))
+                    if let Some(mut dac) = compile!(compiler) {
+                        dac.optimize_structure();
+                        Some(dac)
+                    } else {
+                        None
+                    }
                 },
                 FileType::FDAC => {
                     println!("Reading {}", input.to_str().unwrap());
                     // The query has already been compiled, we just read from the file.
-                    (Some(Dac::from_file(input)), None)
-                }
-            };
-            // We handle the compiled circuit, if present.
-            if let Some(ref mut dac) = d.0.as_mut() {
-                if dac.has_cutoff_nodes() {
-                    // The circuit has some nodes that have been cut-off. This means that, when
-                    // evaluating the circuit, they need to be solved. Hence we stock a solver
-                    // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, true);
-                    dac.set_solver(solver);
+                    Some(Dac::from_file(input))
                 }
             }
-            d
         }).collect::<Vec<_>>();
-
         let mut learner = Self { 
             dacs: vec![], 
             unsoftmaxed_distributions, 
@@ -146,35 +139,16 @@ impl <const S: bool> Learner<S>
             expected_outputs: vec![],
             log: Logger::default(),
             epsilon,
-            learned_distributions: vec![true; dacs.len()],
+            learned_distributions,
         };
 
-        for (d, c) in dacs.iter_mut() {
-            if let Some(dac) = d {
-                if epsilon > 0.0 {
-                    if let Some(compiler) = c {
-                        compiler.tag_unsat_partial_nodes(dac);
-                    }
-                    let clauses = if let Some(compiler) = c { compiler.get_learned_clause() } else { vec![] };
-                    dac.add_clause_to_solver(clauses);
-                }
-                dac.optimize_structure();
-                //println!("nb approx {}, nb nodes {}", dac.number_partial_nodes(), dac.number_nodes());
-            }
-        }
-
         for (i, dac) in dacs.into_iter().enumerate() {
-            if let Some(compiler) = dac.1 {
-                learner.learned_distributions = compiler.get_learned_distributions();
-            }
-            if let Some(dac) = dac.0 {
-                if dac.number_nodes() == 2 && dac.number_partial_nodes() == 1 { continue;}
+            if let Some(dac) = dac {
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
-            }        
+            }
         }
         learner.log = Logger::new(outfolder.as_ref(), learner.dacs.len());
-        
         learner
     }
 
@@ -236,19 +210,16 @@ impl <const S: bool> Learner<S>
     // --- Evaluation --- //
 
     // Evaluate the different DACs and return the results
-    pub fn evaluate(&mut self, eval_approx:bool) -> Vec<f64> {
+    pub fn evaluate(&mut self) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.dacs.iter_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.dacs.par_iter_mut().for_each(|d| {
-            if eval_approx {
-                d.reset_approx();
-            }
             d.evaluate();
             //println!("dac\n{}", d.as_graphviz());
         });
-        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect::<Vec<f64>>()
+        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
     }
 
     // --- Gradient computation --- //
@@ -282,6 +253,7 @@ impl <const S: bool> Learner<S>
                         TypeNode::Sum => {
                             self.dacs[dac_id][child].add_to_path_value(path_val.clone());
                         },
+                        TypeNode::Partial => { },
                         TypeNode::Distribution { .. } => {},
                     }
                     if let TypeNode::Distribution { d, v } = self.dacs[dac_id][child].get_type() {
@@ -326,7 +298,6 @@ impl<const S: bool> Learning for Learner<S> {
         let stopping_criterion = 0.0001;
         let mut prev_loss = 1.0;
         let delta_early_stop = 0.00001;
-        let _eval_approx_freq = 500;
         let mut count_no_improve = 0;
         let patience = 5;
         self.log.start();
@@ -340,7 +311,7 @@ impl<const S: bool> Learning for Learner<S> {
             let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
-            let predictions = self.evaluate(e==0);
+            let predictions = self.evaluate();
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
             /* if do_print { 

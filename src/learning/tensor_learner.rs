@@ -63,36 +63,28 @@ impl <const S: bool> TensorLearner<S>
         let mut dacs = inputs.par_iter().map(|input| {
             // We compile the input. This can either be a .cnf file or a fdac file.
             // If the file is a fdac file, then we read directly from it
-            let mut d = match type_of_input(input) {
+            match type_of_input(input) {
                 FileType::CNF => {
                     println!("Compiling {}", input.to_str().unwrap());
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
                     let mut compiler = make_compiler!(input, branching, epsilon);
-                    let dac = compile!(compiler);
-                    (dac, Some(compiler))
+                    if let Some(mut dac) = compile!(compiler) {
+                        dac.optimize_structure();
+                        Some(dac)
+                    } else {
+                        None
+                    }
                 },
                 FileType::FDAC => {
                     println!("Reading {}", input.to_str().unwrap());
                     // The query has already been compiled, we just read from the file.
-                    (Some(Dac::from_file(input)), None)
-                }
-            };
-            // We handle the compiled circuit, if present.
-            if let Some(ref mut dac) = d.0.as_mut() {
-                dac.remove_dead_ends();
-                if dac.has_cutoff_nodes() {
-                    // The circuit has some nodes that have been cut-off. This means that, when
-                    // evaluating the circuit, they need to be solved. Hence we stock a solver
-                    // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, false);
-                    dac.set_solver(solver);
+                    Some(Dac::from_file(input))
                 }
             }
-            d
         }).collect::<Vec<_>>();
-        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.0.is_some()).count());
+        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count());
 
         let vs = nn::VarStore::new(Device::Cpu);
         let root = vs.root();
@@ -109,15 +101,9 @@ impl <const S: bool> TensorLearner<S>
         let mut s_dacs: Vec<Dac<Tensor>> = vec![];
         let mut expected: Vec<Tensor> = vec![];
         while dacs.len() > 0 {
-            let (dac, mut compiler) = dacs.pop().unwrap();
+            let dac = dacs.pop().unwrap();
             let proba = expected_outputs.pop().unwrap();
-            if let Some(mut d) = dac {
-                if let Some(comp) = compiler.as_mut() {
-                    comp.tag_unsat_partial_nodes(&mut d);
-                }
-                let clauses = if let Some(comp) = compiler { comp.get_learned_clause() } else { vec![] };
-                d.add_clause_to_solver(clauses);
-                d.optimize_structure();
+            if let Some(d) = dac {
                 //println!("dac\n{}", d.as_graphviz());
                 s_dacs.push(d);
                 expected.push(Tensor::from_f64(proba));
@@ -172,22 +158,15 @@ impl <const S: bool> TensorLearner<S>
     // --- Evaluation --- //
 
     // Evaluate the different DACs and return the results
-    fn evaluate(&mut self, eval_approx:bool) -> Vec<f64> {
+    fn evaluate(&mut self) -> Vec<f64> {
         for i in 0..self.dacs.len() {
             let softmaxed = self.get_softmaxed_array();
             self.dacs[i].reset_distributions(&softmaxed);
         }
-        let mut predictions = vec![];
-        //self.dacs.par_iter_mut().enumerate().for_each(|(i, d)| {
-        for i in 0..self.dacs.len() {
-            let d = &mut self.dacs[i];
-            if eval_approx {
-                d.reset_approx();
-            }
-            predictions[i] = d.evaluate().to_f64();
-
-        }
-        predictions
+        self.dacs.par_iter_mut().for_each(|d| {
+            d.evaluate();
+        });
+        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
     }
 }
 
@@ -201,7 +180,6 @@ impl<const S: bool> Learning for TensorLearner<S> {
         let stopping_criterion = 0.0001;
         let mut prev_loss = 1.0;
         let delta_early_stop = 0.00001;
-        let eval_approx_freq = 500;
         let mut count_no_improve = 0;
         let patience = 5;
         self.log.start();
@@ -214,7 +192,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             self.optimizer.set_lr(self.lr);
             if do_print{println!("\nEpoch {} lr {}", e, self.lr);}
-            let predictions = self.evaluate(e % eval_approx_freq == 0);
+            let predictions = self.evaluate();
             if do_print {
                 for i in 0..self.dacs.len() {
                     println!("{} {} {}", i, self.dacs[i].root().to_f64(), self.expected_outputs[i].to_f64());
@@ -235,7 +213,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
                 println!("tensor grad: {:?}", d.grad());
             } */
             self.log.log_epoch(&dac_loss, 0.0, self.epsilon, &predictions);
-            let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+            let avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
             if (avg_loss-prev_loss).abs()<delta_early_stop {
                 count_no_improve += 1;
             }
@@ -246,24 +224,8 @@ impl<const S: bool> Learning for TensorLearner<S> {
                 // TODO: Before we checked if the learned ratio was < 1.0 and launched only in that
                 // case the additional evaluation. Should probabily do something of the like with
                 // the cut-off nodes int he DACs?
-                self.evaluate(true);
-                let mut loss_epoch = Tensor::from(0.0);
-                for i in 0..self.dacs.len() {
-                    let loss_i = match loss {
-                        Loss::MAE => self.dacs[i].root().l1_loss(&self.expected_outputs[i], Reduction::Mean),
-                        Loss::MSE => self.dacs[i].root().mse_loss(&self.expected_outputs[i], Reduction::Mean),
-                    };
-                    dac_loss[i] = loss_i.to_f64();
-                    loss_epoch += loss_i;
-                }
-                avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
-                if (avg_loss-prev_loss).abs()>delta_early_stop {
-                    count_no_improve = 0;
-                }
-                if avg_loss < stopping_criterion || count_no_improve>=patience{
-                    println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
-                    break;
-                }
+                println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                break;
             }
             prev_loss = avg_loss;
         }

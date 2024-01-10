@@ -17,10 +17,6 @@
 
 use rug::Float;
 use crate::branching::*;
-use crate::diagrams::dac::dac::Dac;
-use crate::core::graph::{VariableIndex, ClauseIndex};
-use crate::core::literal::Literal;
-use crate::diagrams::semiring::*;
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -49,90 +45,6 @@ pub enum Solver {
     QMinOutDegree(SearchSolver<MinOutDegree, false>),
     QMaxDegree(SearchSolver<MaxDegree, false>),
     QVSIDS(SearchSolver<VSIDS, false>),
-}
-
-impl Solver {
-
-    pub fn solve(&mut self) -> ProblemSolution {
-        match self {
-            Solver::SMinInDegree(solver) => solver.solve(),
-            Solver::SMinOutDegree(solver) => solver.solve(),
-            Solver::SMaxDegree(solver) => solver.solve(),
-            Solver::SVSIDS(solver) => solver.solve(),
-            Solver::QMinInDegree(solver) => solver.solve(),
-            Solver::QMinOutDegree(solver) => solver.solve(),
-            Solver::QMaxDegree(solver) => solver.solve(),
-            Solver::QVSIDS(solver) => solver.solve(),
-        }
-    }
-
-    pub fn solve_partial(&mut self, propagations:&Vec<(VariableIndex, bool)>, clauses:&Vec<ClauseIndex>, factor: f64) -> f64 {
-        match self {
-            Solver::SMinInDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::SMinOutDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::SMaxDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::SVSIDS(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::QMinInDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::QMinOutDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::QMaxDegree(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-            Solver::QVSIDS(ref mut solver) => {
-                solver.solve_partial(propagations, clauses, factor)
-            },
-        }
-    }
-
-    pub fn update_distributions(&mut self, distributions: &Vec<Vec<f64>>) {
-        match self {
-            Solver::SMinInDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::SMinOutDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::SMaxDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::SVSIDS(ref mut solver) => solver.update_distributions(distributions),
-            Solver::QMinInDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::QMinOutDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::QMaxDegree(ref mut solver) => solver.update_distributions(distributions),
-            Solver::QVSIDS(ref mut solver) => solver.update_distributions(distributions),
-        }
-    }
-
-    pub fn reset_cache(&mut self) {
-        match self {
-            Solver::SMinInDegree(ref mut solver) => solver.reset_cache(),
-            Solver::SMinOutDegree(ref mut solver) => solver.reset_cache(),
-            Solver::SMaxDegree(ref mut solver) => solver.reset_cache(),
-            Solver::SVSIDS(ref mut solver) => solver.reset_cache(),
-            Solver::QMinInDegree(ref mut solver) => solver.reset_cache(),
-            Solver::QMinOutDegree(ref mut solver) => solver.reset_cache(),
-            Solver::QMaxDegree(ref mut solver) => solver.reset_cache(),
-            Solver::QVSIDS(ref mut solver) => solver.reset_cache(),
-        }
-    }
-
-    pub fn transfer_learned_clause(&mut self, clause: Vec<Literal>) {
-        match self {
-            Solver::SMinInDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::SMinOutDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::SMaxDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::SVSIDS(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::QMinInDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::QMinOutDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::QMaxDegree(ref mut solver) => solver.transfer_learned_clause(clause),
-            Solver::QVSIDS(ref mut solver) => solver.transfer_learned_clause(clause),
-        }
-    }
 }
 
 macro_rules! make_solver {
@@ -243,38 +155,6 @@ pub enum Compiler {
     MinOutDegree(DACCompiler<MinOutDegree>),
     MaxDegree(DACCompiler<MaxDegree>),
     VSIDS(DACCompiler<VSIDS>),
-}
-
-impl Compiler {
-
-    pub fn tag_unsat_partial_nodes<R:SemiRing>(&mut self, dac: &mut Dac<R>) {
-        match self {
-            Compiler::VSIDS(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
-            Compiler::MinInDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
-            Compiler::MinOutDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
-            Compiler::MaxDegree(ref mut compiler) => compiler.tag_unsat_partial_nodes(dac),
-        }
-    }
-
-    pub fn get_learned_clause(&self) -> Vec<Vec<Literal>> {
-        match self {
-            Compiler::VSIDS(ref compiler) => compiler.get_learned_clauses(),
-            Compiler::MinInDegree(ref compiler) => compiler.get_learned_clauses(),
-            Compiler::MinOutDegree(ref compiler) => compiler.get_learned_clauses(),
-            Compiler::MaxDegree(ref compiler) => compiler.get_learned_clauses(),
-        }
-    }
-
-    pub fn get_learned_distributions(&self) -> Vec<bool> {
-        match self {
-            Compiler::VSIDS(ref compiler) => compiler.get_learned_distributions(),
-            Compiler::MinInDegree(ref compiler) => compiler.get_learned_distributions(),
-            Compiler::MinOutDegree(ref compiler) => compiler.get_learned_distributions(),
-            Compiler::MaxDegree(ref compiler) => compiler.get_learned_distributions(),
-        }
-    }
-
-
 }
 
 macro_rules! make_compiler {
