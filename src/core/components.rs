@@ -89,6 +89,7 @@ pub struct Component {
     /// Hash of the component, computed during its detection
     hash: u64,
     max_probability: f64,
+    has_learned_distribution: bool,
 }
 
 impl Component {
@@ -99,6 +100,10 @@ impl Component {
 
     pub fn max_probability(&self) -> f64 {
         self.max_probability
+    }
+
+    pub fn has_learned_distribution(&self) -> bool {
+        self.has_learned_distribution
     }
 }
 
@@ -116,6 +121,7 @@ impl ComponentExtractor {
             number_distribution: g.number_distributions(),
             hash: 0,
             max_probability: 1.0,
+            has_learned_distribution: false,
         }];
         Self {
             clauses: nodes,
@@ -165,6 +171,7 @@ impl ComponentExtractor {
         comp_number_distribution: &mut usize,
         hash: &mut u64,
         max_probability: &mut f64,
+        has_learned_distribution: &mut bool,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
@@ -198,6 +205,7 @@ impl ComponentExtractor {
                     for variable in g[clause].iter_probabilistic_variables() {
                         if !g[variable].is_fixed(state) {
                             let distribution = g[variable].distribution().unwrap();
+                            *has_learned_distribution |= g[distribution].is_branching_candidate();
                             if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
                                 let current_d_pos = self.distribution_positions[distribution.0];
                                 let new_d_pos = comp_distribution_start + *comp_number_distribution;
@@ -270,6 +278,7 @@ impl ComponentExtractor {
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
+                let mut has_learned_distribution = false;
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -279,10 +288,11 @@ impl ComponentExtractor {
                     &mut number_distribution,
                     &mut hash,
                     &mut max_probability,
+                    &mut has_learned_distribution,
                     state,
                 );
                 if number_distribution > 0 {
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability});
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -382,7 +392,7 @@ impl ComponentExtractor {
             self.clause_positions[clause.0] = new_pos;
             self.clause_positions[moved_node.0] = current_pos;
         }
-        let component = Component{start, size, distribution_start, number_distribution, hash, max_probability};
+        let component = Component{start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution: false};
         self.components.push(component);
         state.set_usize(self.limit, self.components.len());
         ComponentIndex(self.components.len() - 1)

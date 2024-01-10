@@ -117,13 +117,9 @@ impl Clause {
     /// If the clause still has unfixed probabilisitc variables, return the distribution of the first watcher.
     /// Else, return None.
     pub fn get_constrained_distribution(&self, state: &StateManager, g: &Graph) -> Option<DistributionIndex> {
-        match self.literals.iter_end().filter(|l| {
-            let v = l.to_variable();
-            let d = g[v].distribution().unwrap();
-            !g[v].is_fixed(state) && g[d].is_branching_candidate()
-        }).map(|l| g[l.to_variable()].distribution()).next() {
+        match self.literals.get_alive_end_watcher(state) {
             None => None,
-            Some(o) => o,
+            Some(l) => g[l.to_variable()].distribution(),
         }
     }
     
