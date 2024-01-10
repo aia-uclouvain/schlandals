@@ -38,8 +38,6 @@ use crate::propagator::Propagator;
 use crate::common::*;
 use crate::diagrams::dac::dac::{NodeIndex, Dac};
 
-/// The solver for a particular set of Horn clauses. It is generic over the branching heuristic
-/// and has a constant parameter that tells if statistics must be recorded or not.
 pub struct DACCompiler<B>
 where
     B: BranchingDecision,
@@ -56,9 +54,6 @@ where
     propagator: Propagator,
     /// Cache used to store results of sub-problems
     cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
-    /// If true, allows the compiler to compile partially the diagram and run an approximate solver
-    /// to estimate the probability of the partially compiled node
-    partial: bool,
     number_constrained_distribution: usize,
     epsilon: f64,
 
@@ -84,14 +79,9 @@ where
             branching_heuristic,
             propagator,
             cache,
-            partial: false,
             number_constrained_distribution: 0,
             epsilon
         }
-    }
-
-    pub fn set_partial(&mut self, value: bool) {
-        self.partial = value;
     }
 
     fn restore(&mut self) {
@@ -133,11 +123,9 @@ where
         if level == 1 {
             dac.set_number_used_distributions(self.graph.number_distributions());
         }
+
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
-            if level==1 {
-                dac.set_root(node);
-            }
             for literal in self.propagator.assignments_iter(&self.state) {
                 let variable = literal.to_variable();
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
@@ -165,6 +153,7 @@ where
         } else {
             None
         };
+
         let mut sum_children: Vec<NodeIndex> = vec![];
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
             let number_component = self.component_extractor.number_components(&self.state);
@@ -175,11 +164,10 @@ where
                     dac.set_used_distribution(distribution);
                     }
                 }
+
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 if !self.cache.contains_key(&bit_repr) {
-                    let branching = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component);
-                    if branching.is_some() {
-                        let distribution = branching.unwrap();
+                    if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
                         if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
                             sum_children.push(child);
                             self.cache.insert(bit_repr, Some(child));
@@ -226,11 +214,11 @@ where
         }
         if !sum_children.is_empty() && prod_node.is_none() {
             prod_node = Some(dac.add_prod_node());
-            if level==1 {
-                dac.set_root(prod_node.unwrap());
-            }
         }
         if let Some(node) = prod_node {
+            if level==1 {
+                dac.set_root(node);
+            }
             for child in sum_children {
                 dac.add_node_output(child, node);
             }

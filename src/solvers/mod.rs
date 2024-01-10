@@ -140,7 +140,7 @@ macro_rules! make_solver {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state);
+            let graph = graph_from_ppidimacs($i, &mut state, false);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
@@ -246,14 +246,6 @@ pub enum Compiler {
 }
 
 impl Compiler {
-    pub fn set_partial_mode_on(&mut self) {
-        match self {
-            Compiler::VSIDS(ref mut compiler) => compiler.set_partial(true),
-            Compiler::MinInDegree(ref mut compiler) => compiler.set_partial(true),
-            Compiler::MinOutDegree(ref mut compiler) => compiler.set_partial(true),
-            Compiler::MaxDegree(ref mut compiler) => compiler.set_partial(true),
-        }
-    }
 
     pub fn tag_unsat_partial_nodes<R:SemiRing>(&mut self, dac: &mut Dac<R>) {
         match self {
@@ -281,7 +273,7 @@ macro_rules! make_compiler {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state);
+            let graph = graph_from_ppidimacs($i, &mut state, true);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             match $b {
                 Branching::MinInDegree => {

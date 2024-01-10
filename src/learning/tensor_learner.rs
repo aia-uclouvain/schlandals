@@ -70,9 +70,6 @@ impl <const S: bool> TensorLearner<S>
                     // First, we need to know how much distributions are needed to compute the
                     // query.
                     let mut compiler = make_compiler!(input, branching, epsilon);
-                    if epsilon > 0.0 {
-                        compiler.set_partial_mode_on();
-                    }
                     let dac = compile!(compiler);
                     (dac, Some(compiler))
                 },
