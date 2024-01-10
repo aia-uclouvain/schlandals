@@ -60,9 +60,10 @@ pub struct Learner<const S: bool>
     expected_outputs: Vec<f64>,
     log: Logger<S>,
     epsilon: f64,
+    learned_distributions: Vec<bool>,
 }
 
-fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac_loss: Vec<f64>, mut dac_grad: Vec<f64>) -> (Vec<f64>, Vec<f64>) {
+fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac_loss: Vec<f64>, mut dac_grad: Vec<f64>, _epsilon:f64) -> (Vec<f64>, Vec<f64>) {
     for i in 0..predictions.len() {
         match loss {
             Loss::MSE => {
@@ -71,8 +72,19 @@ fn loss_and_grad(loss:Loss, predictions: &Vec<f64>, expected: &Vec<f64>, mut dac
             },
             Loss::MAE => {
                 dac_loss[i] = (predictions[i] - expected[i]).abs();
-                dac_grad[i] = if predictions[i] > expected[i] {1.0} else {-1.0};
+                dac_grad[i] = if predictions[i] > expected[i] {1.0} else if predictions[i]==expected[i] {0.0} else {-1.0};
             },
+            /* Loss::Approx_MAE => {
+                if predictions[i] >= expected[i]/(1.0+epsilon) && predictions[i] <= expected[i]*(1.0+epsilon) {
+                    dac_loss[i] = 0.0;
+                    dac_grad[i] = 0.0;
+                }
+                // TODO: loss with the nearest border or the expected?
+                else {
+                    dac_loss[i] = (predictions[i] - expected[i]).abs();
+                    dac_grad[i] = if predictions[i] > expected[i] {1.0} else if predictions[i]==expected[i] {0.0} else {-1.0};
+                }
+            } */
         }
     }
     (dac_loss, dac_grad)
@@ -124,7 +136,7 @@ impl <const S: bool> Learner<S>
             }
             d
         }).collect::<Vec<_>>();
-        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.0.is_some()).count());
+
         let mut learner = Self { 
             dacs: vec![], 
             unsoftmaxed_distributions, 
@@ -132,8 +144,9 @@ impl <const S: bool> Learner<S>
             lr: 0.0,
             expected_distribution: distributions,
             expected_outputs: vec![],
-            log: logger,
+            log: Logger::default(),
             epsilon,
+            learned_distributions: vec![true; dacs.len()],
         };
 
         for (d, c) in dacs.iter_mut() {
@@ -146,14 +159,22 @@ impl <const S: bool> Learner<S>
                     dac.add_clause_to_solver(clauses);
                 }
                 dac.optimize_structure();
+                //println!("nb approx {}, nb nodes {}", dac.number_partial_nodes(), dac.number_nodes());
             }
         }
 
         for (i, dac) in dacs.into_iter().enumerate() {
+            if let Some(compiler) = dac.1 {
+                learner.learned_distributions = compiler.get_learned_distributions();
+            }
             if let Some(dac) = dac.0 {
+                if dac.number_nodes() == 2 && dac.number_partial_nodes() == 1 { continue;}
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
-            }        }
+            }        
+        }
+        learner.log = Logger::new(outfolder.as_ref(), learner.dacs.len());
+        
         learner
     }
 
@@ -198,8 +219,8 @@ impl <const S: bool> Learner<S>
         self.log.start();
     }
 
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64) {
-        self.log.log_epoch(loss, lr, self.epsilon);
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64, predictions: &Vec<f64>) {
+        self.log.log_epoch(loss, lr, self.epsilon, predictions);
     }
 
     // --- Setters --- //
@@ -225,6 +246,7 @@ impl <const S: bool> Learner<S>
                 d.reset_approx();
             }
             d.evaluate();
+            //println!("dac\n{}", d.as_graphviz());
         });
         self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect::<Vec<f64>>()
     }
@@ -251,7 +273,10 @@ impl <const S: bool> Learner<S>
                     let child = self.dacs[dac_id].get_input_at(child_index);
                     match self.dacs[dac_id][node].get_type() {
                         TypeNode::Product => {
-                            let val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
+                            let mut val = f128!(0.0);
+                            if self.dacs[dac_id][child].get_value().to_f64() != 0.0 {
+                                val = path_val.clone() * &value / self.dacs[dac_id][child].get_value().to_f64();
+                            }
                             self.dacs[dac_id][child].add_to_path_value(val)
                         },
                         TypeNode::Sum => {
@@ -282,9 +307,11 @@ impl <const S: bool> Learner<S>
     }
 
     pub fn update_distributions(&mut self) {
-        for (distribution, grad) in self.unsoftmaxed_distributions.iter_mut().zip(self.gradients.iter()) {
-            for (value, grad) in distribution.iter_mut().zip(grad.iter()) {
-                *value -= (self.lr * grad.clone()).to_f64();
+        for (i, (distribution, grad)) in self.unsoftmaxed_distributions.iter_mut().zip(self.gradients.iter()).enumerate() {
+            if self.learned_distributions[i]{
+                for (value, grad) in distribution.iter_mut().zip(grad.iter()) {
+                    *value -= (self.lr * grad.clone()).to_f64();
+                }
             }
         }
     }
@@ -299,7 +326,7 @@ impl<const S: bool> Learning for Learner<S> {
         let stopping_criterion = 0.0001;
         let mut prev_loss = 1.0;
         let delta_early_stop = 0.00001;
-        let eval_approx_freq = 500;
+        let _eval_approx_freq = 500;
         let mut count_no_improve = 0;
         let patience = 5;
         self.log.start();
@@ -307,12 +334,13 @@ impl<const S: bool> Learning for Learner<S> {
 
         let mut dac_loss = vec![0.0; self.dacs.len()];
         let mut dac_grad = vec![0.0; self.dacs.len()];
+
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
-            let do_print = e % 1 == 0;
+            let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
-            let predictions = self.evaluate(e % eval_approx_freq == 0);
+            let predictions = self.evaluate(e==0);
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
             /* if do_print { 
@@ -320,12 +348,12 @@ impl<const S: bool> Learning for Learner<S> {
                     println!("Distribution {}  predicted {:?} expected {:?}", i, self.get_softmaxed(i), self.expected_distribution[i]);
                 }
             } */
-            (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
+            (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad, self.epsilon);
             self.compute_gradients(&dac_grad);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
             self.update_distributions();
-            self.log.log_epoch(&dac_loss, self.lr, self.epsilon);
-            let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+            self.log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
+            let avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
             if (avg_loss-prev_loss).abs()<delta_early_stop {
                 count_no_improve += 1;
             }
@@ -333,19 +361,8 @@ impl<const S: bool> Learning for Learner<S> {
                 count_no_improve = 0;
             }
             if (avg_loss < stopping_criterion) || count_no_improve>=patience {
-                // TODO: Before we checked if the learned ratio was < 1.0 and launched only in that
-                // case the additional evaluation. Should probabily do something of the like with
-                // the cut-off nodes int he DACs?
-                let predictions = self.evaluate(true);
-                (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad);
-                avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
-                if (avg_loss-prev_loss).abs()>delta_early_stop {
-                    count_no_improve = 0;
-                }
-                if avg_loss < stopping_criterion || count_no_improve>=patience{
-                    println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
-                    break;
-                }
+                println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                break;
             }
             prev_loss = avg_loss;
             dac_loss.fill(0.0);

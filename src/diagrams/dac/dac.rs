@@ -459,15 +459,17 @@ impl<R> Dac<R>
         self.outputs[index]
     }
 
+    /// Returns the number of partial nodes in the circuit
     pub fn number_partial_nodes(&self) -> usize {
         self.partial_nodes.len()
     }
 
+    /// Returns the partial node at the given index of the partial node list
     pub fn get_partial_node_at(&self, index: usize) -> NodeIndex {
         self.partial_nodes[index]
     }
     
-    // Retruns, for a given distribution index and its value, the corresponding node index in the dac
+    /// Returns, for a given distribution index and its value, the corresponding node index in the dac
     pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
@@ -515,14 +517,17 @@ impl<R> Dac<R>
         cnt
     }
 
+    /// Sets the root of the circuit
     pub fn set_root(&mut self, root: NodeIndex) {
         self.root = Some(root);
     }
 
+    /// Adds a node to the partial node list
     pub fn add_to_partial_list(&mut self, node: NodeIndex) {
         self.partial_nodes.push(node);
     }
 
+    /// Marks the node as unsat and removes it from the partial node list
     pub fn set_partial_node_unsat(&mut self, node: NodeIndex) {
         let idx = self.partial_nodes.iter().position(|x| *x == node).unwrap();
         self.partial_nodes.swap_remove(idx);
@@ -670,9 +675,9 @@ impl<R> Dac<R>
             if self.nodes[node.0].get_propagation().len() > 0 {
                 out.push_str(&Dac::<Float>::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value().to_f64())));
             } else if self[node].is_product() {
-                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3}) path {:3}", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
+                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3}) path({:.3})", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
             } else if self[node].is_sum() {
-                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3}) path {:3}", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
+                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3}) path({:.3})", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
             }
         }
         

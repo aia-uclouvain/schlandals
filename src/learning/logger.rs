@@ -28,6 +28,12 @@ pub struct Logger<const B: bool> {
 }
 
 impl<const B: bool> Logger<B> {
+    pub fn default() -> Self {
+        Self {
+            global_timestamp: chrono::Local::now(),
+            outfile: None,
+        }
+    }
     pub fn new(outfolder:Option<&PathBuf>, ndacs:usize) -> Self {
         let global_timestamp = chrono::Local::now();
         let csv_file = if B{
@@ -41,6 +47,9 @@ impl<const B: bool> Logger<B> {
             output.push_str("epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
             for i in 0..ndacs {
                 output.push_str(&format!("dac{} epoch_error,", i));
+            }
+            for i in 0..ndacs {
+                output.push_str(&format!("dac{} prediction,", i));
             }
             /* for i in 0..distributions.len() {
                 for j in 0..distributions[i].len() {
@@ -62,7 +71,7 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64) { //expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>,
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64, predictions:&Vec<f64>) { //expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>,
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
@@ -71,6 +80,9 @@ impl<const B: bool> Logger<B> {
             output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64)); //, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
+            }
+            for p in predictions.iter() {
+                output.push_str(&format!("{:.6},", p));
             }
             /* for distr in distances.iter() {
                 for d in distr.iter() {

@@ -301,4 +301,9 @@ where
     pub fn get_clause(&self, clause: ClauseIndex) -> Vec<Literal> {
         self.graph[clause].iter().collect()
     }
+
+    /// Returns a boolean vector indicating which distributions are learned
+    pub fn get_learned_distributions(&self) -> Vec<bool> {
+        self.graph.distributions_iter().map(|d| self.graph[d].is_branching_candidate()).collect()
+    }
 }

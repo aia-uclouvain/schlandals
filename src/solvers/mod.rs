@@ -265,6 +265,15 @@ impl Compiler {
         }
     }
 
+    pub fn get_learned_distributions(&self) -> Vec<bool> {
+        match self {
+            Compiler::VSIDS(ref compiler) => compiler.get_learned_distributions(),
+            Compiler::MinInDegree(ref compiler) => compiler.get_learned_distributions(),
+            Compiler::MinOutDegree(ref compiler) => compiler.get_learned_distributions(),
+            Compiler::MaxDegree(ref compiler) => compiler.get_learned_distributions(),
+        }
+    }
+
 
 }
 

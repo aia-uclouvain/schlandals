@@ -166,23 +166,28 @@ impl <const S: bool> TensorLearner<S>
         self.log.start();
     }
 
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64) {
-        self.log.log_epoch(loss, lr, self.epsilon);
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64, predictions:&Vec<f64>) {
+        self.log.log_epoch(loss, lr, self.epsilon, predictions);
     }
     // --- Evaluation --- //
 
     // Evaluate the different DACs and return the results
-    fn evaluate(&mut self, eval_approx:bool) {
+    fn evaluate(&mut self, eval_approx:bool) -> Vec<f64> {
         for i in 0..self.dacs.len() {
             let softmaxed = self.get_softmaxed_array();
             self.dacs[i].reset_distributions(&softmaxed);
         }
-        self.dacs.par_iter_mut().for_each(|d| {
+        let mut predictions = vec![];
+        //self.dacs.par_iter_mut().enumerate().for_each(|(i, d)| {
+        for i in 0..self.dacs.len() {
+            let d = &mut self.dacs[i];
             if eval_approx {
                 d.reset_approx();
             }
-            d.evaluate();
-        });
+            predictions[i] = d.evaluate().to_f64();
+
+        }
+        predictions
     }
 }
 
@@ -209,7 +214,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             self.optimizer.set_lr(self.lr);
             if do_print{println!("\nEpoch {} lr {}", e, self.lr);}
-            self.evaluate(e % eval_approx_freq == 0);
+            let predictions = self.evaluate(e % eval_approx_freq == 0);
             if do_print {
                 for i in 0..self.dacs.len() {
                     println!("{} {} {}", i, self.dacs[i].root().to_f64(), self.expected_outputs[i].to_f64());
@@ -229,7 +234,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             /* for d in self.distribution_tensors.iter() {
                 println!("tensor grad: {:?}", d.grad());
             } */
-            self.log.log_epoch(&dac_loss, 0.0, self.epsilon);
+            self.log.log_epoch(&dac_loss, 0.0, self.epsilon, &predictions);
             let mut avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
             if (avg_loss-prev_loss).abs()<delta_early_stop {
                 count_no_improve += 1;
