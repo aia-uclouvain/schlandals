@@ -168,28 +168,29 @@ where
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 if !self.cache.contains_key(&bit_repr) {
                     if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
-                        if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
-                            sum_children.push(child);
-                            self.cache.insert(bit_repr, Some(child));
+                        if self.component_extractor[sub_component].has_learned_distribution() {
+                            if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
+                                sum_children.push(child);
+                                self.cache.insert(bit_repr, Some(child));
+                            } else {
+                                self.cache.insert(bit_repr, None);
+                                prod_node = None;
+                                sum_children.clear();
+                                break;
+                            }
                         } else {
-                            self.cache.insert(bit_repr, None);
-                            prod_node = None;
-                            sum_children.clear();
-                            break;
+                            let child = dac.add_sum_node();
+                            for (variable, value) in self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| (self.graph[*l].reason(&self.state).is_none())) {
+                                dac[child].add_to_propagation(variable, value);
+                            }
+                            for clause in self.component_extractor.component_iter(sub_component) {
+                                dac[child].add_to_clauses(clause);
+                            }
+                            dac.add_to_partial_list(child);
+                            dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
+                            dac[child].set_bounding_factor(new_bound_factor);
+                            sum_children.push(child);
                         }
-                    } else if self.component_extractor.component_iter(sub_component).find(|clause| !self.graph[*clause].is_learned() && self.graph[*clause].has_probabilistic(&self.state)  && self.graph[*clause].is_constrained(&self.state)).is_some() {
-                        // TODO : check if this is correct
-                        let child = dac.add_sum_node();
-                        for (variable, value) in self.propagator.iter_propagated_assignments().map(|l| (l.to_variable(), l.is_positive())).filter(|(l, _)| (self.graph[*l].reason(&self.state).is_none())) {
-                            dac[child].add_to_propagation(variable, value);
-                        }
-                        for clause in self.component_extractor.component_iter(sub_component) {
-                            dac[child].add_to_clauses(clause);
-                        }
-                        dac.add_to_partial_list(child);
-                        dac[child].add_distributions(self.graph.number_distributions(), self.component_extractor.component_distribution_iter(sub_component));
-                        dac[child].set_bounding_factor(new_bound_factor);
-                        sum_children.push(child);
                     }
                 } else {
                     match self.cache.get(&bit_repr) {
