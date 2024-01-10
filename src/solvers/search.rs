@@ -372,7 +372,7 @@ where
         }
         self.component_extractor.create_distribution_from(comp, distributions.iter().copied());
         let (solution, _) = self._solve(comp, 1, bounding_factor);
-        let ub: Float = 1.0 - solution.1;
+        let ub: Float = (1.0 - solution.1) / &self.prefix_factor;
         let lb: Float = solution.0 / &self.prefix_factor;
         let proba: Float = (ub*lb).sqrt()*p;
         self.restore();

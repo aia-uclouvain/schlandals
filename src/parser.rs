@@ -57,6 +57,7 @@ pub enum FileType {
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
+    learn: bool,
 ) -> Graph {
     // First pass to get the distributions
     let distributions = distributions_from_cnf(filepath);
@@ -87,7 +88,7 @@ pub fn graph_from_ppidimacs(
         match l {
             Err(e) => panic!("Problem while reading file: {}", e),
             Ok(line) => {
-                if line.starts_with("c p learn") {
+                if learn && line.starts_with("c p learn") {
                     for distribution in g.distributions_iter() {
                         g[distribution].set_branching_candidate(false);
                     }

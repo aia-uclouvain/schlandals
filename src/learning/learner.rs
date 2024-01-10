@@ -103,9 +103,6 @@ impl <const S: bool> Learner<S>
                     // First, we need to know how much distributions are needed to compute the
                     // query.
                     let mut compiler = make_compiler!(input, branching, epsilon);
-                    if epsilon > 0.0 {
-                        compiler.set_partial_mode_on();
-                    }
                     let dac = compile!(compiler);
                     (dac, Some(compiler))
                 },
@@ -121,7 +118,7 @@ impl <const S: bool> Learner<S>
                     // The circuit has some nodes that have been cut-off. This means that, when
                     // evaluating the circuit, they need to be solved. Hence we stock a solver
                     // for this query.
-                    let solver = make_solver!(input, branching, epsilon, None, false);
+                    let solver = make_solver!(input, branching, epsilon, None, true);
                     dac.set_solver(solver);
                 }
             }
@@ -156,8 +153,7 @@ impl <const S: bool> Learner<S>
             if let Some(dac) = dac.0 {
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
-            }
-        }
+            }        }
         learner
     }
 
