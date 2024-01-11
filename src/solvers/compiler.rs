@@ -125,10 +125,6 @@ where
     fn expand_prod_node<R>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<NodeIndex>
         where R: SemiRing
     {   
-        if level == 1 {
-            dac.set_number_used_distributions(self.graph.number_distributions());
-        }
-
         let mut prod_node: Option<NodeIndex> = if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             for literal in self.propagator.assignments_iter(&self.state) {
@@ -164,11 +160,6 @@ where
             let number_component = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_component as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                if level ==1 {
-                    for distribution in self.component_extractor.component_distribution_iter(sub_component) {
-                    dac.set_used_distribution(distribution);
-                    }
-                }
 
                 let bit_repr = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
                 if !self.cache.contains_key(&bit_repr) {
@@ -184,8 +175,9 @@ where
                                 break;
                             }
                         } else {
+                            let sub_target = self.component_extractor[sub_component].max_probability();
                             let child_bound = self.get_cached_component_or_compute(sub_component, level, new_bound_factor).0;
-                            let child_value = (child_bound.0.clone() * child_bound.1.clone()).sqrt().to_f64();
+                            let child_value = (child_bound.0.clone() * (sub_target-child_bound.1.clone())).sqrt().to_f64();
                             let child = dac.add_partial_node(child_value);
                             sum_children.push(child);
                         }

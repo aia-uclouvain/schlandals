@@ -25,7 +25,6 @@
 //! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
 
 use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
-use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
 use crate::common::*;
 
@@ -63,8 +62,6 @@ pub struct Dac<R>
     /// Mapping between the (distribution, value) and the node index for distribution nodes
     pub distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
     root: Option<NodeIndex>,
-    partial_nodes: Vec<NodeIndex>,
-    used_distributions: BitVec,
 }
 
 impl<R> Dac<R>
@@ -79,8 +76,6 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             root: None,
-            partial_nodes: vec![],
-            used_distributions: BitVec::new(),
         }
     }
 
@@ -228,10 +223,6 @@ impl<R> Dac<R>
                 }
             }
             self[node].clear_and_shrink_input();
-        }
-
-        for i in 0..self.partial_nodes.len() {
-            self.partial_nodes[i] = NodeIndex(new_indexes[self.partial_nodes[i].0]);
         }
 
         // Actually remove the nodes (and allocated space) from the nodes vector.
@@ -399,16 +390,6 @@ impl<R> Dac<R>
     pub fn get_output_at(&self, index: usize) -> NodeIndex {
         self.outputs[index]
     }
-
-    /// Returns the number of partial nodes in the circuit
-    pub fn number_partial_nodes(&self) -> usize {
-        self.partial_nodes.len()
-    }
-
-    /// Returns the partial node at the given index of the partial node list
-    pub fn get_partial_node_at(&self, index: usize) -> NodeIndex {
-        self.partial_nodes[index]
-    }
     
     /// Returns, for a given distribution index and its value, the corresponding node index in the dac
     pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
@@ -463,17 +444,6 @@ impl<R> Dac<R>
         self.root = Some(root);
     }
 
-    pub fn set_number_used_distributions(&mut self, number: usize) {
-        self.used_distributions.resize(number, false);
-    }
-    pub fn set_used_distribution(&mut self, distribution: DistributionIndex) {
-        *self.used_distributions.get_mut(distribution.0).unwrap() = true;
-    }
-
-    pub fn use_distribution(&self, distribution: DistributionIndex) -> bool {
-        self.used_distributions[distribution.0]
-    }
-
     pub fn zero_paths(&mut self) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             self[node].set_path_value(f128!(0.0));
@@ -495,12 +465,6 @@ impl<R> Dac<R>
             }
         }
         cnt
-    }
-
-    /// Returns true iff the circuit has some nodes that have been cut-of during expansion.
-    /// These node contains the propagations that have been done
-    pub fn has_cutoff_nodes(&self) -> bool {
-        !self.partial_nodes.is_empty()
     }
 
     pub fn root(&self) -> &R {
@@ -659,8 +623,6 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             root: None,
-            partial_nodes: vec![],
-            used_distributions: BitVec::new(),
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);

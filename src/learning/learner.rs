@@ -18,6 +18,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use rug::{Assign, Float};
+use rustc_hash::FxHashSet;
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
@@ -118,6 +119,7 @@ impl <const S: bool> Learner<S>
                     let mut compiler = make_compiler!(input, branching, epsilon);
                     if let Some(mut dac) = compile!(compiler) {
                         dac.optimize_structure();
+                        //sprintln!("nb approx {}, nb nodes {}", dac.iter().filter(|n| dac[*n].is_partial()).count(), dac.nodes.len());
                         Some(dac)
                     } else {
                         None
@@ -141,13 +143,21 @@ impl <const S: bool> Learner<S>
             epsilon,
             learned_distributions,
         };
-
+        let mut distri_set: FxHashSet<usize> = FxHashSet::default();
         for (i, dac) in dacs.into_iter().enumerate() {
             if let Some(dac) = dac {
+                for node in dac.iter() {
+                    if let TypeNode::Distribution { d, .. } = dac[node].get_type() {
+                        if learner.learned_distributions[d] {
+                            distri_set.insert(d+1);
+                        }
+                    }
+                }
                 learner.dacs.push(dac);
                 learner.expected_outputs.push(expected_outputs[i]);
             }
         }
+        //println!("learned distribution in queries {:?}", distri_set);
         learner.log = Logger::new(outfolder.as_ref(), learner.dacs.len());
         learner
     }
@@ -325,6 +335,7 @@ impl<const S: bool> Learning for Learner<S> {
             self.update_distributions();
             self.log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
             let avg_loss = dac_loss.iter().sum::<f64>() / dac_loss.len() as f64;
+            if do_print { println!("Loss: {}", avg_loss);}
             if (avg_loss-prev_loss).abs()<delta_early_stop {
                 count_no_improve += 1;
             }

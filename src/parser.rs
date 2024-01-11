@@ -164,7 +164,7 @@ pub fn learned_distributions_from_cnf(filepath: &PathBuf) -> Vec<bool> {
             }
         }
     }
-    let mut flags = vec![false; number_distributions];
+    let mut flags = if learned_distributions.is_empty() {vec![true; number_distributions]} else {vec![false; number_distributions]};
     for x in learned_distributions {
         flags[x] = true;
     }
