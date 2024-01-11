@@ -116,26 +116,26 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     }
 }
 
-pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, optimizer: Optimizer) -> Box<dyn Learning> {
+pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, optimizer: Optimizer, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
             }
         },
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer, test_inputs, test_expected))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer, test_inputs, test_expected))
             }
         }
     }
 }
 
-pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
+pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
             log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring, optimizer: Optimizer) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
@@ -148,7 +148,19 @@ pub fn learn(trainfile: PathBuf, branching: Branching, outfolder: Option<PathBuf
         inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
-    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, optimizer);
+    let mut test_inputs = vec![];
+    let mut test_expected: Vec<f64> = vec![];
+    if let Some(testfile) = testfile {
+        let file = File::open(&testfile).unwrap();
+        let reader = BufReader::new(file);
+        for line in reader.lines().skip(1) {
+            let l = line.unwrap();
+            let mut split = l.split(",");
+            test_inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
+            test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
+        }
+    }
+    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, optimizer, test_inputs, test_expected);
     learner.train(nepochs, lr, loss, timeout);
 }
 

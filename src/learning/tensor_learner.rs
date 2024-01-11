@@ -14,7 +14,6 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::fmt;
 use std::path::PathBuf;
 use crate::diagrams::dac::dac::*;
 use super::logger::Logger;
@@ -43,10 +42,12 @@ pub struct DacIndex(pub usize);
 pub struct TensorLearner<const S: bool>
 {
     dacs: Vec<Dac<Tensor>>,
+    test_dacs: Vec<Dac<Tensor>>,
     distribution_tensors: Vec<Tensor>,
-    expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<Tensor>,
+    test_expected_outputs: Vec<Tensor>,
     log: Logger<S>,
+    test_log: Logger<S>,
     epsilon: f64,
     optimizer: Optimizer,
     lr: f64,
@@ -56,7 +57,7 @@ impl <const S: bool> TensorLearner<S>
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, optimizer: OptChoice) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, optimizer: OptChoice, test_inputs:Vec<PathBuf>, mut test_expected:Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
 
         let distributions = distributions_from_cnf(&inputs[0]);
@@ -84,8 +85,31 @@ impl <const S: bool> TensorLearner<S>
                 }
             }
         }).collect::<Vec<_>>();
-        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count());
-
+        let mut test_dacs = test_inputs.par_iter().map(|input| {
+            // We compile the input. This can either be a .cnf file or a fdac file.
+            // If the file is a fdac file, then we read directly from it
+            match type_of_input(input) {
+                FileType::CNF => {
+                    println!("Compiling {}", input.to_str().unwrap());
+                    // The input is a CNF file, we need to compile it from scratch
+                    // First, we need to know how much distributions are needed to compute the
+                    // query.
+                    let mut compiler = make_compiler!(input, branching, epsilon);
+                    if let Some(mut dac) = compile!(compiler) {
+                        dac.optimize_structure();
+                        Some(dac)
+                    } else {
+                        None
+                    }
+                },
+                FileType::FDAC => {
+                    println!("Reading {}", input.to_str().unwrap());
+                    // The query has already been compiled, we just read from the file.
+                    Some(Dac::from_file(input))
+                }
+            }
+        }).collect::<Vec<_>>();
+        let logger = Logger::new(outfolder.as_ref(), dacs.iter().filter(|d| d.is_some()).count(), false);
         let vs = nn::VarStore::new(Device::Cpu);
         let root = vs.root();
         let distribution_tensors = distributions.iter().enumerate().map(|(i, distribution)| {
@@ -109,17 +133,31 @@ impl <const S: bool> TensorLearner<S>
                 expected.push(Tensor::from_f64(proba));
             }
         }
+        let mut test_s_dacs: Vec<Dac<Tensor>> = vec![];
+        let mut test_expected_o: Vec<Tensor> = vec![];
+        while test_dacs.len() > 0 {
+            let dac = test_dacs.pop().unwrap();
+            let proba = test_expected.pop().unwrap();
+            if let Some(d) = dac {
+                //println!("dac\n{}", d.as_graphviz());
+                test_s_dacs.push(d);
+                test_expected_o.push(Tensor::from_f64(proba));
+            }
+        }
 
-        let learner = Self { 
+        let mut learner = Self { 
             dacs: s_dacs,
+            test_dacs: test_s_dacs,
             distribution_tensors,
-            expected_distribution: distributions,
             expected_outputs: expected,
+            test_expected_outputs: test_expected_o,
             log: logger,
+            test_log: Logger::default(),
             epsilon,
             optimizer,
             lr: 0.0,
         };
+        if test_inputs.len()!=0{ learner.test_log = Logger::new(outfolder.as_ref(), learner.dacs.len(), false);}
         learner
     }
 
@@ -134,10 +172,6 @@ impl <const S: bool> TensorLearner<S>
                 tensor.i(idx)
             }).collect::<Vec<Tensor>>()
         }).collect()
-    }
-
-    pub fn get_expected_distributions(&self) -> &Vec<Vec<f64>> {
-        &self.expected_distribution
     }
 
     pub fn get_number_dacs(&self) -> usize {
@@ -160,6 +194,18 @@ impl <const S: bool> TensorLearner<S>
     // Evaluate the different DACs and return the results
     fn evaluate(&mut self) -> Vec<f64> {
         for i in 0..self.dacs.len() {
+            let softmaxed = self.get_softmaxed_array();
+            self.dacs[i].reset_distributions(&softmaxed);
+        }
+        self.dacs.par_iter_mut().for_each(|d| {
+            d.evaluate();
+        });
+        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+    }
+
+    // Evaluate the different test DACs and return the results
+    fn test(&mut self) -> Vec<f64> {
+        for i in 0..self.test_dacs.len() {
             let softmaxed = self.get_softmaxed_array();
             self.dacs[i].reset_distributions(&softmaxed);
         }
@@ -221,13 +267,25 @@ impl<const S: bool> Learning for TensorLearner<S> {
                 count_no_improve = 0;
             }
             if (avg_loss < stopping_criterion) || count_no_improve>=patience {
-                // TODO: Before we checked if the learned ratio was < 1.0 and launched only in that
-                // case the additional evaluation. Should probabily do something of the like with
-                // the cut-off nodes int he DACs?
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
             }
             prev_loss = avg_loss;
+        }
+        if self.test_dacs.len()!=0{
+            self.test_log.start();
+            let predictions = self.test();
+            let mut loss_epoch = Tensor::from(0.0);
+            let mut dac_loss = vec![0.0; self.test_dacs.len()];
+            for i in 0..self.test_dacs.len() {
+                let loss_i = match loss {
+                    Loss::MAE => self.test_dacs[i].root().l1_loss(&self.test_expected_outputs[i], Reduction::Mean),
+                    Loss::MSE => self.test_dacs[i].root().mse_loss(&self.test_expected_outputs[i], Reduction::Mean),
+                };
+                dac_loss[i] = loss_i.to_f64();
+                loss_epoch += loss_i;
+                self.test_log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
+            }
         }
     }
 }
@@ -242,16 +300,3 @@ impl <const S: bool> std::ops::Index<DacIndex> for TensorLearner<S>
     }
 }
 
-// --- Display/Output methods ---- 
-
-// TODO: Implementing Display for outputting the distributions is maybe not adequate, but need to
-// think about that
-impl <const S: bool> fmt::Display for TensorLearner<S>
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for distribution in self.expected_distribution.iter() {
-            writeln!(f, "d {} {}", distribution.len(), distribution.iter().map(|p| format!("{:.5}", p)).collect::<Vec<String>>().join(" "))?;
-        }
-        fmt::Result::Ok(())
-    }
-}

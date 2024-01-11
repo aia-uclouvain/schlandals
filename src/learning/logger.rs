@@ -34,12 +34,13 @@ impl<const B: bool> Logger<B> {
             outfile: None,
         }
     }
-    pub fn new(outfolder:Option<&PathBuf>, ndacs:usize) -> Self {
+    pub fn new(outfolder:Option<&PathBuf>, ndacs:usize, do_train:bool) -> Self {
         let global_timestamp = chrono::Local::now();
         let csv_file = if B{
             let mut out = match outfolder {
                 Some(x) => {
-                    Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
+                    if do_train{Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())}
+                    else { Some(File::create(x.join(format!("test_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())}
                 },
                 None => None,
             };

@@ -67,8 +67,11 @@ enum Command {
     /// Learn a circuit from a set of queries
     Learn {
         /// The csv file containing the cnf filenames and the associated expected output
-        #[clap(long, value_parser, num_args=1.., value_delimiter=' ')]
+        #[clap(long, value_parser, value_delimiter=' ')]
         trainfile: PathBuf,
+        /// The csv file containing the test cnf filenames and the associated expected output
+        #[clap(long, value_parser, value_delimiter=' ')]
+        testfile: Option<PathBuf>,
         /// How to branch
         #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
         branching: schlandals::Branching,
@@ -127,12 +130,12 @@ fn main() {
             };
             schlandals::compile(input, branching, fdac, dotfile, e);
         },
-        Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
+        Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
             if do_log && outfolder.is_none() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
-            schlandals::learn(trainfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring, optimizer);
+            schlandals::learn(trainfile, testfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring, optimizer);
         }
     }
 }

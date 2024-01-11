@@ -14,7 +14,6 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::fmt;
 use std::path::PathBuf;
 
 use rug::{Assign, Float};
@@ -54,12 +53,14 @@ pub struct DacIndex(pub usize);
 pub struct Learner<const S: bool>
 {
     dacs: Vec<Dac<Float>>,
+    test_dacs: Vec<Dac<Float>>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     lr: f64,
-    expected_distribution: Vec<Vec<f64>>,
     expected_outputs: Vec<f64>,
+    test_expected_outputs: Vec<f64>,
     log: Logger<S>,
+    test_log: Logger<S>,
     epsilon: f64,
     learned_distributions: Vec<bool>,
 }
@@ -95,9 +96,8 @@ impl <const S: bool> Learner<S>
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
-
         let distributions = distributions_from_cnf(&inputs[0]);
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
@@ -119,7 +119,31 @@ impl <const S: bool> Learner<S>
                     let mut compiler = make_compiler!(input, branching, epsilon);
                     if let Some(mut dac) = compile!(compiler) {
                         dac.optimize_structure();
-                        //sprintln!("nb approx {}, nb nodes {}", dac.iter().filter(|n| dac[*n].is_partial()).count(), dac.nodes.len());
+                        //println!("nb approx {}, nb nodes {}", dac.iter().filter(|n| dac[*n].is_partial()).count(), dac.nodes.len());
+                        Some(dac)
+                    } else {
+                        None
+                    }
+                },
+                FileType::FDAC => {
+                    println!("Reading {}", input.to_str().unwrap());
+                    // The query has already been compiled, we just read from the file.
+                    Some(Dac::from_file(input))
+                }
+            }
+        }).collect::<Vec<_>>();
+        let test_dacs = test_inputs.par_iter().map(|input| {
+            // We compile the input. This can either be a .cnf file or a fdac file.
+            // If the file is a fdac file, then we read directly from it
+            match type_of_input(input) {
+                FileType::CNF => {
+                    println!("Compiling {}", input.to_str().unwrap());
+                    // The input is a CNF file, we need to compile it from scratch
+                    // First, we need to know how much distributions are needed to compute the
+                    // query.
+                    let mut compiler = make_compiler!(input, branching, epsilon);
+                    if let Some(mut dac) = compile!(compiler) {
+                        dac.optimize_structure();
                         Some(dac)
                     } else {
                         None
@@ -134,12 +158,14 @@ impl <const S: bool> Learner<S>
         }).collect::<Vec<_>>();
         let mut learner = Self { 
             dacs: vec![], 
+            test_dacs: vec![],
             unsoftmaxed_distributions, 
             gradients: grads,
             lr: 0.0,
-            expected_distribution: distributions,
             expected_outputs: vec![],
+            test_expected_outputs: vec![],
             log: Logger::default(),
+            test_log: Logger::default(),
             epsilon,
             learned_distributions,
         };
@@ -157,8 +183,15 @@ impl <const S: bool> Learner<S>
                 learner.expected_outputs.push(expected_outputs[i]);
             }
         }
+        for (i, dac) in test_dacs.into_iter().enumerate() {
+            if let Some(dac) = dac {
+                learner.test_dacs.push(dac);
+                learner.test_expected_outputs.push(test_expected[i]);
+            }
+        }
         //println!("learned distribution in queries {:?}", distri_set);
-        learner.log = Logger::new(outfolder.as_ref(), learner.dacs.len());
+        learner.log = Logger::new(outfolder.as_ref(), learner.dacs.len(), true);
+        if learner.test_dacs.len()!=0{ learner.test_log = Logger::new(outfolder.as_ref(), learner.test_dacs.len(), false);}
         learner
     }
 
@@ -181,10 +214,6 @@ impl <const S: bool> Learner<S>
 
     pub fn get_expected_outputs(&self) -> &Vec<f64> {
         &self.expected_outputs
-    }
-
-    pub fn get_expected_distributions(&self) -> &Vec<Vec<f64>> {
-        &self.expected_distribution
     }
 
     pub fn get_current_distributions(&self) -> &Vec<Vec<f64>> {
@@ -223,6 +252,19 @@ impl <const S: bool> Learner<S>
     pub fn evaluate(&mut self) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.dacs.iter_mut() {
+            dac.reset_distributions(&softmaxed);
+        }
+        self.dacs.par_iter_mut().for_each(|d| {
+            d.evaluate();
+            //println!("dac\n{}", d.as_graphviz());
+        });
+        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+    }
+
+    // Evaluate the different test DACs and return the results
+    pub fn test(&mut self) -> Vec<f64> {
+        let softmaxed = self.get_softmaxed_array();
+        for dac in self.test_dacs.iter_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.dacs.par_iter_mut().for_each(|d| {
@@ -324,11 +366,6 @@ impl<const S: bool> Learning for Learner<S> {
             let predictions = self.evaluate();
             // TODO: Maybe we can pass that in the logger and do something like self.log.print()
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
-            /* if do_print { 
-                for i in 0..self.expected_distribution.len(){
-                    println!("Distribution {}  predicted {:?} expected {:?}", i, self.get_softmaxed(i), self.expected_distribution[i]);
-                }
-            } */
             (dac_loss, dac_grad) = loss_and_grad(loss, &predictions, &self.expected_outputs, dac_loss, dac_grad, self.epsilon);
             self.compute_gradients(&dac_grad);
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
@@ -350,6 +387,13 @@ impl<const S: bool> Learning for Learner<S> {
             dac_loss.fill(0.0);
             dac_grad.fill(0.0);
         }
+
+        if self.test_dacs.len()!=0{ 
+            self.test_log.start();
+            let predictions = self.test();
+            let (dac_loss, _) = loss_and_grad(loss, &predictions, &self.test_expected_outputs, dac_loss, dac_grad, self.epsilon);
+            self.test_log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
+        }
     }
 }
 
@@ -363,16 +407,3 @@ impl <const S: bool> std::ops::Index<DacIndex> for Learner<S>
     }
 }
 
-// --- Display/Output methods ---- 
-
-// TODO: Implementing Display for outputting the distributions is maybe not adequate, but need to
-// think about that
-impl <const S: bool> fmt::Display for Learner<S>
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for distribution in self.expected_distribution.iter() {
-            writeln!(f, "d {} {}", distribution.len(), distribution.iter().map(|p| format!("{:.5}", p)).collect::<Vec<String>>().join(" "))?;
-        }
-        fmt::Result::Ok(())
-    }
-}
