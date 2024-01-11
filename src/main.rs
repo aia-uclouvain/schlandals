@@ -60,6 +60,9 @@ enum Command {
         /// If present, store a DOT representation of the compiled circuit
         #[clap(long)]
         dotfile: Option<PathBuf>,
+        /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
+        #[clap(short, long)]
+        epsilon: Option<f64>,
     },
     /// Learn a circuit from a set of queries
     Learn {
@@ -117,8 +120,12 @@ fn main() {
                 Ok(p) => println!("{}", p),
             };
         },
-        Command::Compile { input, branching, fdac, dotfile} => {
-            schlandals::compile(input, branching, fdac, dotfile);
+        Command::Compile { input, branching, fdac, dotfile, epsilon} => {
+            let e = match epsilon {
+                Some(v) => v,
+                None => 0.0,
+            };
+            schlandals::compile(input, branching, fdac, dotfile, e);
         },
         Command::Learn { trainfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
             if do_log && outfolder.is_none() {
