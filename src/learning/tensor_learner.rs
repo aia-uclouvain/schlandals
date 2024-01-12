@@ -51,6 +51,7 @@ pub struct TensorLearner<const S: bool>
     epsilon: f64,
     optimizer: Optimizer,
     lr: f64,
+    // TODO a field for distributions that are learned -> not backpropagate them
 }
 
 impl <const S: bool> TensorLearner<S>
