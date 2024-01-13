@@ -210,10 +210,10 @@ impl <const S: bool> TensorLearner<S>
             let softmaxed = self.get_softmaxed_array();
             self.dacs[i].reset_distributions(&softmaxed);
         }
-        self.dacs.par_iter_mut().for_each(|d| {
+        self.test_dacs.par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.test_dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
     }
 }
 

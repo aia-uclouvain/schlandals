@@ -267,11 +267,11 @@ impl <const S: bool> Learner<S>
         for dac in self.test_dacs.iter_mut() {
             dac.reset_distributions(&softmaxed);
         }
-        self.dacs.par_iter_mut().for_each(|d| {
+        self.test_dacs.par_iter_mut().for_each(|d| {
             d.evaluate();
             //println!("dac\n{}", d.as_graphviz());
         });
-        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.test_dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
     }
 
     // --- Gradient computation --- //
