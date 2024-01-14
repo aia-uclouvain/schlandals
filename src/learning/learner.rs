@@ -357,6 +357,15 @@ impl<const S: bool> Learning for Learner<S> {
 
         let mut dac_loss = vec![0.0; self.dacs.len()];
         let mut dac_grad = vec![0.0; self.dacs.len()];
+        let test_loss = vec![0.0; self.test_dacs.len()];
+        let test_grad = vec![0.0; self.test_dacs.len()];
+
+        if self.test_dacs.len()!=0{ 
+            self.test_log.start();
+            let predictions = self.test();
+            let (test_loss, _) = loss_and_grad(loss, &predictions, &self.test_expected_outputs, test_loss.clone(), test_grad.clone(), self.epsilon);
+            self.test_log.log_epoch(&test_loss, self.lr, self.epsilon, &predictions);
+        }
 
         for e in 0..nepochs {
             if (chrono::Local::now() - start).num_seconds() > timeout { break;}
@@ -389,10 +398,9 @@ impl<const S: bool> Learning for Learner<S> {
         }
 
         if self.test_dacs.len()!=0{ 
-            self.test_log.start();
             let predictions = self.test();
-            let (dac_loss, _) = loss_and_grad(loss, &predictions, &self.test_expected_outputs, dac_loss, dac_grad, self.epsilon);
-            self.test_log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
+            let (test_loss, _) = loss_and_grad(loss, &predictions, &self.test_expected_outputs, test_loss, test_grad, self.epsilon);
+            self.test_log.log_epoch(&test_loss, self.lr, self.epsilon, &predictions);
         }
     }
 }
