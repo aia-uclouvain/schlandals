@@ -88,8 +88,8 @@ enum Command {
         #[clap(long, short, action)]
         do_log: bool,
         /// If present, define the learning timeout
-        #[clap(long, default_value_t=i64::MAX)]
-        timeout: i64,
+        #[clap(long, default_value_t=u64::MAX)]
+        timeout: u64,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
         #[clap(short, long, default_value_t=0.0)]
         epsilon: f64,

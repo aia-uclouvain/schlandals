@@ -244,6 +244,7 @@ where
         let ret = match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
             None => None,
             Some(_) => {
+                dac.optimize_structure();
                 Some(dac)
             }
         };

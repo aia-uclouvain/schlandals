@@ -136,7 +136,7 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
 }
 
 pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, lr:f64, nepochs: usize, 
-            log:bool, timeout:i64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring, optimizer: Optimizer) {    
+            log:bool, timeout:u64, epsilon: f64, loss: Loss, jobs: usize, semiring: Semiring, optimizer: Optimizer) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];

@@ -219,7 +219,7 @@ impl <const S: bool> TensorLearner<S>
 
 impl<const S: bool> Learning for TensorLearner<S> {
 
-    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:i64,) {
+    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:u64,) {
         self.lr = init_lr;
         self.optimizer.set_lr(self.lr);
         let lr_drop: f64 = 0.75;
@@ -234,7 +234,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
 
         let mut dac_loss = vec![0.0; self.dacs.len()];
         for e in 0..nepochs {
-            if (chrono::Local::now() - start).num_seconds() > timeout { break;}
+            if (chrono::Local::now() - start).num_seconds() > timeout as i64 { break;}
             let do_print = e % 500 == 0;
             self.lr = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
             self.optimizer.set_lr(self.lr);

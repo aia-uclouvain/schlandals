@@ -18,8 +18,45 @@ use crate::Loss;
 
 pub mod learner;
 pub mod tensor_learner;
+mod utils;
 mod logger;
 
 pub trait Learning {
-    fn train(&mut self, nepochs: usize, init_lr: f64, loss: Loss, timeout: i64);
+    fn train(&mut self, nepochs: usize, init_lr: f64, loss: Loss, timeout: u64);
+}
+
+/// This trait provide multiple functions to use on loss functions. In particular, every loss
+/// function must implements
+///     - Their computation (loss)
+///     - Their gradient (gradient)
+pub trait LossFunctions {
+    /// Evaluates the loss given a predicted and expected output
+    fn loss(&self, predicted: f64, expected: f64) -> f64;
+    /// Evaluates the gradient of the loss given a predicted and expected output
+    fn gradient(&self, predicted: f64, expected: f64) -> f64;
+}
+
+impl LossFunctions for Loss {
+
+    fn loss(&self, predicted: f64, expected: f64) -> f64 {
+        match self {
+            Loss::MSE => (predicted - expected).powi(2),
+            Loss::MAE => (predicted - expected).abs(),
+        }
+    }
+
+    fn gradient(&self, predicted: f64, expected: f64) -> f64 {
+        match self {
+            Loss::MSE => 2.0 * (predicted - expected),
+            Loss::MAE => {
+                if predicted == expected {
+                    0.0
+                } else if predicted > expected {
+                    1.0
+                } else {
+                    -1.0
+                }
+            },
+        }
+    }
 }

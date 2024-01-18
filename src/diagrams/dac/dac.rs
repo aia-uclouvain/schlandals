@@ -54,7 +54,7 @@ pub struct Dac<R>
     where R: SemiRing
 {
     /// Internal nodes of the circuit
-    pub nodes: Vec<Node<R>>,
+    nodes: Vec<Node<R>>,
     /// Outputs of the internal nodes
     outputs: Vec<NodeIndex>,
     /// Inputs of the internal nodes
@@ -77,6 +77,11 @@ impl<R> Dac<R>
             distribution_mapping: FxHashMap::default(),
             root: None,
         }
+    }
+
+    /// Returns the number of nodes in the circuit
+    pub fn len(&self) -> usize {
+        self.nodes.len()
     }
 
     /// Adds a prod node to the circuit
@@ -445,9 +450,10 @@ impl<R> Dac<R>
     }
 
     pub fn zero_paths(&mut self) {
-        for node in (0..self.nodes.len()).map(NodeIndex) {
+        for node in (0..self.nodes.len()-1).map(NodeIndex) {
             self[node].set_path_value(f128!(0.0));
         }
+        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
     }
     // --- QUERIES --- //
     
