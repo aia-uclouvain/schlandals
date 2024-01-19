@@ -24,8 +24,6 @@
 //! As of now, the circuit structure has been designed to be optimized when lots of queries are done on it.
 //! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
 
-use rustc_hash::FxHashSet;
-
 use rug::Float;
 use crate::diagrams::semiring::*;
 use super::dac::NodeIndex;
@@ -35,7 +33,7 @@ use crate::common::*;
 pub enum TypeNode {
     Product,
     Sum,
-    Partial,
+    Approximate,
     Distribution {d: usize, v: usize},
 }
 
@@ -44,17 +42,6 @@ macro_rules! is_node_type {
         match $val {
             $var{..} => true,
             _ => false,
-        }
-    }
-}
-
-impl TypeNode {
-    pub fn get_value(&self) -> usize {
-        match self {
-            TypeNode::Product => panic!("Product typenode has no value"),
-            TypeNode::Sum => panic!("Sum typenode has no value"),
-            TypeNode::Partial => panic!("Partial typenode has no value"),
-            TypeNode::Distribution{d:_,v} => *v,
         }
     }
 }
@@ -69,7 +56,7 @@ pub struct Node<R>
     /// Outputs of the node. Only used during the creation. These values are moved to the DAC structure before evaluation
     outputs: Vec<NodeIndex>,
     /// Inputs of the node. Only used during the creation to minimize the size of the circuit
-    inputs: FxHashSet<NodeIndex>,
+    inputs: Vec<NodeIndex>,
     /// What is the type of the node?
     typenode: TypeNode,
     /// Start index of the output in the DAC's output vector
@@ -96,7 +83,7 @@ impl<R> Node<R>
         Node {
             value: R::one(),
             outputs: vec![],
-            inputs: FxHashSet::default(),
+            inputs: vec![],
             typenode: TypeNode::Product,
             output_start: 0,
             number_outputs: 0,
@@ -112,7 +99,7 @@ impl<R> Node<R>
         Node {
             value: R::zero(),
             outputs: vec![],
-            inputs: FxHashSet::default(),
+            inputs: vec![],
             typenode: TypeNode::Sum,
             output_start: 0,
             number_outputs: 0,
@@ -124,12 +111,12 @@ impl<R> Node<R>
         }
     }
 
-    pub fn partial(value: f64) -> Self {
+    pub fn approximate(value: f64) -> Self {
         Node {
             value: R::from_f64(value),
             outputs: vec![],
-            inputs: FxHashSet::default(),
-            typenode: TypeNode::Partial,
+            inputs: vec![],
+            typenode: TypeNode::Approximate,
             output_start: 0,
             number_outputs: 0,
             input_start: 0,
@@ -144,7 +131,7 @@ impl<R> Node<R>
         Node {
             value: R::from_f64(probability),
             outputs: vec![],
-            inputs: FxHashSet::default(),
+            inputs: vec![],
             typenode: TypeNode::Distribution {d: distribution, v: value},
             output_start: 0,
             number_outputs: 0,
@@ -172,56 +159,58 @@ impl<R> Node<R>
     }
 
     /// Returns true iff the node is a partial node
-    pub fn is_partial(&self) -> bool {
-        is_node_type!(self.typenode, TypeNode::Partial)
+    pub fn is_approximate(&self) -> bool {
+        is_node_type!(self.typenode, TypeNode::Approximate)
     }
 
-    /// Returns the value of the node
-    pub fn get_value(&self) -> &R {
+    /// Returns a reference to the value stored in the node
+    pub fn value(&self) -> &R {
         &self.value
     }
 
-    pub fn get_value_mut(&mut self) -> &mut R {
+    /// Returns a mutable reference to the value stored in the node
+    pub fn value_mut(&mut self) -> &mut R {
         &mut self.value
     }
 
     // Return the path value of the node. The path value of a node is the accumulated product of
     // the value of the nodes from the root of the circuit to the node.
-    pub fn get_path_value(&self) -> Float{
+    pub fn path_value(&self) -> Float {
         self.path_value.clone()
     }
 
     /// Returns the type of the node.
-    pub fn get_type(&self) -> TypeNode{
+    pub fn get_type(&self) -> TypeNode {
+        // can not name the function "type" since it's a reserved keyword:(
         self.typenode
     }
     
     /// Returns the start of the outputs of the nodes
-    pub fn get_output_start(&self) -> usize {
+    pub fn output_start(&self) -> usize {
         self.output_start
     }
     
     /// Returns the number of output the node has
-    pub fn get_number_outputs(&self) -> usize {
+    pub fn number_outputs(&self) -> usize {
         self.number_outputs
     }
 
     /// Returns the start of the input of the node
-    pub fn get_input_start(&self) -> usize {
+    pub fn input_start(&self) -> usize {
         self.input_start
     }
 
     /// Returns the number of input the node has
-    pub fn get_number_inputs(&self) -> usize {
+    pub fn number_inputs(&self) -> usize {
         self.number_inputs
     }
 
     /// Returns the layer of the node
-    pub fn get_layer(&self) -> usize {
+    pub fn layer(&self) -> usize {
         self.layer
     }
 
-    /// Returns true if the node must be removed
+    /// Returns true if the node must be removed during the optimization of the circuit's structure
     pub fn is_to_remove(&self) -> bool {
         self.to_remove
     }
@@ -240,7 +229,7 @@ impl<R> Node<R>
 
     /// Adds the given node to the inputs
     pub fn add_input(&mut self, node: NodeIndex) {
-        self.inputs.insert(node);
+        self.inputs.push(node);
     }
 
     /// Sets the value of the node to the given float
@@ -325,12 +314,18 @@ impl<R> Node<R>
     }
 
     /// Removes a node from the inputs
-    pub fn remove_input(&mut self, input: NodeIndex) {
-        self.inputs.remove(&input);
+    pub fn remove_index_from_input(&mut self, index: usize) {
+        self.inputs.swap_remove(index);
     }
 
-    pub fn get_output_at(&self, id: usize) -> NodeIndex {
+    /// Returns the output at the given index in the vector of output
+    pub fn output_at(&self, id: usize) -> NodeIndex {
         self.outputs[id]
+    }
+
+    /// Returns the input at the given index in the vector of inputs
+    pub fn input_at(&self, id: usize) -> NodeIndex {
+        self.inputs[id]
     }
 
     // ---- ITERATORS --- //
@@ -341,8 +336,7 @@ impl<R> Node<R>
     }
 
     /// Returns an interator over the inputs of the nodes
-    pub fn iter_input(&self) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.inputs.iter().copied()
+    pub fn iter_input(&self) -> impl Iterator<Item = usize> {
+        0..self.inputs.len()
     }
-
 }

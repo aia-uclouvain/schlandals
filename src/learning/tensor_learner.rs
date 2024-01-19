@@ -201,7 +201,7 @@ impl <const S: bool> TensorLearner<S>
         self.dacs.par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.dacs.iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
     // Evaluate the different test DACs and return the results
@@ -213,7 +213,7 @@ impl <const S: bool> TensorLearner<S>
         self.test_dacs.par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.test_dacs.iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.test_dacs.iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 }
 
@@ -242,14 +242,14 @@ impl<const S: bool> Learning for TensorLearner<S> {
             let predictions = self.evaluate();
             if do_print {
                 for i in 0..self.dacs.len() {
-                    println!("{} {} {}", i, self.dacs[i].root().to_f64(), self.expected_outputs[i].to_f64());
+                    println!("{} {} {}", i, self.dacs[i].circuit_probability().to_f64(), self.expected_outputs[i].to_f64());
                 }
             }
             let mut loss_epoch = Tensor::from(0.0);
             for i in 0..self.dacs.len() {
                 let loss_i = match loss {
-                    Loss::MAE => self.dacs[i].root().l1_loss(&self.expected_outputs[i], Reduction::Mean),
-                    Loss::MSE => self.dacs[i].root().mse_loss(&self.expected_outputs[i], Reduction::Mean),
+                    Loss::MAE => self.dacs[i].circuit_probability().l1_loss(&self.expected_outputs[i], Reduction::Mean),
+                    Loss::MSE => self.dacs[i].circuit_probability().mse_loss(&self.expected_outputs[i], Reduction::Mean),
                 };
                 dac_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;
@@ -280,8 +280,8 @@ impl<const S: bool> Learning for TensorLearner<S> {
             let mut dac_loss = vec![0.0; self.test_dacs.len()];
             for i in 0..self.test_dacs.len() {
                 let loss_i = match loss {
-                    Loss::MAE => self.test_dacs[i].root().l1_loss(&self.test_expected_outputs[i], Reduction::Mean),
-                    Loss::MSE => self.test_dacs[i].root().mse_loss(&self.test_expected_outputs[i], Reduction::Mean),
+                    Loss::MAE => self.test_dacs[i].circuit_probability().l1_loss(&self.test_expected_outputs[i], Reduction::Mean),
+                    Loss::MSE => self.test_dacs[i].circuit_probability().mse_loss(&self.test_expected_outputs[i], Reduction::Mean),
                 };
                 dac_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;

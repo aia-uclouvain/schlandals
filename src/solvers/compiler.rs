@@ -132,7 +132,7 @@ where
                 if self.graph[variable].is_probabilitic() && self.graph[variable].value(&self.state).unwrap() {
                     let distribution = self.graph[variable].distribution().unwrap();
                     let value_id = variable.0 - self.graph[distribution].start().0;
-                    let disti_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
+                    let disti_index = dac.distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                     dac.add_node_output(disti_index, node);
                 }
             }
@@ -143,7 +143,7 @@ where
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_id = variable.0 - self.graph[distribution].start().0;
-                            let distri_index = dac.get_distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
+                            let distri_index = dac.distribution_value_node_index(distribution, value_id, self.graph[variable].weight().unwrap());
                             dac.add_node_output(distri_index, sum_node);
                         }
                     }
@@ -178,7 +178,7 @@ where
                             let sub_target = self.component_extractor[sub_component].max_probability();
                             let child_bound = self.get_cached_component_or_compute(sub_component, level, new_bound_factor).0;
                             let child_value = (child_bound.0.clone() * (sub_target-child_bound.1.clone())).sqrt().to_f64();
-                            let child = dac.add_partial_node(child_value);
+                            let child = dac.add_approximate_node(child_value);
                             sum_children.push(child);
                         }
                     }

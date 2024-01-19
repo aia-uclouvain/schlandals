@@ -14,17 +14,21 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module provide an implementation of a distribution aware arithmetic circuits.
-//! Unlike traditional circuits, the input of the circuits are not variables, but distributions
-//! as used by Schlandal's modelling language.
-//! Hence, given a valid input for Schlandals, there is one input per distribution.
-//! Then, internal nodes are either a product node or a sum node. Once constructed, the probability
-//! of the original problem can be computed in a feed-forward manner, starting from the input and pushing
-//! the values towards the root of the circuits.
-//! As of now, the circuit structure has been designed to be optimized when lots of queries are done on it.
-//! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
+//! This module provide an implementation of an arithmetic circuit (AC) whose input are distributions.
+//! As traditional AC, internal nodes are either sum or product node. The circuit is evaluated
+//! bottom-up.
+//! Leaves can either be inputs from a distribution, or approximate probabilities if the circuit is
+//! partially compiled.
+//! The circuit is constructed by a compiler, that follows the same structure of the search solver
+//! but storing its trace.
+//! Since the construction is done in two phases (first the circuit is constructed, then its
+//! structure optimized), some information is first stored in the nodes and then transfered into
+//! the vectors of the circuit.
 
-use std::{fmt, path::PathBuf, fs::File, io::{BufRead, BufReader}};
+use std::fmt;
+use std::path::PathBuf;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
 use rustc_hash::FxHashMap;
 use crate::common::*;
 
@@ -40,28 +44,24 @@ pub struct NodeIndex(pub usize);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct LayerIndex(usize);
 
-/// Structure representing the Distribution awared Arithmetic Circuit (DAC).
-/// The structure only has three vector for the distributions, the internal nodes and the output of each internal node.
-/// Currently the structure is reorganized after its creation to optimize the cache locality and simplify the evaluation.
-/// That is, the nodes vector is sorted by "layer" so that all the inputs of node at index i are at an index j < i.
-/// Moreover, the outputs of each internal nodes are stored in a contiguous part of the `outputs` vector.
-/// This has two effects:
-///     - When evaluating the circuits, a simple pass from index 0 until `nodes.len()` is sufficient. When loading node at index i,
-///       the next node to be evaluated is i+1 and is likely to be stored in cache.
-///     - When a node sends its value to its outputs, the same optimization happens (as loading the first output is likely to implies that
-///       the following outputs are in cache).
+/// Structure representing the arithmetic circuit.
 pub struct Dac<R>
     where R: SemiRing
 {
     /// Internal nodes of the circuit
     nodes: Vec<Node<R>>,
-    /// Outputs of the internal nodes
+    /// Each node has a reference (two usizes) to a slice of this vector to store the index of
+    /// their outputs in the circuit
     outputs: Vec<NodeIndex>,
-    /// Inputs of the internal nodes
+    /// Each node has a reference (two usizes) to a slice of this vector to store the index of
+    /// their inputs in the circuit
     inputs: Vec<NodeIndex>,
     /// Mapping between the (distribution, value) and the node index for distribution nodes
-    pub distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
+    distribution_mapping: FxHashMap<(DistributionIndex, usize), NodeIndex>,
+    /// Root of the circuit
     root: Option<NodeIndex>,
+    /// Index of the first node that is not an input
+    start_computational_nodes: usize,
 }
 
 impl<R> Dac<R>
@@ -76,6 +76,7 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             root: None,
+            start_computational_nodes: 0,
         }
     }
 
@@ -84,23 +85,24 @@ impl<R> Dac<R>
         self.nodes.len()
     }
 
-    /// Adds a prod node to the circuit
+    /// Adds a prod node to the circuit. Returns its index.
     pub fn add_prod_node(&mut self) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(Node::product());
         id
     }
     
-    /// Adds a sum node to the circuit
+    /// Adds a sum node to the circuit. Returns its index.
     pub fn add_sum_node(&mut self) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(Node::sum());
         id
     }
 
-    pub fn add_partial_node(&mut self, value: f64) -> NodeIndex {
+    /// Adds a partial node, with the given value, to the circuit. Returns its index.
+    pub fn add_approximate_node(&mut self, value: f64) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
-        self.nodes.push(Node::partial(value));
+        self.nodes.push(Node::approximate(value));
         id
     }
 
@@ -111,6 +113,108 @@ impl<R> Dac<R>
         self[output].add_input(node);
     }
 
+    /// Sets the root of the circuit
+    pub fn set_root(&mut self, root: NodeIndex) {
+        self.root = Some(root);
+    }
+
+    /// Returns the number of computational nodes in the circuit
+    pub fn number_nodes(&self) -> usize {
+        self.nodes.len()
+    }
+
+    // --- GETTERS --- //
+    
+    /// Returns the probability of the circuit. If the circuit has not been evaluated,
+    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
+    /// sum node
+    pub fn circuit_probability(&self) -> &R {
+        self.nodes.last().unwrap().value()
+    }
+    
+    /// Returns the node at the given index in the input vector
+    pub fn input_at(&self, index: usize) -> NodeIndex {
+        self.inputs[index]
+    }
+    
+    /// Returns the node at the given index in the output vector
+    pub fn output_at(&self, index: usize) -> NodeIndex {
+        self.outputs[index]
+    }
+    
+    /// Returns, for a given distribution index and its value, the corresponding node index in the dac
+    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            *x
+        } else {
+            self.nodes.push(Node::distribution(distribution.0, value, probability));
+            self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
+            NodeIndex(self.nodes.len()-1)
+        }
+    }
+
+    pub fn zero_paths(&mut self) {
+        for node in (0..self.nodes.len()-1).map(NodeIndex) {
+            self[node].set_path_value(f128!(0.0));
+        }
+        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
+    }
+}
+
+// --- CIRCUIT EVALUATION ---
+
+impl<R> Dac<R>
+    where R: SemiRing
+{
+    /// Updates the values of the distributions
+    pub fn reset_distributions(&mut self, distributions: &Vec<Vec<R>>) {
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            if let TypeNode::Distribution { d, v } = self[node].get_type() {
+                let value = R::copy(&distributions[d][v]);
+                self[node].set_value(value);
+            }
+            // All the distributions are at layer 0
+            if self[node].layer() > 0 {
+                break;
+            }
+        }
+    }
+
+    /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
+    pub fn evaluate(&mut self) -> &R {
+        for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
+            let start = self.nodes[node.0].input_start();
+            let end = start + self.nodes[node.0].number_inputs();
+            if self[node].is_product() {
+                let value = R::mul_children((start..end).map(|idx| {
+                    let child = self.inputs[idx];
+                    self[child].value()
+                }));
+                self[node].set_value(value);
+            } else {
+                let value = R::sum_children((start..end).map(|idx| {
+                    let child = self.inputs[idx];
+                    self[child].value()
+                }));
+                self[node].set_value(value);
+            }
+        }
+        // Last node is the root since it has the higher layer
+        self.nodes.last().unwrap().value()
+    }
+}
+
+// --- STRUCTURE OPTIMIZATION ---
+
+impl<R> Dac<R>
+    where R: SemiRing
+{
+    /// Optimize the structure of the circuit. This implies the following actions.
+    ///     1. Every node not useful to the evaluation of the circuits are removed (e.g. a node
+    ///        that has no path to the root
+    ///     2. The circuit is reduce in size, by removing nodes not doing any computations (i.e.,
+    ///        nodes with only one input)
+    ///     3. The internal vector `nodes` is reorganized by layers.
     pub fn optimize_structure(&mut self) {
         self.remove_dead_ends();
         self.reduce();
@@ -127,33 +231,38 @@ impl<R> Dac<R>
     /// Layerizes the circuit. This function sort the internal nodes of the circuits such that an internal nodes at index i
     /// has all its input at an index j < i.
     pub fn layerize(&mut self) {
-        // First, we need to add the layer to each node
+        // First, we need to add the layer to each node. The nodes at layer 0 are the distribution
+        // nodes or the approximate nodes.
         let mut to_process: Vec<(NodeIndex, usize)> = vec![];
         for node in (0..self.nodes.len()).map(NodeIndex) {
-            if let TypeNode::Distribution {..} = self[node].get_type() {
-                // The distribution nodes are at layer 0
+            if self[node].is_distribution() || self[node].is_approximate() {
                 to_process.push((node, 0));
-            }
-            if self[node].is_partial() {
-                to_process.push((node, 0));
+                self[node].set_layer(0);
             }
         }
         let mut number_layers = 1;
+        // Then the nodes in the queue are processed. Each node give to its parent a layer of l+1
+        // (l being the layer of the node). The layer is updated only if l+1 is greater than the
+        // current layer of the node
         while let Some((node, layer)) = to_process.pop() {
-            // Only change if the layer must be increased
-            //if layer >= self[node].get_layer() {
             if number_layers < layer + 1 {
                 number_layers = layer + 1;
             }
-            self[node].set_layer(layer);
             for output_id in self[node].iter_output() {
-                let output = self[node].get_output_at(output_id);
-                if self[output].get_layer() < layer + 1 {
+                let output = self[node].output_at(output_id);
+                if self[output].layer() < layer + 1 {
                     to_process.push((output, layer+1));
+                    self[output].set_layer(layer+1);
                 }
             }
-            //}
         }
+
+        // Finally, we reorganize the nodes vector by layer. It means that we need to sort its
+        // content using the layers computed above.
+        // To do so, we keep track, for each node, of its new and old index. This helps us update
+        // the input/output vectors.
+        // During this reorganization, we also delete all nodes that are not useful for the
+        // evaluation of the circuit.
 
         let n_nodes = self.nodes.len();
         // new_indexes stores at each old index i the new index of the node.
@@ -162,7 +271,10 @@ impl<R> Dac<R>
         // old_indexes store for each each new index i the old index of the node.
         // This vector is used to be able to update new_indexes when nodes have been moved.
         let mut old_indexes = (0..n_nodes).collect::<Vec<usize>>();
+        // Actual end of the circuits. After this reorganization, everything after end can be
+        // removed
         let mut end = self.nodes.len();
+        // Helps to keep track to where we need to put the nodes
         let mut start = 0;
         // First we remove all nodes that are not part of a path from an input to the root of the
         // circuit.
@@ -176,38 +288,43 @@ impl<R> Dac<R>
         }
 
         // Then we process each layer one by one.
+        // TODO: This requires to do multiple pass on the
+        // circuits, could probably be improved by keeping tracks of the size of each layer. Then
+        // we can infer the start-end positions in the nodes vector and move every node in one pass
+        // over the circuit.
         let mut start_layer = 0;
         for layer in 0..number_layers {
+            if layer == 1 {
+                self.start_computational_nodes = start_layer;
+            }
             for i in start_layer..end{
                 // If the node is part of the layer being process, then we swap it to the layer area
                 let node = NodeIndex(i);
-                if self[node].get_layer() == layer {
+                if self[node].layer() == layer {
                     // Only move if necessary
-                    if i != start_layer {
-                        self.swap(&mut new_indexes, &mut old_indexes, start_layer, i);
-                    }
+                    self.swap(&mut new_indexes, &mut old_indexes, start_layer, i);
                     start_layer += 1;
                 }
             }
         }
         
         // At this point, the nodes vector is sorted by layer. But the indexes for the outputs/inputs must be updated.
-        self.distribution_mapping.clear();
+        // During this pass, the inputs/ouputs are update and moved inside the input/output vectors
+        // in the DAC.
+        // At this point we do not need to store them in the nodes anymore, and we can move them.
+        // One of the advantage of doing so is that all the inputs/outputs are stored in the same
+        // array and each node only store two usize (the start/size of the slice in which their
+        // parents/children are stored).
         for node in (0..end).map(NodeIndex) {
-            // Drop all nodes that have been removed
-            if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                self.distribution_mapping.insert((DistributionIndex(d), v), node);
-            }
-
             // Update the outputs with the new indexes
             let n = self.outputs.len();
             self[node].set_output_start(n);
             self[node].set_number_outputs(0);
 
             for output_id in self[node].iter_output() {
-                let output = self[node].get_output_at(output_id);
-                // If the node has not been dropped, update the output. At this step, it is also moved in the
-                // outputs vector of the DAC structure
+                let output = self[node].output_at(output_id);
+                // If the new index of the node is after then end, then it is dropped. Otherwise,
+                // we need to update it
                 if new_indexes[output.0] < end {
                     let new_output = NodeIndex(new_indexes[output.0]);
                     self.outputs.push(new_output);
@@ -220,7 +337,10 @@ impl<R> Dac<R>
             self[node].set_input_start(n);
             self[node].set_number_inputs(0);
 
-            for input in self[node].iter_input().collect::<Vec<NodeIndex>>() {
+            for input_id in self[node].iter_input() {
+                let input = self[node].input_at(input_id);
+                // If the new index of the node is after then end, then it is dropped. Otherwise,
+                // we need to update it
                 if new_indexes[input.0] < end {
                     let new_input = NodeIndex(new_indexes[input.0]);
                     self.inputs.push(new_input);
@@ -233,10 +353,11 @@ impl<R> Dac<R>
         // Actually remove the nodes (and allocated space) from the nodes vector.
         self.nodes.truncate(end);
         self.nodes.shrink_to(end);
+        self.distribution_mapping.clear();
     }
     
-    /// Tag all nodes that are not on a path from an input (incomplete nodes are considered as
-    /// input) to the root of the DAC as to be removed.
+    /// Tags all the node not useful for the evaluation of the circuit as to be removed.
+    /// This include all nodes that are not reachable from the root.
     pub fn remove_dead_ends(&mut self) {
         let mut to_process: Vec<NodeIndex> = vec![];
         to_process.push(self.root.unwrap());
@@ -245,7 +366,8 @@ impl<R> Dac<R>
                 continue;
             }
             self[node].set_to_remove(false);
-            for child in self[node].iter_input() {
+            for child_id in self[node].iter_input() {
+                let child = self[node].input_at(child_id);
                 if self[child].is_to_remove() {
                     to_process.push(child);
                 }
@@ -256,7 +378,7 @@ impl<R> Dac<R>
     /// A node is said to be neutral if it is not to be removed, has only one input, and is not the root of the DAC.
     /// In such case it can be bypass (it does not change its input)
     fn is_neutral(&self, node: NodeIndex) -> bool {
-        !self[node].is_to_remove() && self[node].has_output() && self[node].get_number_inputs() == 1
+        !self[node].is_to_remove() && self[node].has_output() && self[node].number_inputs() == 1
     }
     
     /// Reduces the current circuit. This implies the following transformations (in that order)
@@ -266,222 +388,63 @@ impl<R> Dac<R>
     ///     2. If a sum node has as input a distribution and all its value, it can be removed. In practice it only
     ///        has input from that distribution
     pub fn reduce(&mut self) {
-        let mut changed = true;
-        while changed {
-            changed = false;
-            // First, we remove all neutral node. Since it can lead to a possible optimization of the sum node, we do that first
-            for node in (0..self.nodes.len()).map(NodeIndex) {
-                if self.is_neutral(node) {
-                    changed = true;
-                    self[node].set_to_remove(true);
-                    // The removal of the node is the same, no matter the node type of the input
-                    let input = self[node].iter_input().next().unwrap();
-                    // Removing the node from the output of the input node
-                    if let Some(idx) = self[input].iter_output().position(|x| self[input].get_output_at(x) == node) {
-                        self[input].remove_index_from_output(idx);
-                    }
-                    for output_id in self[node].iter_output() {
-                        let output = self[node].get_output_at(output_id);
-                        // Adds the input of node to its parent input and remove node from the inputs
-                        self[input].add_output(output);
-                        // Updating the input of the new output from node -> input
-                        self[output].remove_input(node);
-                        self[output].add_input(input);
-                    }
-                    self[node].clear_and_shrink_output();
-                    self[node].clear_and_shrink_input();
-                
+        // First, we remove all neutral node. Since it can lead to a possible optimization of the sum node, we do that first
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            if self.is_neutral(node) {
+                self[node].set_to_remove(true);
+                let input = self[node].iter_input().next().unwrap();
+                let child = self[node].input_at(input);
+                // Removing the node from the output of the input node
+                if let Some(idx) = self[child].iter_output().position(|x| self[child].output_at(x) == node) {
+                    self[child].remove_index_from_output(idx);
                 }
+                for output_id in self[node].iter_output() {
+                    let output = self[node].output_at(output_id);
+                    // Adds the input of node to its parent input and remove node from the inputs
+                    self[child].add_output(output);
+                    self[output].add_input(child);
+                }
+                self[node].clear_and_shrink_output();
+                self[node].clear_and_shrink_input();
             }
+        }
 
-            // If a distribution node send all its value to a sum node, remove the node from the output
-            for node in (0..self.nodes.len()).map(NodeIndex) {
-                if self[node].is_sum() {
-                    let mut in_count = 0.0;
-                    let mut distri_child: Option<usize> = None;
-                    for input in self[node].iter_input() {
-                        if let TypeNode::Distribution { d, v:_ } = self[input].get_type() {
-                            if distri_child.is_none() {
-                                distri_child = Some(d);
-                                in_count += self[input].get_value().to_f64();
-                            } else if Some(d) == distri_child {
-                                in_count += self[node].get_value().to_f64();
-                            } else {
-                                break;
-                            }
+        // If a sum node sums all the value of a distribution, then it always sends 1.0 to its
+        // output (which must be a prod node). Hence it can be removed safely.
+        // Note that the gradients of the distribution nodes will cancel each others, hence keeping
+        // them would have no impact on the learning.
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            if self[node].is_sum() {
+                let mut in_count = 0.0;
+                let mut distri_child: Option<usize> = None;
+                for input_id in self[node].iter_input() {
+                    let input = self[node].input_at(input_id);
+                    if let TypeNode::Distribution { d, v:_ } = self[input].get_type() {
+                        if distri_child.is_none() {
+                            distri_child = Some(d);
+                            in_count += self[input].value().to_f64();
+                        } else if Some(d) == distri_child {
+                            in_count += self[node].value().to_f64();
                         } else {
                             break;
                         }
+                    } else {
+                        break;
                     }
-                    if in_count == 1.0 {
-                        changed = true;
-                        for input in self[node].iter_input().collect::<Vec<NodeIndex>>() {
-                            //debug_assert!(matches!(self.nodes[input.0].typenode, TypeNode::Distribution{..}));
-                            let index_to_remove = self[input].iter_output().position(|x| self[input].get_output_at(x) == node).unwrap();
-                            self[input].remove_index_from_output(index_to_remove);
-                        }
-                        self[node].set_to_remove(true);
-                        self[node].clear_and_shrink_input();
-                        for output_id in self[node].iter_output() {
-                            let output = self[node].get_output_at(output_id);
-                            self[output].remove_input(node);
-                        }
-                    }
+                }
+                if in_count == 1.0 {
+                    self[node].set_to_remove(true);
+                    self[node].clear_and_shrink_input();
                 }
             }
         }
-    }
-    
-    // --- Evaluation ---- //
-
-    /// Updates the values of the distributions
-    pub fn reset_distributions(&mut self, distributions: &Vec<Vec<R>>) {
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                let value = R::copy(&distributions[d][v]);
-                self[node].set_value(value);
-            }
-            // All the distributions are at layer 0
-            if self[node].get_layer() > 0 {
-                break;
-            }
-        }
-    }
-
-    /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self) -> &R {
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].get_layer() == 0 {
-                continue;
-            }
-            let start = self.nodes[node.0].get_input_start();
-            let end = start + self.nodes[node.0].get_number_inputs();
-            if self[node].is_product() {
-                let value = R::mul_children((start..end).map(|idx| {
-                    let child = self.inputs[idx];
-                    self[child].get_value()
-                }));
-                self[node].set_value(value);
-            } else {
-                let value = R::sum_children((start..end).map(|idx| {
-                    let child = self.inputs[idx];
-                    self[child].get_value()
-                }));
-                self[node].set_value(value);
-            }
-        }
-        // Last node is the root since it has the higher layer
-        self.nodes.last().unwrap().get_value()
-    }
-    
-    // --- Various helper methods for the python bindings ---
-    
-
-    // --- GETTERS --- //
-    
-    /// Returns the probability of the circuit. If the circuit has not been evaluated,
-    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
-    /// sum node
-    pub fn get_circuit_probability(&self) -> &R {
-        self.nodes.last().unwrap().get_value()
-    }
-    
-    /// Returns the node at the given index in the input vector
-    pub fn get_input_at(&self, index: usize) -> NodeIndex {
-        self.inputs[index]
-    }
-    
-    /// Returns the node at the given index in the output vector
-    pub fn get_output_at(&self, index: usize) -> NodeIndex {
-        self.outputs[index]
-    }
-    
-    /// Returns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn get_distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
-        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
-            *x
-        } else {
-            self.nodes.push(Node::distribution(distribution.0, value, probability));
-            self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
-            NodeIndex(self.nodes.len()-1)
-        }
-    }
-
-    // --- GETTERS FOR PYTHON INTERFACE --- //
-    pub fn get_number_distribution_nodes(&self) -> usize {
-        let mut cnt = 0;
-        for node in 0..self.nodes.len() {
-            if matches!(self.nodes[node].get_type(), TypeNode::Distribution{..}) {
-                cnt += 1;
-            }
-        }
-        cnt
-    }
-
-    pub fn get_number_circuit_nodes(&self) -> usize {
-        self.nodes.len() - self.get_number_distribution_nodes()
-    }
-
-    // Retruns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn get_distribution_value_node_index_usize(&self, distribution: DistributionIndex, value: usize) -> isize {
-        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
-            x.0 as isize
-        } else {
-            -1
-        }
-    }
-
-    /// Returns the number of input edges from the distributions of the given node
-    pub fn get_circuit_node_number_distribution_input(&self, node: NodeIndex) -> usize {
-        let mut cnt = 0;
-        let num_inputs = self.nodes[node.0].get_number_inputs();
-        let input_start = self.nodes[node.0].get_input_start();
-        for i in 0..num_inputs {
-            if matches!(self.nodes[self.inputs[input_start+i].0].get_type(), TypeNode::Distribution{..}) {
-                cnt += 1;
-            }
-        }
-        cnt
-    }
-
-    /// Sets the root of the circuit
-    pub fn set_root(&mut self, root: NodeIndex) {
-        self.root = Some(root);
-    }
-
-    pub fn zero_paths(&mut self) {
-        for node in (0..self.nodes.len()-1).map(NodeIndex) {
-            self[node].set_path_value(f128!(0.0));
-        }
-        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
-    }
-    // --- QUERIES --- //
-    
-    /// Returns the number of computational nodes in the circuit
-    pub fn number_nodes(&self) -> usize {
-        self.nodes.len()
-    }
-    
-    /// Returns the number of input distributions in the circuit
-    pub fn number_distributions(&self) -> usize {
-        let mut cnt = 0;
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            if self[node].is_distribution() {
-                cnt += 1;
-            }
-        }
-        cnt
-    }
-
-    pub fn root(&self) -> &R {
-        self.nodes.last().unwrap().get_value()
     }
 }
 
 // --- ITERATOR ---
 
 impl<R> Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
     pub fn iter(&self) -> impl Iterator<Item = NodeIndex> {
         (0..self.nodes.len()).map(NodeIndex)
@@ -496,7 +459,7 @@ impl<R> Dac<R>
 // --- Indexing the circuit --- 
 
 impl<R> std::ops::Index<NodeIndex> for Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
     type Output = Node<R>;
 
@@ -506,121 +469,110 @@ impl<R> std::ops::Index<NodeIndex> for Dac<R>
 }
 
 impl<R> std::ops::IndexMut<NodeIndex> for Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
     fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
         &mut self.nodes[index.0]
     }
 }
 
-// Various methods for dumping the compiled diagram, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
+// Various methods for dumping the compiled circuits, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
 
 // Visualization as graphviz DOT file
 impl<R> Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
-    
-    fn distribution_node_id(&self, node: NodeIndex) -> usize {
-        node.0
-    }
-    
-    fn sp_node_id(&self, node: NodeIndex) -> usize {
-        node.0
-    }
-    
+
     pub fn as_graphviz(&self) -> String {
-        
-        let dist_node_attributes = String::from("shape=circle,style=filled");
-        let prod_node_attributes = String::from("shape=circle,style=filled");
+
+        let dist_node_attributes = String::from("shape=doublecircle,style=filled");
+        let prod_node_attributes = String::from("shape=square,style=filled");
         let sum_node_attributes = String::from("shape=circle,style=filled");
-        let partial_node_attributes = String::from("shape=square,style=filled");
-        
+        let approx_node_attributes = String::from("shape=house,style=filled");
+
         let mut out = String::new();
         out.push_str("digraph {\ntranksep = 3;\n\n");
-        
-        // Generating the nodes in the network 
 
+        // Generating the nodes in the network 
         for node in (0..self.nodes.len()).map(NodeIndex) {
-            if let TypeNode::Distribution { d, v } = self[node].get_type() {
-                if self[node].has_output() {
-                    let id = self.distribution_node_id(node);
-                    out.push_str(&Dac::<Float>::node(id, &dist_node_attributes, &format!("id{} d{} v{} ({:.4})", id, d, v, self[node].get_value().to_f64())));
+            let id = node.0;
+            let value = format!("{:.4}", self[node].value().to_f64());
+            match self[node].get_type() {
+                TypeNode::Sum => {
+                    let attributes = &sum_node_attributes;
+                    let label = format!("+ {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Product => {
+                    let attributes = &prod_node_attributes;
+                    let label = format!("x {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Distribution{d:_ ,v:_ } => {
+                    let attributes = &dist_node_attributes;
+                    let label = format!("D {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Approximate => {
+                    let attributes = &approx_node_attributes;
+                    let label = format!("A {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 }
             }
         }
 
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            let id = self.sp_node_id(node);
-            if self[node].is_partial() {
-                out.push_str(&Dac::<Float>::node(id, &partial_node_attributes, &format!("partial{} ({:.3})", id, self[node].get_value().to_f64())));
-            } else if self[node].is_product() {
-                out.push_str(&Dac::<Float>::node(id, &prod_node_attributes, &format!("X ({:.3}) path({:.3})", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
-            } else if self[node].is_sum() {
-                out.push_str(&Dac::<Float>::node(id, &sum_node_attributes, &format!("+ ({:.3}) path({:.3})", self[node].get_value().to_f64(), self[node].get_path_value().to_f64())));
-            }
-        }
-        
         // Generating the edges
-        for node in (0..self.nodes.len()).map(NodeIndex) {
-            let from = self.sp_node_id(node);
-            let out_start = self[node].get_output_start();
-            let out_end = out_start + self[node].get_number_outputs();
-            for output_i in out_start..out_end {
-                let output = self.outputs[output_i];
-                let to = self.sp_node_id(output);
-                out.push_str(&Dac::<Float>::edge(from, to, None));
+        for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
+            let input_start = self[node].input_start();
+            let input_end = input_start + self[node].number_inputs();
+            for child_id in input_start..input_end {
+                let child = self.inputs[child_id];
+                let from = child.0;
+                let to = node.0;
+                out.push_str(&format!("\t{from} -> {to} [penwidth=1];\n"));
             }
         }
         out.push_str("}\n");
         out
-    }
-    
-    fn node(id: usize, attributes: &String, label: &String) -> String {
-        format!("\t{id} [{attributes},label=\"{label}\"];\n")
-    }
-    
-    fn edge(from: usize, to: usize, label: Option<String>) -> String {
-        let label = if let Some(v) = label {
-            v
-        } else {
-            String::new()
-        };
-        format!("\t{from} -> {to} [penwidth=1,label=\"{label}\"];\n")
     }
 }
 
 // Custom text format for the network
 
 impl<R> fmt::Display for Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "outputs")?;
-        for output in self.outputs.iter().copied() {
-            write!(f, " {}", output.0)?;
+        for output in self.outputs.iter().copied().map(|node| format!("{}", node.0)) {
+            write!(f, " {}", output)?;
         }
         writeln!(f)?;
         write!(f, "inputs")?;
-        for input in self.inputs.iter().copied() {
-            write!(f, " {}", input.0)?;
+        for input in self.inputs.iter().copied().map(|node| format!("{}", node.0)) {
+            write!(f, " {}", input)?;
         }
         writeln!(f)?;
         for node in self.nodes.iter() {
             match node.get_type() {
                 TypeNode::Product => write!(f, "x")?,
                 TypeNode::Sum => write!(f, "+")?,
-                TypeNode::Partial => write!(f, "p {}", node.get_value().to_f64())?,
+                TypeNode::Approximate => write!(f, "p {}", node.value().to_f64())?,
                 TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
-            write!(f, " {} {} {} {} ", node.get_output_start(), node.get_number_outputs(), node.get_input_start(), node.get_number_inputs())?;
+            writeln!(f, " {} {} {} {}", node.output_start(), node.number_outputs(), node.input_start(), node.number_inputs())?;
         }
         fmt::Result::Ok(())
     }
 }
 
 impl<R> Dac<R>
-    where R: SemiRing
+where R: SemiRing
 {
+    pub fn to_file(&self, filepath: &PathBuf) {
+        let mut output = File::create(filepath).unwrap();
+        write!(output, "{}", self).unwrap();
+    }
 
     pub fn from_file(filepath: &PathBuf) -> Self {
         let mut dac = Self {
@@ -629,6 +581,7 @@ impl<R> Dac<R>
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
             root: None,
+            start_computational_nodes: 0,
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);
@@ -665,8 +618,10 @@ impl<R> Dac<R>
                 node.set_input_start(values[4]);
                 node.set_number_inputs(values[5]);
                 dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
-            } else if l.starts_with("evaluate") {
-                continue;
+            } else if l.starts_with('p') {
+                let value = split.iter().skip(1).next().unwrap().parse::<f64>().unwrap();
+                let node = Node::approximate(value);
+                dac.nodes.push(node);
             }
             else if !l.is_empty() {
                 panic!("Bad line format: {}", l);
