@@ -25,7 +25,7 @@ use crate::parser::*;
 use crate::propagator::Propagator;
 use crate::core::components::ComponentExtractor;
 use crate::{Branching, Loss};
-use crate::solvers::DACCompiler;
+use crate::solvers::Solver;
 use crate::solvers::*;
 use super::Learning;
 use crate::common::f128;
@@ -76,7 +76,7 @@ impl <const S: bool> Learner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let mut compiler = make_compiler!(input, branching, epsilon);
+                    let compiler = make_solver!(input, branching, epsilon, None, false);
                     if let Some(mut dac) = compile!(compiler) {
                         dac.optimize_structure();
                         //println!("nb approx {}, nb nodes {}", dac.iter().filter(|n| dac[*n].is_partial()).count(), dac.nodes.len());
@@ -102,7 +102,7 @@ impl <const S: bool> Learner<S>
                     // The input is a CNF file, we need to compile it from scratch
                     // First, we need to know how much distributions are needed to compute the
                     // query.
-                    let mut compiler = make_compiler!(input, branching, epsilon);
+                    let compiler = make_solver!(input, branching, epsilon, None, false);
                     compile!(compiler)
                 },
                 FileType::FDAC => {

@@ -20,7 +20,7 @@ use learning::learner::Learner;
 use learning::Learning;
 use learning::tensor_learner::TensorLearner;
 use diagrams::dac::dac::Dac;
-use solvers::compiler::DACCompiler;
+use solvers::GenericSolver;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -82,7 +82,7 @@ pub enum Optimizer {
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> Option<Dac<Float>>{
     match type_of_input(&input) {
         FileType::CNF => {
-            let mut compiler = make_compiler!(&input, branching, epsilon);
+            let compiler = make_solver!(&input, branching, epsilon, None, false);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.optimize_structure();
@@ -166,7 +166,7 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, statistics);
-    solve_search!(solver)
+    search!(solver)
 }
 
 
