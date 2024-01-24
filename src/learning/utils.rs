@@ -15,6 +15,15 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use rug::Float;
+use std::path::PathBuf;
+use rayon::prelude::*;
+use crate::branching::*;
+use crate::Branching;
+use search_trail::StateManager;
+use crate::core::components::ComponentExtractor;
+use crate::propagator::Propagator;
+use crate::parser::*;
+use crate::solvers::*;
 use crate::{common::f128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
@@ -29,13 +38,52 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
     x.iter().map(|i| f128!(i.exp() / sum_exp)).collect()
 }
 
+/// Generates a vector of optional Dacs from a list of input files
+pub fn generate_dacs<R>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64) -> Vec<Option<Dac<R>>>
+    where R: SemiRing
+{
+    inputs.par_iter().map(|input| {
+        // We compile the input. This can either be a .cnf file or a fdac file.
+        // If the file is a fdac file, then we read directly from it
+        match type_of_input(input) {
+            FileType::CNF => {
+                println!("Compiling {}", input.to_str().unwrap());
+                // The input is a CNF file, we need to compile it from scratch
+                let mut compiler = make_compiler!(input, branching, epsilon);
+                compile!(compiler)
+            },
+            FileType::FDAC => {
+                println!("Reading {}", input.to_str().unwrap());
+                // The query has already been compiled, we just read from the file.
+                Some(Dac::from_file(input))
+            }
+        }
+    }).collect::<Vec<_>>()
+}
+
+/// Decides whether early stopping should be performed or not
+pub fn do_early_stopping(avg_loss:f64, prev_loss:f64, count:&mut usize, stopping_criterion:f64, patience:usize, delta:f64) -> bool {
+    if (avg_loss-prev_loss).abs()<delta {
+        *count += 1;
+    }
+    else {
+        *count = 0;
+    }
+    if (avg_loss < stopping_criterion) || *count>=patience {
+        true
+    }
+    else {
+        false
+    }
+}
+
 /// Structure representing a dataset for the learners. A dataset is a set of queries (boolean
 /// formulas compiled into an arithmetic circuit) associated with an expected probability
 pub struct Dataset<R> 
     where R: SemiRing
 {
     queries: Vec<Dac<R>>,
-    expected: Vec<f64>,
+    expected: Vec<R>,
 }
 
 impl<R> Dataset<R>
@@ -43,7 +91,7 @@ impl<R> Dataset<R>
 {
 
     /// Creates a new dataset from the provided queries and expected probabilities
-    pub fn new(queries: Vec<Dac<R>>, expected: Vec<f64>) -> Self {
+    pub fn new(queries: Vec<Dac<R>>, expected: Vec<R>) -> Self {
         Self {
             queries,
             expected,
@@ -66,8 +114,8 @@ impl<R> Dataset<R>
     }
 
     /// Returns the expected output for the required query
-    pub fn expected(&self, query_index: usize) -> f64 {
-        self.expected[query_index]
+    pub fn expected(&self, query_index: usize) -> &R {
+        &self.expected[query_index]
     }
 }
 

@@ -20,15 +20,9 @@ use rug::{Assign, Float};
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
-use search_trail::StateManager;
-use crate::branching::*;
 use crate::parser::*;
-use crate::propagator::Propagator;
-use crate::core::components::ComponentExtractor;
 use crate::Branching;
 use crate::Loss;
-use crate::solvers::DACCompiler;
-use crate::solvers::*;
 use rayon::prelude::*;
 use super::Learning;
 use crate::common::f128;
@@ -52,10 +46,13 @@ pub struct Learner<const S: bool>
 
 impl <const S: bool> Learner<S>
 {
-    /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
+    /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
     pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
+        
+        // Retrieves the distributions values and computes their unsoftmaxed values
+        // and initializes the gradients to 0
         let distributions = distributions_from_cnf(&inputs[0]);
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
@@ -64,75 +61,31 @@ impl <const S: bool> Learner<S>
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
+        // Retrieves which distributions are learned
         let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
 
         // Compiling the train and test queries into arithmetic circuits
-        let mut train_dacs = inputs.par_iter().map(|input| {
-            // We compile the input. This can either be a .cnf file or a fdac file.
-            // If the file is a fdac file, then we read directly from it
-            match type_of_input(input) {
-                FileType::CNF => {
-                    println!("Compiling {}", input.to_str().unwrap());
-                    // The input is a CNF file, we need to compile it from scratch
-                    // First, we need to know how much distributions are needed to compute the
-                    // query.
-                    let mut compiler = make_compiler!(input, branching, epsilon);
-                    if let Some(mut dac) = compile!(compiler) {
-                        dac.optimize_structure();
-                        //println!("nb approx {}, nb nodes {}", dac.iter().filter(|n| dac[*n].is_partial()).count(), dac.nodes.len());
-                        Some(dac)
-                    } else {
-                        None
-                    }
-                },
-                FileType::FDAC => {
-                    println!("Reading {}", input.to_str().unwrap());
-                    // The query has already been compiled, we just read from the file.
-                    Some(Dac::from_file(input))
-                }
-            }
-        }).collect::<Vec<_>>();
-
-        let mut test_dacs = test_inputs.par_iter().map(|input| {
-            // We compile the input. This can either be a .cnf file or a fdac file.
-            // If the file is a fdac file, then we read directly from it
-            match type_of_input(input) {
-                FileType::CNF => {
-                    println!("Compiling {}", input.to_str().unwrap());
-                    // The input is a CNF file, we need to compile it from scratch
-                    // First, we need to know how much distributions are needed to compute the
-                    // query.
-                    let mut compiler = make_compiler!(input, branching, epsilon);
-                    compile!(compiler)
-                },
-                FileType::FDAC => {
-                    println!("Reading {}", input.to_str().unwrap());
-                    // The query has already been compiled, we just read from the file.
-                    Some(Dac::from_file(input))
-                }
-            }
-        }).collect::<Vec<_>>();
-
+        let mut train_dacs = generate_dacs(inputs, branching, epsilon);
+        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon);
+        // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
         let mut test_data = vec![];
         let mut test_expected = vec![];
-
         while !train_dacs.is_empty() {
             let d = train_dacs.pop().unwrap();
             let expected = expected_outputs.pop().unwrap();
             if let Some(dac) = d {
                 train_data.push(dac);
-                train_expected.push(expected);
+                train_expected.push(f128!(expected));
             }
         }
-
         while !test_dacs.is_empty() {
             let d = test_dacs.pop().unwrap();
             let expected = expected_test.pop().unwrap();
             if let Some(dac) = d {
                 test_data.push(dac);
-                test_expected.push(expected);
+                test_expected.push(f128!(expected));
             }
         }
         let train_dataset = Dataset::new(train_data, train_expected);
@@ -182,7 +135,7 @@ impl <const S: bool> Learner<S>
 
     // --- Evaluation --- //
 
-    // Evaluate the different DACs and return the results
+    // Evaluate the different train DACs and return the results
     pub fn evaluate(&mut self) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.train.get_queries_mut() {
@@ -209,6 +162,8 @@ impl <const S: bool> Learner<S>
     // --- Gradient computation --- //
 
     // Compute the gradient of the distributions, from the different DAC queries
+    // The computation is done in a top-down way, starting from the root node
+    // and uses the chaine rule of the derivative to cumulatively compute the gradient in the leaves
     pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
         self.zero_grads();
         for query_id in 0..self.train.len() {
@@ -227,6 +182,9 @@ impl <const S: bool> Learner<S>
                     let child = self.train[query_id].get_input_at(child_index);
                     match self.train[query_id][node].get_type() {
                         TypeNode::Product => {
+                            // If it is a product node, we need to divide the path value by the value of the child
+                            // This is equivalent to multiplying the values of the other children
+                            // If the value of the child is 0, then the path value is simply 0
                             let mut val = f128!(0.0);
                             if self.train[query_id][child].get_value().to_f64() != 0.0 {
                                 val = path_val.clone() * &value / self.train[query_id][child].get_value().to_f64();
@@ -234,6 +192,7 @@ impl <const S: bool> Learner<S>
                             self.train[query_id][child].add_to_path_value(val);
                         },
                         TypeNode::Sum => {
+                            // If it is a sum node, we simply propagate the path value to the children
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
                         TypeNode::Partial => { },
@@ -246,7 +205,8 @@ impl <const S: bool> Learner<S>
                             factor *= value;
                             factor /= self.get_probability(d, v);
                         }
-                        // Compute the gradient contribution for the value used in the node and all the other possible values of the distribution
+                        // Compute the gradient contribution for the value used in the node 
+                        // and all the other possible values of the distribution (derivative of the softmax)
                         let mut sum_other_w = f128!(0.0);
                         let child_w = self.get_probability(d, v);
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
@@ -276,39 +236,33 @@ impl<const S: bool> Learning for Learner<S> {
 
     fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout: u64) {
         let lr_drop: f64 = 0.75;
-        let epoch_drop = 100.0;
+        let epoch_drop = 100;
         let stopping_criterion = 0.0001;
-        let mut prev_loss = 1.0;
         let delta_early_stop = 0.00001;
-        let mut count_no_improve = 0;
         let patience = 5;
+        
+        let mut prev_loss = 1.0;
+        let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
         let to = Duration::from_secs(timeout);
 
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
-
         for e in 0..nepochs {
             if start.elapsed() > to {
                 break;
             }
-            let learning_rate = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
+            let learning_rate = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop as f64).floor());
             let predictions = self.evaluate();
             for i in 0..predictions.len() {
-                train_loss[i] = loss.loss(predictions[i], self.train.expected(i));
-                train_grad[i] = loss.gradient(predictions[i], self.train.expected(i));
+                train_loss[i] = loss.loss(predictions[i], self.train.expected(i).to_f64());
+                train_grad[i] = loss.gradient(predictions[i], self.train.expected(i).to_f64());
             }
             self.compute_gradients(&train_grad);
             self.update_distributions(learning_rate);
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
-            if (avg_loss-prev_loss).abs()<delta_early_stop {
-                count_no_improve += 1;
-            }
-            else {
-                count_no_improve = 0;
-            }
-            if (avg_loss < stopping_criterion) || count_no_improve>=patience {
+            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, stopping_criterion, patience, delta_early_stop) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
             }
@@ -328,12 +282,11 @@ impl<const S: bool> Learning for Learner<S> {
 
         if self.test.len() != 0 {
             let predictions = self.test();
-            let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| loss.loss(prediction, self.test.expected(i))).collect::<Vec<f64>>();
+            let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| loss.loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
             let average_loss = test_loss.iter().sum::<f64>() / test_loss.len() as f64;
             println!("Average test loss : {}", average_loss);
             // TODO: Log somewhere the loss of the test set. Maybe we can add this small loop also
             // at the beginning of the method. Should we output on stdout ?
-
         }
     }
 }
