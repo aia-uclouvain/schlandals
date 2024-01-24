@@ -22,7 +22,6 @@ use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
 use crate::parser::*;
 use crate::Branching;
-use crate::Loss;
 use rayon::prelude::*;
 use super::Learning;
 use crate::common::f128;
@@ -234,35 +233,29 @@ impl <const S: bool> Learner<S>
 
 impl<const S: bool> Learning for Learner<S> {
 
-    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout: u64) {
-        let lr_drop: f64 = 0.75;
-        let epoch_drop = 100;
-        let stopping_criterion = 0.0001;
-        let delta_early_stop = 0.00001;
-        let patience = 5;
-        
+    fn train(&mut self, params:&LearnParameters) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
-        let to = Duration::from_secs(timeout);
+        let to = Duration::from_secs(params.timeout);
 
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
-        for e in 0..nepochs {
+        for e in 0..params.nepochs {
             if start.elapsed() > to {
                 break;
             }
-            let learning_rate = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop as f64).floor());
+            let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
             let predictions = self.evaluate();
             for i in 0..predictions.len() {
-                train_loss[i] = loss.loss(predictions[i], self.train.expected(i).to_f64());
-                train_grad[i] = loss.gradient(predictions[i], self.train.expected(i).to_f64());
+                train_loss[i] = params.loss.loss(predictions[i], self.train.expected(i).to_f64());
+                train_grad[i] = params.loss.gradient(predictions[i], self.train.expected(i).to_f64());
             }
             self.compute_gradients(&train_grad);
             self.update_distributions(learning_rate);
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
-            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, stopping_criterion, patience, delta_early_stop) {
+            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
             }
@@ -282,7 +275,7 @@ impl<const S: bool> Learning for Learner<S> {
 
         if self.test.len() != 0 {
             let predictions = self.test();
-            let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| loss.loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
+            let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss.loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
             let average_loss = test_loss.iter().sum::<f64>() / test_loss.len() as f64;
             println!("Average test loss : {}", average_loss);
             // TODO: Log somewhere the loss of the test set. Maybe we can add this small loop also

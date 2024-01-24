@@ -17,6 +17,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
+use schlandals::learning::LearnParameters;
 
 
 #[derive(Debug, Parser)]
@@ -107,6 +108,25 @@ enum Command {
         /// The optimizer to use if `tensor` is selected as semiring
         #[clap(long, short, default_value_t=schlandals::Optimizer::SGD, value_enum)]
         optimizer: schlandals::Optimizer,
+        /// The drop in the learning rate to apply at each step
+        #[clap(long, default_value_t=0.75)]
+        lr_drop: f64,
+        /// The number of epochs after which to drop the learning rate
+        /// (i.e. the learning rate is multiplied by `lr_drop`)
+        #[clap(long, default_value_t=100)]
+        epoch_drop: usize,
+        /// The stopping criterion for the training
+        /// (i.e. if the loss is below this value, stop the training)
+        #[clap(long, default_value_t=0.0001)]
+        stopping_criterion: f64,
+        /// The minimum of improvement in the loss to consider that the training is still improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=0.00001)]
+        delta_early_stop: f64,
+        /// The number of epochs to wait before stopping the training if the loss is not improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=5)]
+        patience: usize,
     }
 }
 
@@ -130,12 +150,27 @@ fn main() {
             };
             schlandals::compile(input, branching, fdac, dotfile, e);
         },
-        Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, do_log , timeout, epsilon, loss, jobs, semiring, optimizer} => {
+        Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
+            do_log , timeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
+            epoch_drop, stopping_criterion, delta_early_stop, patience} => {
+            let params = LearnParameters {
+                lr,
+                nepochs,
+                timeout,
+                loss,
+                optimizer,
+                lr_drop,
+                epoch_drop,
+                stopping_criterion,
+                delta_early_stop,
+                patience,
+            };
             if do_log && outfolder.is_none() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
-            schlandals::learn(trainfile, testfile, branching, outfolder, lr, nepochs, do_log, timeout, epsilon, loss, jobs, semiring, optimizer);
+            
+            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
         }
     }
 }

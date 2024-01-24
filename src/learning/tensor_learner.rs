@@ -26,6 +26,8 @@ use super::Learning;
 use super::utils::*;
 use std::f64::consts::E;
 use crate::diagrams::semiring::SemiRing;
+use super::*;
+
 
 use tch::{Kind, nn, Device, Tensor, IndexOp, Reduction};
 use tch::nn::{OptimizerConfig, Adam, Sgd, Optimizer};
@@ -158,32 +160,26 @@ impl <const S: bool> TensorLearner<S>
 
 impl<const S: bool> Learning for TensorLearner<S> {
 
-    fn train(&mut self, nepochs:usize, init_lr:f64, loss: Loss, timeout:u64,) {
-        let lr_drop: f64 = 0.75;
-        let epoch_drop = 100.0;
-        let stopping_criterion = 0.0001;
+    fn train(&mut self, params: &LearnParameters) {
         let mut prev_loss = 1.0;
-        let delta_early_stop = 0.00001;
-        let patience = 5;
-
         let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
-        let to = Duration::from_secs(timeout);
+        let to = Duration::from_secs(params.timeout);
 
         let mut train_loss = vec![0.0; self.train.len()];
-        for e in 0..nepochs {
+        for e in 0..params.nepochs {
             if start.elapsed() > to { 
                 break;
             }
-            let learning_rate = init_lr * lr_drop.powf(((1+e) as f64/ epoch_drop).floor());
+            let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
             self.optimizer.set_lr(learning_rate);
             let _predictions = self.evaluate();
             let mut loss_epoch = Tensor::from(0.0);
             for i in 0..self.train.len() {
-                let loss_i = match loss {
-                    Loss::MAE => self.train[i].root().l1_loss(&self.train.expected(i), Reduction::Mean),
-                    Loss::MSE => self.train[i].root().mse_loss(&self.train.expected(i), Reduction::Mean),
+                let loss_i = match params.loss {
+                    Loss::MAE => self.train[i].circuit_probability().l1_loss(&self.train.expected(i), Reduction::Mean),
+                    Loss::MSE => self.train[i].circuit_probability().mse_loss(&self.train.expected(i), Reduction::Mean),
                 };
                 train_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;
@@ -191,7 +187,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             self.optimizer.backward_step(&loss_epoch);
             
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
-            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, stopping_criterion, patience, delta_early_stop) {
+            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
             }
@@ -202,9 +198,9 @@ impl<const S: bool> Learning for TensorLearner<S> {
             let mut loss_epoch = Tensor::from(0.0);
             let mut test_loss = vec![0.0; self.test.len()];
             for i in 0..self.test.len() {
-                let loss_i = match loss {
-                    Loss::MAE => self.test[i].root().l1_loss(&self.test.expected(i), Reduction::Mean),
-                    Loss::MSE => self.test[i].root().mse_loss(&self.test.expected(i), Reduction::Mean),
+                let loss_i = match params.loss {
+                    Loss::MAE => self.test[i].circuit_probability().l1_loss(&self.test.expected(i), Reduction::Mean),
+                    Loss::MSE => self.test[i].circuit_probability().mse_loss(&self.test.expected(i), Reduction::Mean),
                 };
                 test_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;

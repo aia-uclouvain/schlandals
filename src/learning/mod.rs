@@ -14,7 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::Loss;
+use crate::{Loss, Optimizer};
 
 pub mod learner;
 #[cfg(feature = "tensor")]
@@ -23,7 +23,30 @@ mod utils;
 mod logger;
 
 pub trait Learning {
-    fn train(&mut self, nepochs: usize, init_lr: f64, loss: Loss, timeout: u64);
+    fn train(& mut self, params:&LearnParameters);
+}
+
+pub struct LearnParameters {
+    /// The initial learning rate
+    pub lr: f64,
+    /// The number of epochs
+    pub nepochs: usize,
+    /// The timeout in seconds
+    pub timeout: u64,
+    /// The loss function
+    pub loss: Loss,
+    /// The optimizer
+    pub optimizer: Optimizer,
+    /// The learning rate decay
+    pub lr_drop: f64,
+    /// The number of epochs after which the learning rate is dropped
+    pub epoch_drop: usize,
+    /// The error threshold under which the training is stopped
+    pub stopping_criterion: f64,
+    /// The minimum delta between two epochs to consider that the training is still improving
+    pub delta_early_stop: f64,
+    /// The number of epochs to wait before stopping the training if the loss is not improving
+    pub patience: usize,
 }
 
 /// This trait provide multiple functions to use on loss functions. In particular, every loss
