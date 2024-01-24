@@ -64,7 +64,6 @@ impl <const S: bool> TensorLearner<S>
             let t = Tensor::from_slice(&distribution.iter().map(|d| d.log(E)).collect::<Vec<f64>>()).requires_grad_(learned_distributions[i]);
             root.var_copy(&format!("Distribution {}", i+1), &t)
         }).collect::<Vec<Tensor>>();
-        
 
         // Compiling the train and test queries into arithmetic circuits
         let mut train_dacs = generate_dacs(inputs, branching, epsilon);
@@ -92,14 +91,14 @@ impl <const S: bool> TensorLearner<S>
         }
         let train_dataset = Dataset::new(train_data, train_expected);
         let test_dataset = Dataset::new(test_data, test_expected);
-
         // Creating the optimizer
         let optimizer = match optimizer {
             OptChoice::Adam => Adam::default().build(&vs, 1e-4).unwrap(),
             OptChoice::SGD => Sgd::default().build(&vs, 1e-4).unwrap(),
         };
+        // Initializing the logger
+        let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
         
-        let log = Logger::new(outfolder.as_ref(), train_dacs.iter().filter(|d| d.is_some()).count(), false);
         Self { 
             train: train_dataset,
             test: test_dataset,
@@ -121,14 +120,6 @@ impl <const S: bool> TensorLearner<S>
                 tensor.i(idx)
             }).collect::<Vec<Tensor>>()
         }).collect()
-    }
-
-    pub fn start_logger(&mut self) {
-        self.log.start();
-    }
-
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr:f64, predictions:&Vec<f64>) {
-        self.log.log_epoch(loss, lr, self.epsilon, predictions);
     }
 
     // --- Evaluation --- //
@@ -159,7 +150,7 @@ impl <const S: bool> TensorLearner<S>
 }
 
 impl<const S: bool> Learning for TensorLearner<S> {
-
+    /// Training loop for the train dacs, using the given training parameters
     fn train(&mut self, params: &LearnParameters) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
@@ -167,34 +158,9 @@ impl<const S: bool> Learning for TensorLearner<S> {
         let start = Instant::now();
         let to = Duration::from_secs(params.timeout);
 
-        let mut train_loss = vec![0.0; self.train.len()];
-        for e in 0..params.nepochs {
-            if start.elapsed() > to { 
-                break;
-            }
-            let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
-            self.optimizer.set_lr(learning_rate);
-            let _predictions = self.evaluate();
-            let mut loss_epoch = Tensor::from(0.0);
-            for i in 0..self.train.len() {
-                let loss_i = match params.loss {
-                    Loss::MAE => self.train[i].circuit_probability().l1_loss(&self.train.expected(i), Reduction::Mean),
-                    Loss::MSE => self.train[i].circuit_probability().mse_loss(&self.train.expected(i), Reduction::Mean),
-                };
-                train_loss[i] = loss_i.to_f64();
-                loss_epoch += loss_i;
-            }
-            self.optimizer.backward_step(&loss_epoch);
-            
-            let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
-            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
-                println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
-                break;
-            }
-            prev_loss = avg_loss;
-        }
+        // Evaluate the test set before training, if it exists
         if self.test.len()!=0{
-            let _predictions = self.test();
+            let predictions = self.test();
             let mut loss_epoch = Tensor::from(0.0);
             let mut test_loss = vec![0.0; self.test.len()];
             for i in 0..self.test.len() {
@@ -205,8 +171,57 @@ impl<const S: bool> Learning for TensorLearner<S> {
                 test_loss[i] = loss_i.to_f64();
                 loss_epoch += loss_i;
             }
-            let average_loss = test_loss.iter().sum::<f64>() / test_loss.len() as f64;
-            println!("Average test loss : {}", average_loss);
+            self.log.log_test(&test_loss, self.epsilon, &predictions);
+        }
+
+        let mut train_loss = vec![0.0; self.train.len()];
+        for e in 0..params.nepochs {
+            // Timeout
+            if start.elapsed() > to { 
+                break;
+            }
+            // Update the learning rate
+            let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
+            self.optimizer.set_lr(learning_rate);
+            // Forward pass
+            let predictions = self.evaluate();
+            // Compute the loss
+            let mut loss_epoch = Tensor::from(0.0);
+            for i in 0..self.train.len() {
+                let loss_i = match params.loss {
+                    Loss::MAE => self.train[i].circuit_probability().l1_loss(&self.train.expected(i), Reduction::Mean),
+                    Loss::MSE => self.train[i].circuit_probability().mse_loss(&self.train.expected(i), Reduction::Mean),
+                };
+                train_loss[i] = loss_i.to_f64();
+                loss_epoch += loss_i;
+            }
+            let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
+            // Compute the gradients and update the parameters
+            self.optimizer.backward_step(&loss_epoch);
+            // Log the epoch
+            self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions);
+            // Early stopping
+            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
+                println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
+                break;
+            }
+            prev_loss = avg_loss;
+        }
+
+        // Evaluate the test set after training, if it exists
+        if self.test.len()!=0{
+            let predictions = self.test();
+            let mut loss_epoch = Tensor::from(0.0);
+            let mut test_loss = vec![0.0; self.test.len()];
+            for i in 0..self.test.len() {
+                let loss_i = match params.loss {
+                    Loss::MAE => self.test[i].circuit_probability().l1_loss(&self.test.expected(i), Reduction::Mean),
+                    Loss::MSE => self.test[i].circuit_probability().mse_loss(&self.test.expected(i), Reduction::Mean),
+                };
+                test_loss[i] = loss_i.to_f64();
+                loss_epoch += loss_i;
+            }
+            self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
     }
 }

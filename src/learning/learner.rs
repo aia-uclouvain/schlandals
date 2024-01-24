@@ -41,6 +41,7 @@ pub struct Learner<const S: bool>
     gradients: Vec<Vec<Float>>,
     log: Logger<S>,
     learned_distributions: Vec<bool>,
+    epsilon: f64,
 }
 
 impl <const S: bool> Learner<S>
@@ -89,8 +90,9 @@ impl <const S: bool> Learner<S>
         }
         let train_dataset = Dataset::new(train_data, train_expected);
         let test_dataset = Dataset::new(test_data, test_expected);
-
-        let log = Logger::new(outfolder.as_ref(), train_dataset.len(), true);
+        // Initializing the logger
+        let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
+        
         Self { 
             train: train_dataset,
             test: test_dataset,
@@ -98,18 +100,23 @@ impl <const S: bool> Learner<S>
             gradients: grads,
             log,
             learned_distributions,
+            epsilon,
         }
     }
 
     // --- Getters --- //
+
+    /// Return the softmax values for the paramater of the given distribution
     fn get_softmaxed(&self, distribution: usize) -> Vec<Float> {
         softmax(&self.unsoftmaxed_distributions[distribution])
     }
 
+    /// Return the probability of the given value for the given distribution
     pub fn get_probability(&self, distribution: usize, index: usize) -> f64 {
         self.get_softmaxed(distribution)[index].to_f64()
     }
 
+    /// Return the softmaxed values for all the distributions
     pub fn get_softmaxed_array(&self) -> Vec<Vec<Float>> {
         let mut softmaxed: Vec<Vec<Float>> = vec![];
         for distribution in self.unsoftmaxed_distributions.iter() {
@@ -118,11 +125,9 @@ impl <const S: bool> Learner<S>
         softmaxed
     }
 
-    pub fn get_current_distributions(&self) -> &Vec<Vec<f64>> {
-        &self.unsoftmaxed_distributions
-    }
-
     // --- Setters --- //
+
+    /// Set the gradients of the parameters to 0
     pub fn zero_grads(&mut self) {
         for grad in self.gradients.iter_mut() {
             for el in grad.iter_mut() {
@@ -130,7 +135,6 @@ impl <const S: bool> Learner<S>
             }
         }
     }
-
 
     // --- Evaluation --- //
 
@@ -220,6 +224,7 @@ impl <const S: bool> Learner<S>
         }
     }
 
+    /// Update the distributions with the computed gradients and the learning rate, following an SGD approach
     pub fn update_distributions(&mut self, learning_rate: f64) {
         for (i, (distribution, grad)) in self.unsoftmaxed_distributions.iter_mut().zip(self.gradients.iter()).enumerate() {
             if self.learned_distributions[i]{
@@ -232,29 +237,44 @@ impl <const S: bool> Learner<S>
 }
 
 impl<const S: bool> Learning for Learner<S> {
-
+    /// Training loop for the train dacs, using the given training parameters
     fn train(&mut self, params:&LearnParameters) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
         let to = Duration::from_secs(params.timeout);
+        
+        // Evaluate the test set before training, if it exists
+        if self.test.len() != 0 {
+            let predictions = self.test();
+            let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss.loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
+            self.log.log_test(&test_loss, self.epsilon, &predictions);
+        }
 
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
         for e in 0..params.nepochs {
+            // Timeout
             if start.elapsed() > to {
                 break;
             }
+            // Update the learning rate
             let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
+            // Forward pass
             let predictions = self.evaluate();
+            // Compute the loss and the gradients
             for i in 0..predictions.len() {
                 train_loss[i] = params.loss.loss(predictions[i], self.train.expected(i).to_f64());
                 train_grad[i] = params.loss.gradient(predictions[i], self.train.expected(i).to_f64());
             }
-            self.compute_gradients(&train_grad);
-            self.update_distributions(learning_rate);
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
+            self.compute_gradients(&train_grad);
+            // Update the parameters
+            self.update_distributions(learning_rate);
+            // Log the epoch
+            self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions);
+            // Early stopping
             if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
@@ -267,19 +287,15 @@ impl<const S: bool> Learning for Learner<S> {
             if do_print{println!("Epoch {} lr {}", e, self.lr);}
             if do_print { println!("--- Epoch {} ---\n Predictions: {:?} \nExpected: {:?}\n", e, predictions, self.expected_outputs);}
             //if do_print{ println!("Gradients: {:?}", self.gradients);}
-            self.update_distributions();
-            self.log.log_epoch(&dac_loss, self.lr, self.epsilon, &predictions);
             if do_print { println!("Loss: {}", avg_loss);}
             */
         }
-
+        
+        // Evaluate the test set after training, if it exists
         if self.test.len() != 0 {
             let predictions = self.test();
             let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss.loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
-            let average_loss = test_loss.iter().sum::<f64>() / test_loss.len() as f64;
-            println!("Average test loss : {}", average_loss);
-            // TODO: Log somewhere the loss of the test set. Maybe we can add this small loop also
-            // at the beginning of the method. Should we output on stdout ?
+            self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
     }
 }

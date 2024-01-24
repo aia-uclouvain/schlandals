@@ -24,47 +24,60 @@ use std::io::Write;
 #[cfg(not(tarpaulin_include))]
 pub struct Logger<const B: bool> {
     global_timestamp: chrono::DateTime<chrono::Local>,
-    outfile: Option<File>,
+    outfile_train: Option<File>,
+    outfile_test: Option<File>,
 }
 
 impl<const B: bool> Logger<B> {
-    pub fn default() -> Self {
-        Self {
-            global_timestamp: chrono::Local::now(),
-            outfile: None,
-        }
-    }
-    pub fn new(outfolder:Option<&PathBuf>, ndacs:usize, do_train:bool) -> Self {
+    pub fn new(outfolder:Option<&PathBuf>, ndacs_train:usize, ndacs_test:usize) -> Self {
         let global_timestamp = chrono::Local::now();
-        let csv_file = if B{
-            let mut out = match outfolder {
+
+        let outfile_train = if B{
+            let mut out_train = match outfolder {
                 Some(x) => {
-                    if do_train{Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())}
-                    else { Some(File::create(x.join(format!("test_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())}
+                    Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
                 },
                 None => None,
             };
             let mut output= "".to_string();
             output.push_str("epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
-            for i in 0..ndacs {
+            for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
-            for i in 0..ndacs {
+            for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} prediction,", i));
             }
-            /* for i in 0..distributions.len() {
-                for j in 0..distributions[i].len() {
-                    output.push_str(&format!("distribution{}_{} epoch_distance,",i, j));
-                }
-            } */
-            writeln!(out.as_mut().unwrap(), "{}", output).unwrap();
-            out
+            writeln!(out_train.as_mut().unwrap(), "{}", output).unwrap();
+            out_train
         } else {
             None
         };
+
+        let outfile_test = if B && ndacs_test > 0 {
+            let mut out_test = match outfolder {
+                Some(x) => {
+                    Some(File::create(x.join(format!("test_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
+                },
+                None => None,
+            };
+            let mut output= "".to_string();
+            output.push_str("epsilon,avg_errror,"); //avg_distance,
+            for i in 0..ndacs_test {
+                output.push_str(&format!("dac{} epoch_error,", i));
+            }
+            for i in 0..ndacs_test {
+                output.push_str(&format!("dac{} prediction,", i));
+            }
+            writeln!(out_test.as_mut().unwrap(), "{}", output).unwrap();
+            out_test
+        } else {
+            None
+        };
+
         Self {
             global_timestamp,
-            outfile: csv_file,
+            outfile_train,
+            outfile_test,
         }
     }
     pub fn start(&mut self) {
@@ -72,42 +85,31 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64, predictions:&Vec<f64>) { //expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>,
+    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64, predictions:&Vec<f64>) {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            //let distances = Self::distance(&expected_distribution, &predicted_distribution, &gradients);
-            //let non_null_distances: Vec<f64> = distances.iter().flatten().filter(|d| **d!=0.0).copied().collect();
-            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64)); //, non_null_distances.iter().sum::<f64>() / non_null_distances.iter().count() as f64
+            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
             for p in predictions.iter() {
                 output.push_str(&format!("{:.6},", p));
             }
-            /* for distr in distances.iter() {
-                for d in distr.iter() {
-                    output.push_str(&format!("{:.6},", d));
-                }
-            } */
-            writeln!(self.outfile.as_mut().unwrap(), "{}", output).unwrap();
-            
+            writeln!(self.outfile_train.as_mut().unwrap(), "{}", output).unwrap();
         }
     }
-    /* fn distance(expected_distribution: &Vec<Vec<f64>>, predicted_distribution: &Vec<Vec<f64>>, gradients: &Vec<Vec<Float>>) -> Vec<Vec<f64>> {
-        let mut total: Vec<Vec<f64>> = vec![];
-        for i in 0..expected_distribution.len() {
-            let mut tmp: Vec<f64> = vec![];
-            for j in 0..expected_distribution[i].len() {
-                if gradients[i][j] != 0.0 {
-                    tmp.push((expected_distribution[i][j] - predicted_distribution[i][j]).abs());
-                }
-                else{
-                    tmp.push(0.0);
-                }
+    pub fn log_test(&mut self, loss:&Vec<f64>, epsilon:f64, predictions:&Vec<f64>) {
+        if B {
+            let mut output = String::new();
+            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<f64>() / loss.len() as f64));
+            for l in loss.iter() {
+                output.push_str(&format!("{:.6},", l));
             }
-            total.push(tmp);
+            for p in predictions.iter() {
+                output.push_str(&format!("{:.6},", p));
+            }
+            writeln!(self.outfile_test.as_mut().unwrap(), "{}", output).unwrap();
         }
-        total
-    } */
+    }
 }
