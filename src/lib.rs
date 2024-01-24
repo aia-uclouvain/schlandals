@@ -85,7 +85,6 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
             let compiler = make_solver!(&input, branching, epsilon, None, false);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
-                dac.optimize_structure();
                 dac.evaluate();
                 println!("Dac probability {}", dac.circuit_probability());
                 if let Some(f) = dotfile {

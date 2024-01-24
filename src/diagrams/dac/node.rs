@@ -14,15 +14,8 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module provide an implementation of a distribution aware arithmetic circuits.
-//! Unlike traditional circuits, the input of the circuits are not variables, but distributions
-//! as used by Schlandal's modelling language.
-//! Hence, given a valid input for Schlandals, there is one input per distribution.
-//! Then, internal nodes are either a product node or a sum node. Once constructed, the probability
-//! of the original problem can be computed in a feed-forward manner, starting from the input and pushing
-//! the values towards the root of the circuits.
-//! As of now, the circuit structure has been designed to be optimized when lots of queries are done on it.
-//! A typical use case is when the parameter of the distributions must be learn in a EM like algorithm.
+//! This module provide an implementation of a node in an arithmetic circuits.
+//! The node is generic over a semiring R
 
 use rug::Float;
 use crate::diagrams::semiring::*;
@@ -30,10 +23,16 @@ use super::dac::NodeIndex;
 use crate::common::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Types of node in an AC
 pub enum TypeNode {
+    /// Product nodes
     Product,
+    /// Sum nodes
     Sum,
+    /// Approximate node. Only present when the circuit is partially compiled. Send a constant
+    /// value as output and act as input of the circuit
     Approximate,
+    /// Distribution node. Send the value P[d = v] as output and act as input of the circuit
     Distribution {d: usize, v: usize},
 }
 
@@ -57,7 +56,7 @@ pub struct Node<R>
     outputs: Vec<NodeIndex>,
     /// Inputs of the node. Only used during the creation to minimize the size of the circuit
     inputs: Vec<NodeIndex>,
-    /// What is the type of the node?
+    /// Type of node
     typenode: TypeNode,
     /// Start index of the output in the DAC's output vector
     output_start: usize,
@@ -71,7 +70,8 @@ pub struct Node<R>
     layer: usize,
     /// Should the node be removed as post-processing ?
     to_remove: bool,
-    /// Gradient computation, the value of the path from the root
+    /// The multiplicative factor accumulated on the paths to the root whil computing the gradient
+    /// (only used when evaluating on the Float semiring)
     path_value: Float,
 }
 
@@ -95,6 +95,7 @@ impl<R> Node<R>
         }
     }
 
+    /// Returns a new sum node
     pub fn sum() -> Self {
         Node {
             value: R::zero(),
@@ -111,6 +112,7 @@ impl<R> Node<R>
         }
     }
 
+    /// Returns a new approximate node with the given value
     pub fn approximate(value: f64) -> Self {
         Node {
             value: R::from_f64(value),
@@ -127,6 +129,7 @@ impl<R> Node<R>
         }
     }
 
+    /// Returns a new distribution node with P[distribution = value] = probability
     pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
         Node {
             value: R::from_f64(probability),

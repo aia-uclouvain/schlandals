@@ -24,6 +24,11 @@
 //! Since the construction is done in two phases (first the circuit is constructed, then its
 //! structure optimized), some information is first stored in the nodes and then transfered into
 //! the vectors of the circuit.
+//! Since, for now, the compilation is done using the same structure as the search, compilation
+//! should only be used for learning parameters. For one shot evaluation, the search solver should
+//! be used.
+//!
+//! The circuit is generic over the semiring on which it is evaluated.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -123,15 +128,6 @@ impl<R> Dac<R>
         self.nodes.len()
     }
 
-    // --- GETTERS --- //
-    
-    /// Returns the probability of the circuit. If the circuit has not been evaluated,
-    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
-    /// sum node
-    pub fn circuit_probability(&self) -> &R {
-        self.nodes.last().unwrap().value()
-    }
-    
     /// Returns the node at the given index in the input vector
     pub fn input_at(&self, index: usize) -> NodeIndex {
         self.inputs[index]
@@ -152,21 +148,23 @@ impl<R> Dac<R>
             NodeIndex(self.nodes.len()-1)
         }
     }
-
-    pub fn zero_paths(&mut self) {
-        for node in (0..self.nodes.len()-1).map(NodeIndex) {
-            self[node].set_path_value(f128!(0.0));
-        }
-        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
-    }
 }
 
 // --- CIRCUIT EVALUATION ---
 
+/// All methods in this impl block assume that the circuit's structure has been optimized and
+/// layerized.
 impl<R> Dac<R>
     where R: SemiRing
 {
-    /// Updates the values of the distributions
+    /// Returns the probability of the circuit. If the circuit has not been evaluated,
+    /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
+    /// sum node
+    pub fn circuit_probability(&self) -> &R {
+        self.nodes.last().unwrap().value()
+    }
+    
+    /// Updates the values of the distributions to the given values
     pub fn reset_distributions(&mut self, distributions: &Vec<Vec<R>>) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let TypeNode::Distribution { d, v } = self[node].get_type() {
@@ -178,6 +176,14 @@ impl<R> Dac<R>
                 break;
             }
         }
+    }
+
+    /// Resets the path value of each node
+    pub fn zero_paths(&mut self) {
+        for node in (0..self.nodes.len()-1).map(NodeIndex) {
+            self[node].set_path_value(f128!(0.0));
+        }
+        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
@@ -202,6 +208,7 @@ impl<R> Dac<R>
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value()
     }
+
 }
 
 // --- STRUCTURE OPTIMIZATION ---
@@ -483,6 +490,7 @@ impl<R> Dac<R>
 where R: SemiRing
 {
 
+    /// Returns a DOT representation of the circuit
     pub fn as_graphviz(&self) -> String {
 
         let dist_node_attributes = String::from("shape=doublecircle,style=filled");
@@ -542,6 +550,16 @@ where R: SemiRing
 impl<R> fmt::Display for Dac<R>
 where R: SemiRing
 {
+    /// Formats the circuit in the following formats
+    ///     1. The first line starts with "output" followed by the indexes in the outputs vector,
+    ///        separated by a space
+    ///     2. The first line starts with "input" followed by the indexes in the inputs vector,
+    ///        separated by a space
+    ///     3. There is one line per node in the diagram, starting with "x" for product node, "+"
+    ///        for sum nodes, "a" for approximate node and "d" for distribution node. For
+    ///        approximate and distribution node, their parameters are written next to them.
+    ///        Then, for all types of node, their slice (start and size) in the inputs/outputs
+    ///        vector are written
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "outputs")?;
         for output in self.outputs.iter().copied().map(|node| format!("{}", node.0)) {
@@ -557,7 +575,7 @@ where R: SemiRing
             match node.get_type() {
                 TypeNode::Product => write!(f, "x")?,
                 TypeNode::Sum => write!(f, "+")?,
-                TypeNode::Approximate => write!(f, "p {}", node.value().to_f64())?,
+                TypeNode::Approximate => write!(f, "a {}", node.value().to_f64())?,
                 TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
             }
             writeln!(f, " {} {} {} {}", node.output_start(), node.number_outputs(), node.input_start(), node.number_inputs())?;
@@ -569,11 +587,13 @@ where R: SemiRing
 impl<R> Dac<R>
 where R: SemiRing
 {
+    /// Dump the structure of the DAC in the given file
     pub fn to_file(&self, filepath: &PathBuf) {
         let mut output = File::create(filepath).unwrap();
         write!(output, "{}", self).unwrap();
     }
 
+    /// Reads the structure of the dac from the given file
     pub fn from_file(filepath: &PathBuf) -> Self {
         let mut dac = Self {
             nodes: vec![],
