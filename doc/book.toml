@@ -1,0 +1,9 @@
+[book]
+authors = ["Alexandre Dubray", "Lucile Dierckx"]
+language = "en"
+multilingual = false
+src = "src"
+title = "The Schlandals Book"
+
+[output.html]
+mathjax-support = true

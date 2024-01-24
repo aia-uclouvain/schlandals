@@ -6,3 +6,4 @@ pyschlandals/target
 pyschlandals/pipytoken
 .vimspector.json
 *.cnf
+doc/book
