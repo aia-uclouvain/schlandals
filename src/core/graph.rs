@@ -235,6 +235,7 @@ impl Graph {
         if !value && self[variable].is_probabilitic() {
             let distribution = self[variable].distribution().unwrap();
             self[distribution].increment_number_false(state);
+            self[distribution].remove_probability_mass(self[variable].weight().unwrap(), state);
         }
 
         //  Update the boundaries of min/max variable not fixed if necessary

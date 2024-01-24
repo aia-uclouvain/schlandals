@@ -17,6 +17,7 @@
 use crate::Loss;
 
 pub mod learner;
+#[cfg(feature = "tensor")]
 pub mod tensor_learner;
 mod utils;
 mod logger;

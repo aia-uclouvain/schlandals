@@ -28,23 +28,21 @@ pub type ProblemSolution = Result<Float, Unsat>;
 
 pub type Bounds = (Float, Float);
 
-pub mod search;
-pub mod compiler;
+pub mod solver;
 mod statistics;
 
-pub use search::SearchSolver;
-pub use compiler::DACCompiler;
+pub use solver::Solver;
 pub use sysinfo::{SystemExt, System};
 
-pub enum Solver {
-    SMinInDegree(SearchSolver<MinInDegree, true>),
-    SMinOutDegree(SearchSolver<MinOutDegree, true>),
-    SMaxDegree(SearchSolver<MaxDegree, true>),
-    SVSIDS(SearchSolver<VSIDS, true>),
-    QMinInDegree(SearchSolver<MinInDegree, false>),
-    QMinOutDegree(SearchSolver<MinOutDegree, false>),
-    QMaxDegree(SearchSolver<MaxDegree, false>),
-    QVSIDS(SearchSolver<VSIDS, false>),
+pub enum GenericSolver {
+    SMinInDegree(Solver<MinInDegree, true>),
+    SMinOutDegree(Solver<MinOutDegree, true>),
+    SMaxDegree(Solver<MaxDegree, true>),
+    SVSIDS(Solver<VSIDS, true>),
+    QMinInDegree(Solver<MinInDegree, false>),
+    QMinOutDegree(Solver<MinOutDegree, false>),
+    QMaxDegree(Solver<MaxDegree, false>),
+    QVSIDS(Solver<VSIDS, false>),
 }
 
 macro_rules! make_solver {
@@ -63,47 +61,39 @@ macro_rules! make_solver {
             if $s {
                 match $b {
                     Branching::MinInDegree => {
-                        let mut solver = SearchSolver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::SMinInDegree(solver)
+                        let solver = Solver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::SMinInDegree(solver)
                     },
                     Branching::MinOutDegree => {
-                        let mut solver = SearchSolver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::SMinOutDegree(solver)
+                        let solver = Solver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::SMinOutDegree(solver)
                     },
                     Branching::MaxDegree => {
-                        let mut solver = SearchSolver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::SMaxDegree(solver)
+                        let solver = Solver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::SMaxDegree(solver)
                     },
                     Branching::VSIDS => {
-                        let mut solver = SearchSolver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::SVSIDS(solver)
+                        let solver = Solver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
+                        GenericSolver::SVSIDS(solver)
                     },
                 }
             } else {
                 match $b {
                     Branching::MinInDegree => {
-                        let mut solver = SearchSolver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::QMinInDegree(solver)
+                        let solver = Solver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::QMinInDegree(solver)
                     },
                     Branching::MinOutDegree => {
-                        let mut solver = SearchSolver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::QMinOutDegree(solver)
+                        let solver = Solver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::QMinOutDegree(solver)
                     },
                     Branching::MaxDegree => {
-                        let mut solver = SearchSolver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::QMaxDegree(solver)
+                        let solver = Solver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
+                        GenericSolver::QMaxDegree(solver)
                     },
                     Branching::VSIDS => {
-                        let mut solver = SearchSolver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
-                        solver.init();
-                        Solver::QVSIDS(solver)
+                        let solver = Solver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
+                        GenericSolver::QVSIDS(solver)
                     },
                 }
             }
@@ -111,89 +101,36 @@ macro_rules! make_solver {
     };
 }
 
-macro_rules! solve_search {
+macro_rules! search {
     ($s:expr) => {
         match $s {
-            Solver::SMinInDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::SMinOutDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::SMaxDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::SVSIDS(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::QMinInDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::QMinOutDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::QMaxDegree(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
-            Solver::QVSIDS(mut solver) => {
-                solver.init();
-                solver.solve()
-            },
+            GenericSolver::SMinInDegree(mut solver) => solver.search(),
+            GenericSolver::SMinOutDegree(mut solver) => solver.search(),
+            GenericSolver::SMaxDegree(mut solver) => solver.search(),
+            GenericSolver::SVSIDS(mut solver) => solver.search(),
+            GenericSolver::QMinInDegree(mut solver) => solver.search(),
+            GenericSolver::QMinOutDegree(mut solver) => solver.search(),
+            GenericSolver::QMaxDegree(mut solver) => solver.search(),
+            GenericSolver::QVSIDS(mut solver) => solver.search(),
         }
     }
-}
-
-pub enum Compiler {
-    MinInDegree(DACCompiler<MinInDegree>),
-    MinOutDegree(DACCompiler<MinOutDegree>),
-    MaxDegree(DACCompiler<MaxDegree>),
-    VSIDS(DACCompiler<VSIDS>),
-}
-
-macro_rules! make_compiler {
-    ($i:expr, $b:expr, $e:expr) => {
-        {
-            let mut state = StateManager::default();
-            let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, true);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
-            match $b {
-                Branching::MinInDegree => {
-                    Compiler::MinInDegree(DACCompiler::<MinInDegree>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, $e))
-                },
-                Branching::MinOutDegree => {
-                    Compiler::MinOutDegree(DACCompiler::<MinOutDegree>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, $e))
-                },
-                Branching::MaxDegree => {
-                    Compiler::MaxDegree(DACCompiler::<MaxDegree>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, $e))
-                },
-                Branching::VSIDS => {
-                    Compiler::VSIDS(DACCompiler::<VSIDS>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, $e))
-                },
-            }
-        }
-    };
 }
 
 macro_rules! compile {
     ($c:expr) => {
         match $c {
-            Compiler::MinInDegree(ref mut c) => c.compile(),
-            Compiler::MinOutDegree(ref mut c) => c.compile(),
-            Compiler::MaxDegree(ref mut c) => c.compile(),
-            Compiler::VSIDS(ref mut c) => c.compile(),
+            GenericSolver::SMinInDegree(mut solver) => solver.compile(),
+            GenericSolver::SMinOutDegree(mut solver) => solver.compile(),
+            GenericSolver::SMaxDegree(mut solver) => solver.compile(),
+            GenericSolver::SVSIDS(mut solver) => solver.compile(),
+            GenericSolver::QMinInDegree(mut solver) => solver.compile(),
+            GenericSolver::QMinOutDegree(mut solver) => solver.compile(),
+            GenericSolver::QMaxDegree(mut solver) => solver.compile(),
+            GenericSolver::QVSIDS(mut solver) => solver.compile(),
         }
     }
 }
 
 pub(crate) use make_solver;
-pub(crate) use make_compiler;
 pub(crate) use compile;
-pub(crate) use solve_search;
+pub(crate) use search;

@@ -15,8 +15,8 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::path::PathBuf;
+use std::time::{Instant, Duration};
 
-use rug::{Assign, Float};
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
@@ -28,7 +28,7 @@ use super::Learning;
 use crate::common::f128;
 use super::utils::*;
 use super::*;
-use std::time::{Instant, Duration};
+use rug::{Assign, Float};
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -144,7 +144,7 @@ impl <const S: bool> Learner<S>
         self.train.get_queries_mut().par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.train.get_queries().iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.train.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
     // Evaluate the different test DACs and return the results
@@ -156,7 +156,7 @@ impl <const S: bool> Learner<S>
         self.test.get_queries_mut().par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.test.get_queries().iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
     // --- Gradient computation --- //
@@ -171,23 +171,23 @@ impl <const S: bool> Learner<S>
             // Iterate on all nodes from the DAC, top-down way
             for node in self.train[query_id].iter_rev() {
 
-                let start = self.train[query_id][node].get_input_start();
-                let end = start + self.train[query_id][node].get_number_inputs();
-                let value = self.train[query_id][node].get_value().to_f64();
-                let path_val = self.train[query_id][node].get_path_value();
+                let start = self.train[query_id][node].input_start();
+                let end = start + self.train[query_id][node].number_inputs();
+                let value = self.train[query_id][node].value().to_f64();
+                let path_val = self.train[query_id][node].path_value();
 
                 // Update the path value for the children sum, product nodes 
                 // and compute the gradient for the children leaf distributions
                 for child_index in start..end {
-                    let child = self.train[query_id].get_input_at(child_index);
+                    let child = self.train[query_id].input_at(child_index);
                     match self.train[query_id][node].get_type() {
                         TypeNode::Product => {
                             // If it is a product node, we need to divide the path value by the value of the child
                             // This is equivalent to multiplying the values of the other children
                             // If the value of the child is 0, then the path value is simply 0
                             let mut val = f128!(0.0);
-                            if self.train[query_id][child].get_value().to_f64() != 0.0 {
-                                val = path_val.clone() * &value / self.train[query_id][child].get_value().to_f64();
+                            if self.train[query_id][child].value().to_f64() != 0.0 {
+                                val = path_val.clone() * &value / self.train[query_id][child].value().to_f64();
                             }
                             self.train[query_id][child].add_to_path_value(val);
                         },
@@ -195,7 +195,7 @@ impl <const S: bool> Learner<S>
                             // If it is a sum node, we simply propagate the path value to the children
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
-                        TypeNode::Partial => { },
+                        TypeNode::Approximate => { },
                         TypeNode::Distribution { .. } => {},
                     }
                     if let TypeNode::Distribution { d, v } = self.train[query_id][child].get_type() {

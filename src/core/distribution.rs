@@ -38,8 +38,9 @@ pub struct Distribution {
     number_clause: usize,
     /// Number of variables assigned to F in the distribution
     pub number_false: ReversibleUsize,
-    /// 
+    /// Is the distribution still constrained ?
     constrained: ReversibleBool,
+    /// Sum of the weight of the unfixed variables in the distribution
     remaining: ReversibleF64,
     branching_candidate: bool,
 }
@@ -107,7 +108,8 @@ impl Distribution {
     }
 
     pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
-        let new_value = state.get_f64(self.remaining) - removed;
+        let old_value = state.get_f64(self.remaining);
+        let new_value = old_value- removed;
         state.set_f64(self.remaining, new_value);
     }
 

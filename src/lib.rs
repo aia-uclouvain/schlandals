@@ -18,9 +18,10 @@ use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::learner::Learner;
 use learning::Learning;
+#[cfg(feature = "tensor")]
 use learning::tensor_learner::TensorLearner;
 use diagrams::dac::dac::Dac;
-use solvers::compiler::DACCompiler;
+use solvers::GenericSolver;
 use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -70,6 +71,7 @@ pub enum Loss {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Semiring {
     Probability,
+    #[cfg(feature = "tensor")]
     Tensor,
 }
 
@@ -82,12 +84,11 @@ pub enum Optimizer {
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> Option<Dac<Float>>{
     match type_of_input(&input) {
         FileType::CNF => {
-            let mut compiler = make_compiler!(&input, branching, epsilon);
+            let compiler = make_solver!(&input, branching, epsilon, None, false);
             let mut res = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
-                dac.optimize_structure();
                 dac.evaluate();
-                println!("Dac probability {}", dac.get_circuit_probability());
+                println!("Dac probability {}", dac.circuit_probability());
                 if let Some(f) = dotfile {
                     let out = dac.as_graphviz();
                     let mut outfile = File::create(f).unwrap();
@@ -110,7 +111,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
         FileType::FDAC => {
             let mut dac = Dac::from_file(&input);
             dac.evaluate();
-            println!("{}", dac.get_circuit_probability());
+            println!("{}", dac.circuit_probability());
             Some(dac)
         },
     }
@@ -125,6 +126,7 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
                 Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
             }
         },
+        #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
                 Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer, test_inputs, test_expected))
@@ -166,7 +168,7 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, statistics);
-    solve_search!(solver)
+    search!(solver)
 }
 
 

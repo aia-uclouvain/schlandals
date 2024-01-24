@@ -49,7 +49,7 @@ pub fn generate_dacs<R>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64
             FileType::CNF => {
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
-                let mut compiler = make_compiler!(input, branching, epsilon);
+                let compiler = make_solver!(input, branching, epsilon, None, false);
                 compile!(compiler)
             },
             FileType::FDAC => {

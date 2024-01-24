@@ -140,7 +140,7 @@ impl <const S: bool> TensorLearner<S>
         self.train.get_queries_mut().par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.train.get_queries().iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.train.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
     // Evaluate the different test DACs and return the results
@@ -152,7 +152,7 @@ impl <const S: bool> TensorLearner<S>
         self.test.get_queries_mut().par_iter_mut().for_each(|d| {
             d.evaluate();
         });
-        self.test.get_queries().iter().map(|d| d.get_circuit_probability().to_f64()).collect()
+        self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 }
 

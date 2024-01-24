@@ -2,6 +2,7 @@
 use rug::Float;
 use schlandals::*;
 use schlandals::Branching::*;
+use schlandals::diagrams::dac::dac::Dac;
 
 use std::path::PathBuf;
 use tempfile::Builder;
@@ -23,24 +24,25 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let mut dac = compile(PathBuf::from(filename), $b, 1.0, None, None).unwrap();
-                dac.reset(true);
+                let mut dac = compile(PathBuf::from(filename), $b, None, None, 0.0).unwrap();
                 let sol = dac.evaluate();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
 
-            //#[test]
-            /* fn [<compile_from_file_ $b _ $name>]() {
+            /*
+            #[test]
+            fn [<compile_from_file_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let dac = compile(PathBuf::from(filename), $b, None, None).unwrap();
+                let dac = compile(PathBuf::from(filename), $b, None, None, 0.0).unwrap();
                 let mut file = Builder::new().prefix("tmp").suffix(".dac").tempfile().unwrap();
                 writeln!(file, "{}", dac).unwrap();
-                let mut read_dac = read_compiled(PathBuf::from(file.path()), None);
+                let mut read_dac: Dac<Float> = Dac::from_file(&PathBuf::from(file.path()));
                 let sol = read_dac.evaluate();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
-            } */
+            }
+            */
         }
     }
 }
