@@ -18,6 +18,7 @@ use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::learner::Learner;
 use learning::Learning;
+#[cfg(feature = "tensor")]
 use learning::tensor_learner::TensorLearner;
 use diagrams::dac::dac::Dac;
 use solvers::GenericSolver;
@@ -70,6 +71,7 @@ pub enum Loss {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Semiring {
     Probability,
+    #[cfg(feature = "tensor")]
     Tensor,
 }
 
@@ -124,6 +126,7 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
                 Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
             }
         },
+        #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
                 Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, optimizer, test_inputs, test_expected))

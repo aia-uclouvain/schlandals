@@ -22,6 +22,7 @@
 //!     3. The addition is commutative (x + y = y + x)
 //!     4. The addition and multiplication is associative ( (a + b) + c = a + (b + c) and (a * b) * c = a * (b * c) )
 use rug::Float;
+#[cfg(feature = "tensor")]
 use tch::Tensor;
 use crate::common::f128;
 use std::ops::{AddAssign, MulAssign};
@@ -89,6 +90,7 @@ impl SemiRing for Float {
     }
 }
 
+#[cfg(feature = "tensor")]
 impl SemiRing for Tensor {
 
     fn from_f64(value: f64) -> Self {
