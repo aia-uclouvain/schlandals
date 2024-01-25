@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](README.md)
+[Installation](intall.md)
 
 - [Schlandals Modelization](modelization/README.md)
     - [The Language](modelization/language.md)

@@ -25,7 +25,7 @@ The query is encoded by imposing the fact that the source \\( s \\) is reachable
 
 The encoding (in DIMACS-style format) is show below for the query \\( P(A \text{ connected to } E) \\).
 
-```bash
+```
 p cnf 26 19
 c Edge from A to B with variables 1 2
 c p distribution 0.4 0.6

@@ -38,7 +38,7 @@ The encoding (in DIMACS-style format) is show below for the query \\( P(D = d_0)
 Notice that the probailistic variables start at 1 and are in contiguous blocks.
 The 
 
-```bash
+```
 p cnf 26 19
 c Probabilistic variables 1 2
 c p distribution 0.2 0.8
