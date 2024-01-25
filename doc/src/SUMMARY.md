@@ -1,7 +1,7 @@
 # Summary
 
 [Introduction](README.md)
-[Installation](intall.md)
+[Installation](install.md)
 
 - [Schlandals Modelization](modelization/README.md)
     - [The Language](modelization/language.md)
@@ -9,6 +9,7 @@
     - [Encoding Probabilistic Graphs](modelization/pg.md)
     - [Encoding ProbLog Programs](modelization/problog.md)
 - [Probabilistic Inference](inference/README.md)
-    - [Exact Inference](inference/exact.md)
-    - [Approximate Inference](inference/approximate.md)
+    - [Search solver](inference/search.md)
+    - [Compiler](inference/compilation.md)
 - [Learning Distributions Parameters](learning/README.md)
+- [Python Interface](python.md)
