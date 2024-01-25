@@ -148,7 +148,10 @@ fn main() {
                 Some(v) => v,
                 None => 0.0,
             };
-            schlandals::compile(input, branching, fdac, dotfile, e);
+            match schlandals::compile(input, branching, fdac, dotfile, e) {
+                Err(_) => println!("Model UNSAT"),
+                Ok(p) => println!("{}", p),
+            };
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log , timeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 

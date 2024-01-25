@@ -81,14 +81,14 @@ pub enum Optimizer {
     SGD,
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> Option<Dac<Float>>{
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
             let compiler = make_solver!(&input, branching, epsilon, None, false);
-            let mut res = compile!(compiler);
+            let mut res: Option<Dac<Float>> = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.evaluate();
-                println!("Dac probability {}", dac.circuit_probability());
+                let proba = dac.circuit_probability().clone();
                 if let Some(f) = dotfile {
                     let out = dac.as_graphviz();
                     let mut outfile = File::create(f).unwrap();
@@ -105,14 +105,16 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
                     }
                     
                 }
+                ProblemSolution::Ok(proba)
+            } else {
+                ProblemSolution::Err(Unsat)
             }
-            res
         },
         FileType::FDAC => {
-            let mut dac = Dac::from_file(&input);
+            let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
             dac.evaluate();
-            println!("{}", dac.circuit_probability());
-            Some(dac)
+            let proba = dac.circuit_probability().clone();
+            ProblemSolution::Ok(proba)
         },
     }
 }
