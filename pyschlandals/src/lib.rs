@@ -65,8 +65,25 @@ fn get_optimizer_from_pyoptimizer(optimizer: PyOptimizer) -> Optimizer {
 
 #[pyfunction]
 #[pyo3(name = "search")]
-fn pysearch(file: String, branching: PyBranching) -> Option<f64> {
-    match schlandals::search(PathBuf::from(file), get_branching_from_pybranching(branching), false, None, 0.0) {
+fn pysearch(file: String, branching: PyBranching, epsilon: Option<f64>, memory_limit: Option<u64>) -> Option<f64> {
+    let e = if epsilon.is_none() {
+        0.0
+    } else {
+        epsilon.unwrap()
+    };
+    match schlandals::search(PathBuf::from(file), get_branching_from_pybranching(branching), false, memory_limit, e) {
+        Err(_) => None,
+        Ok(p) => Some(p.to_f64()),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "compile")]
+fn pycompile(file: String, branching: PyBranching, epsilon: Option<f64>, output_circuit: Option<String>, output_dot: Option<String>) -> Option<f64> {
+    let fdac = if let Some(file) = output_circuit { Some(PathBuf::from(file)) } else { None };
+    let fdot = if let Some(file) = output_dot { Some(PathBuf::from(file)) } else { None };
+    let e = if let Some(e) = epsilon { e } else { 0.0 };
+    match schlandals::compile(PathBuf::from(file), get_branching_from_pybranching(branching), fdac, fdot, e) {
         Err(_) => None,
         Ok(p) => Some(p.to_f64()),
     }
@@ -98,5 +115,6 @@ fn pyschlandals(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PySemiring>()?;
     m.add_function(wrap_pyfunction!(pylearn, m)?).unwrap();
     m.add_function(wrap_pyfunction!(pysearch, m)?).unwrap();
+    m.add_function(wrap_pyfunction!(pycompile, m)?).unwrap();
     Ok(())
 }
