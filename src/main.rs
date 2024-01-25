@@ -65,7 +65,7 @@ enum Command {
         #[clap(short, long)]
         epsilon: Option<f64>,
     },
-    /// Learn a circuit from a set of queries
+    /// Learn distribution parameters from a set of queries
     Learn {
         /// The csv file containing the cnf filenames and the associated expected output
         #[clap(long, value_parser, value_delimiter=' ')]
