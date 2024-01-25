@@ -14,9 +14,26 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+//! This module provides an implementation of a learner which aims at learning distribution 
+//! parameters from a set of queries. The set of queries is expected to come from a same problem
+//! and to share distributions. The expected value of each query should also be given in the input.
+//! Each of the queries will be compiled in an arithmetic circuit (AC). The compilation can be 
+//! partial (using approximations) or exact in function of the input parameters.
+//! Once the queries are compiled, the distributions can be learned with the train function using
+//! gradient descent optimization. Therefore, at each training epoch, the set of queries is evaluated
+//! with the current values of the distributions. Then, the loss between the found values and the
+//! expected ones is computed and used to derive the gradient value of each circuit parameter.
+//! The values of the distributions are then updated using the found gradient values and the
+//! process is repeated until convergence or until meeting a stopping criterion.
+//!
+//! Additionnaly, it is possible to provide a test set that will be evaluated once before the
+//! training and a second time after the learning loop with the learned distribution values.
+//!
+//! Note that the 'tensor_learner' module is equivalent to this learner but uses tensor automatic
+//! backpropagation while this learner computes the gradients for floats.
+
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
-
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::dac::node::TypeNode;
 use super::logger::Logger;
@@ -33,6 +50,7 @@ use rug::{Assign, Float};
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DacIndex(pub usize);
 
+/// Structure used to learn the distribution parameters from a set of queries
 pub struct Learner<const S: bool>
 {
     train: Dataset<Float>,
@@ -116,7 +134,8 @@ impl <const S: bool> Learner<S>
         self.get_softmaxed(distribution)[index].to_f64()
     }
 
-    /// Return the softmaxed values for all the distributions
+    /// Returns a double vector of tensors. Each entry (d,i) is a tensor representing the softmaxed
+    /// version of the i-th value of vector d
     pub fn get_softmaxed_array(&self) -> Vec<Vec<Float>> {
         let mut softmaxed: Vec<Vec<Float>> = vec![];
         for distribution in self.unsoftmaxed_distributions.iter() {
@@ -252,6 +271,7 @@ impl<const S: bool> Learning for Learner<S> {
             self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
 
+        // Training loop
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
         for e in 0..params.nepochs {
@@ -309,4 +329,3 @@ impl <const S: bool> std::ops::Index<DacIndex> for Learner<S>
         &self.train[index.0]
     }
 }
-
