@@ -32,7 +32,6 @@ pub mod solver;
 mod statistics;
 
 pub use solver::Solver;
-pub use sysinfo::{SystemExt, System};
 
 pub enum GenericSolver {
     SMinInDegree(Solver<MinInDegree, true>),
@@ -55,8 +54,7 @@ macro_rules! make_solver {
             let mlimit = if let Some(m) = $m {
                 m
             } else {
-                let sys = System::new_all();
-                sys.total_memory() / 1000000
+                u64::MAX
             };
             if $s {
                 match $b {

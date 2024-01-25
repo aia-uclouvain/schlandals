@@ -22,7 +22,6 @@ use learning::Learning;
 use learning::tensor_learner::TensorLearner;
 use diagrams::dac::dac::Dac;
 use solvers::GenericSolver;
-use sysinfo::{SystemExt, System};
 use search_trail::StateManager;
 use clap::ValueEnum;
 use rug::Float;
