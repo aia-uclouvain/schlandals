@@ -79,7 +79,7 @@ pub fn graph_from_ppidimacs(
     for d in distributions.iter() {
         number_probabilistic += d.len();
     }
-    g.add_distributions(&distributions, state);
+    let variable_mapping = g.add_distributions(&distributions, state);
     
     // Second pass to parse the clauses
     let file = File::open(filepath).unwrap();
@@ -102,8 +102,14 @@ pub fn graph_from_ppidimacs(
                         let mut literals: Vec<Literal> = vec![];
                         let mut head: Option<Literal> = None;
                         for lit in clause.split_whitespace() {
-                            let trail_value_index = g[VariableIndex(lit.parse::<isize>().unwrap().abs() as usize - 1)].get_value_index();
-                            let literal = Literal::from_str(lit, trail_value_index);
+                            let parsed_lit = lit.parse::<isize>().unwrap();
+                            let is_positive = parsed_lit > 0;
+                            let mut variable = parsed_lit.abs() as usize;
+                            if let Some(new_var) = variable_mapping.get(&variable) {
+                                variable = *new_var;
+                            }
+                            let trail_value_index = g[VariableIndex(variable - 1)].get_value_index();
+                            let literal = Literal::from_variable(VariableIndex(variable - 1), is_positive, trail_value_index);
                             if literal.to_variable().0 < number_probabilistic {
                                 // The variable is probabilistic, put at the end of the vector
                                 literals.push(literal);

@@ -14,9 +14,10 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
 use rug::Float;
 use crate::branching::*;
+
+use std::hash::Hash;
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -132,3 +133,70 @@ macro_rules! compile {
 pub(crate) use make_solver;
 pub(crate) use compile;
 pub(crate) use search;
+
+/// A key of the cache. It is composed of
+///     1. A hash representing the sub-problem being solved
+///     2. The bitwise representation of the sub-problem being solved
+/// 
+/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
+/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
+/// two different sub-problems have different hash.
+/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
+#[derive(Default)]
+pub struct CacheKey {
+    hash: u64,
+    repr: Vec<u64>,
+}
+
+impl CacheKey {
+    pub fn new(hash: u64, repr: Vec<u64>) -> Self {
+        Self {
+            hash,
+            repr
+        }
+    }
+}
+
+impl Hash for CacheKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for CacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        if self.hash != other.hash {
+            false
+        } else {
+            self.repr == other.repr
+        }
+    }
+}
+
+impl Eq for CacheKey {}
+
+/// An entry in the cache for the search. It contains the bounds computed when the sub-problem was
+/// explored as well as various informations used by the solvers.
+#[derive(Clone)]
+pub struct SearchCacheEntry {
+    /// The current bounds on the sub-problem
+    bounds: Bounds,
+    /// The number of children that have been explored
+    number_explored_children: usize,
+}
+
+impl SearchCacheEntry {
+
+    /// Returns a new cache entry
+    pub fn new(bounds: Bounds, number_explored_children: usize) -> Self {
+        Self {
+            bounds,
+            number_explored_children,
+        }
+    }
+
+    /// Returns a reference to the bounds of this entry
+    pub fn bounds(&self) -> &Bounds {
+        &self.bounds
+    }
+}

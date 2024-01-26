@@ -64,9 +64,9 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Memory limit, in megabytes, when running a search over a sub-problem
     mlimit: u64,
     /// Cache used in the compilation to store the nodes associated with each sub-problem
-    compilation_cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
+    compilation_cache: FxHashMap<CacheKey, Option<NodeIndex>>,
     /// Cache used during the search to store bounds associated with sub-problems
-    search_cache: FxHashMap<CacheEntry, Bounds>,
+    search_cache: FxHashMap<CacheKey, SearchCacheEntry>,
     /// Statistics gathered during the solving
     statistics: Statistics<S>
 }
@@ -147,7 +147,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 maximum_probability *= self.graph[distribution].remaining(&self.state);
             }
         }
-        assert!(0.0 <= maximum_probability && maximum_probability <= 1.0);
 
         // If there are no more component to explore (i.e. the sub-problem only contains
         // deterministic variables), then detect_components return false.
@@ -178,16 +177,19 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             None => {
                 self.statistics.cache_miss();
                 let (solution, backtrack_level) = self.branch(component, level, bound_factor);
-                self.search_cache.insert(cache_key, solution.clone());
-                (solution, backtrack_level)
+                let bounds = solution.bounds().clone();
+                self.search_cache.insert(cache_key, solution);
+                (bounds, backtrack_level)
             },
-            Some((p_in, p_out)) => {
+            Some(cache_entry) => {
+                let (p_in, p_out) = cache_entry.bounds();
                 if self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
                     ((p_in.clone(), p_out.clone()), level)
                 } else {
                     let (new_solution, backtrack_level) = self.branch(component, level, bound_factor);
-                    self.search_cache.insert(cache_key, new_solution.clone());
-                    (new_solution, backtrack_level)
+                    let bounds = new_solution.bounds().clone();
+                    self.search_cache.insert(cache_key, new_solution);
+                    (bounds, backtrack_level)
                 }
             },
         }
@@ -197,7 +199,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// resulting from the branching, recursively.
     /// Returns the bounds of the sub-problem as well as the level to which the solver must
     /// backtrack.
-    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (Bounds, isize) {
+    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> (SearchCacheEntry, isize) {
         if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, component) {
             self.statistics.or_node();
             let maximum_probability = self.component_extractor[component].max_probability();
@@ -208,9 +210,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // When a sub-problem is UNSAT, this is the factor that must be used for the
             // computation of p_out
             let unsat_factor = maximum_probability / self.graph[distribution].remaining(&self.state);
-            // TODO: Order the variables by weight in the distribution (i.e., the iter_variables()
-            // should by default iterates on the variable with the highest probability). This will
-            // save some allocations during the search
             for variable in self.graph[distribution].iter_variables() {
                 if self.graph[variable].is_fixed(&self.state) {
                     continue;
@@ -227,7 +226,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return ((f128!(0.0), f128!(maximum_probability)), backtrack_level);
+                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -244,28 +243,28 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // bounds are close enough
                         if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                             self.restore();
-                            return ((p_in, p_out), level);
+                            return (SearchCacheEntry::new((p_in, p_out), 0), level);
                         }
                         if p != 0.0 {
                             let (child_sol, backtrack_level) = self.solve_components(component, level + 1, bound_factor);
                             if backtrack_level != level {
                                 self.restore();
-                                return ((f128!(0.0), f128!(maximum_probability)), backtrack_level);
+                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
                             }
                             p_in += child_sol.0 * &p;
                             p_out += child_sol.1 * &p;
                             if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                                 self.restore();
-                                return ((p_in, p_out), level);
+                                return (SearchCacheEntry::new((p_in, p_out), 0), level);
                             }
                         }
                     }
                 }
                 self.restore();
             }
-            ((p_in, p_out), level)
+            (SearchCacheEntry::new((p_in, p_out), 0), level)
         } else {
-            ((f128!(1.0), f128!(0.0)), level)
+            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), 0), level)
         }
     }
 

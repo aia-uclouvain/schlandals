@@ -43,12 +43,14 @@ use std::cmp::Ordering;
 
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use search_trail::*;
-use crate::common::CacheEntry;
+use crate::solvers::CacheKey;
 use super::literal::*;
 use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use super::watched_vector::WatchedVector;
+
+use rustc_hash::FxHashMap;
 
 /// Abstraction used as a typesafe way of retrieving a `Variable` in the `Graph` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -116,30 +118,41 @@ impl Graph {
     /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
     /// variable such that
     ///     - The sum of their weights sum up to 1.0
-    ///     - Exatctly one of these variable is true in a solution
+    ///     - Exatctly one of these variable is true in a model of the input formula 
     ///     - None of the variable in the distribution is part of another distribution
     ///
     /// Each probabilstic variable should be part of one distribution.
     /// This functions adds the variable in the vector of variables. They are in a contiguous part of
     /// the vector.
-    /// Returns the index of the variables in the distribution
+    /// Moreover, the variables are stored by decreasing probability. The mapping from the old
+    /// variables index (the ones used in the encoding) and the new one (in the vector) is
+    /// returned.
     pub fn add_distributions(
         &mut self,
         distributions: &Vec<Vec<f64>>,
         state: &mut StateManager,
-    ) {
-        
+    ) -> FxHashMap<usize, usize> {
+        let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
             let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
-            for (j, w) in weights.iter().copied().enumerate() {
-                self.variables[current_start + j].set_distribution(distribution_id);
-                self.variables[current_start + j].set_weight(w)
+            let mut weight_with_ids = weights.iter().copied().enumerate().map(|(i, w)| (w,i)).collect::<Vec<(f64, usize)>>();
+            weight_with_ids.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+            // j is the new index while i is the initial index
+            // So the variable will be store at current_start + j instead of current_start + i (+ 1
+            // for the mapping because in the input file indexes start at 1)
+            for (j, (w, i)) in weight_with_ids.iter().copied().enumerate() {
+                let new_index = current_start + j;
+                let initial_index = current_start + i;
+                self.variables[new_index].set_distribution(distribution_id);
+                self.variables[new_index].set_weight(w);
+                mapping.insert(initial_index + 1, new_index + 1);
             }
             current_start += weights.len();
         }
+        mapping
     }
     
     pub fn add_clause(
@@ -293,7 +306,7 @@ impl Graph {
     /// The idea is that using a xor for the hash is not perfect, two subproblems might have the same hash but be different. To avoid
     /// returning a wrong result, the bitwise representation is given with the hash, starting from elements that are likely to be different
     /// in different subproblem (min-max unfixed variable and variable status).
-    pub fn get_bit_representation(&mut self, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> CacheEntry{
+    pub fn get_bit_representation(&mut self, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> CacheKey{
         let vmin = state.get_usize(self.min_var_unassigned);
         let vmax = state.get_usize(self.max_var_unassigned);
         let chash = extractor.get_comp_hash(component);
@@ -307,7 +320,7 @@ impl Graph {
                 v.push(state.get_u64(self.clauses_bit[clause.0 / 64]));
             }
         }
-        CacheEntry::new(chash, v)
+        CacheKey::new(chash, v)
     }
     
     /// Set a clause as unconstrained
