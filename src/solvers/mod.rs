@@ -115,6 +115,21 @@ macro_rules! search {
     }
 }
 
+macro_rules! lds {
+    ($s:expr) => {
+        match $s {
+            GenericSolver::SMinInDegree(mut solver) => solver.lds(),
+            GenericSolver::SMinOutDegree(mut solver) => solver.lds(),
+            GenericSolver::SMaxDegree(mut solver) => solver.lds(),
+            GenericSolver::SVSIDS(mut solver) => solver.lds(),
+            GenericSolver::QMinInDegree(mut solver) => solver.lds(),
+            GenericSolver::QMinOutDegree(mut solver) => solver.lds(),
+            GenericSolver::QMaxDegree(mut solver) => solver.lds(),
+            GenericSolver::QVSIDS(mut solver) => solver.lds(),
+        }
+    }
+}
+
 macro_rules! compile {
     ($c:expr) => {
         match $c {
@@ -133,6 +148,7 @@ macro_rules! compile {
 pub(crate) use make_solver;
 pub(crate) use compile;
 pub(crate) use search;
+pub(crate) use lds;
 
 /// A key of the cache. It is composed of
 ///     1. A hash representing the sub-problem being solved
@@ -181,22 +197,35 @@ impl Eq for CacheKey {}
 pub struct SearchCacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
-    /// The number of children that have been explored
-    number_explored_children: usize,
+    /// Has the node been fully explored ?
+    fully_explored: bool,
+    /// Discrepancy at which the node has been explored
+    discrepancy: usize,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, number_explored_children: usize) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, fully_explored: bool) -> Self {
         Self {
             bounds,
-            number_explored_children,
+            fully_explored,
+            discrepancy
         }
     }
 
     /// Returns a reference to the bounds of this entry
     pub fn bounds(&self) -> &Bounds {
         &self.bounds
+    }
+
+    /// Returns the discrepancy of the node
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    /// Returns true if the sub-problem represented by this entry has been fully explored
+    pub fn fully_explored(&self) -> bool {
+        self.fully_explored
     }
 }

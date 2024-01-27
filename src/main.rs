@@ -15,6 +15,7 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::{Parser, Subcommand};
+use schlandals::ApproximateMethod;
 use std::path::PathBuf;
 use std::process;
 use schlandals::learning::LearnParameters;
@@ -44,8 +45,11 @@ enum Command {
         #[clap(short, long)]
         memory: Option<u64>,
         /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
-        #[clap(short, long)]
-        epsilon: Option<f64>,
+        #[clap(short, long, default_value_t=0.0)]
+        epsilon: f64,
+        /// If epsilon present, use the appropriate approximate method
+        #[clap(short, long, default_value_t=ApproximateMethod::Bounds)]
+        approx: ApproximateMethod,
     },
     /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
@@ -133,12 +137,8 @@ enum Command {
 fn main() {
     let app = App::parse();
     match app.command {
-        Command::Search { input, branching, statistics, memory , epsilon} => {
-            let e = match epsilon {
-                Some(v) => v,
-                None => 0.0,
-            };
-            match schlandals::search(input, branching, statistics, memory, e) {
+        Command::Search { input, branching, statistics, memory , epsilon, approx} => {
+            match schlandals::search(input, branching, statistics, memory, epsilon, approx) {
                 Err(_) => println!("Model UNSAT"),
                 Ok(p) => println!("{}", p),
             };

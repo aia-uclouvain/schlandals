@@ -188,7 +188,7 @@ impl Propagator {
     }
     
     pub fn restore(&mut self, state: &StateManager) {
-        let limit = state.get_usize(self.base_assignments);
+        let limit = state.get_usize(self.base_assignments).max(self.forced);
         self.assignments.truncate(limit);
         self.lit_flags.truncate(limit);
         for i in 0..limit {

@@ -80,6 +80,23 @@ pub enum Optimizer {
     SGD,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum ApproximateMethod {
+    /// Bound-based pruning
+    Bounds,
+    /// Limited Discrepancy Search
+    LDS,
+}
+
+impl std::fmt::Display for ApproximateMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApproximateMethod::Bounds => write!(f, "bounds"),
+            ApproximateMethod::LDS => write!(f, "lds"),
+        }
+    }
+}
+
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
@@ -167,9 +184,12 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     learner.train(&params);
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64) -> ProblemSolution {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, statistics);
-    search!(solver)
+    match approx {
+        ApproximateMethod::Bounds => search!(solver),
+        ApproximateMethod::LDS => lds!(solver),
+    }
 }
 
 
