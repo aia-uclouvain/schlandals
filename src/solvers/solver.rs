@@ -148,7 +148,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             }
         }
 
-        let mut fully_explored  = true;
         // If there are no more component to explore (i.e. the sub-problem only contains
         // deterministic variables), then detect_components return false.
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
@@ -161,19 +160,18 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
                 let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, discrepancy, level);
                 if backtrack_level != level {
-                    let entry = SearchCacheEntry::new((p_in, maximum_probability), discrepancy, true);
+                    let entry = SearchCacheEntry::new((p_in, maximum_probability), discrepancy);
                     self.restore();
                     return (entry, backtrack_level);
                 }
                 // If any of the component is not fully explored, then so is the node
-                fully_explored &= sub_problem.fully_explored();
                 let (sub_p_in, sub_p_out) = sub_problem.bounds();
                 p_in *= sub_p_in;
                 p_out *= sub_maximum_probability - sub_p_out.clone();
             }
         }
         self.restore();
-        let entry = SearchCacheEntry::new((p_in, maximum_probability - p_out), discrepancy, fully_explored);
+        let entry = SearchCacheEntry::new((p_in, maximum_probability - p_out), discrepancy);
         (entry, level - 1)
     }
 
@@ -221,10 +219,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // Number of explored children
             let mut visited = 0;
             // Number of children to explore
-            let number_children = self.graph[distribution].number_unfixed(&self.state);
-            // Is the node fully explored ? It is fully explored when all explored children are
-            // fully explored, and all children have been explored
-            let mut fully_explored = false;
             for variable in self.graph[distribution].iter_variables() {
                 // We've used all the possible discrepancy, we can not explore any more children
                 if visited == discrepancy {
@@ -246,8 +240,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            fully_explored &= visited == number_children;
-                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0, fully_explored), backtrack_level);
+                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -264,23 +257,21 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // bounds are close enough
                         if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                             self.restore();
-                            return (SearchCacheEntry::new((p_in, p_out), 0, false), level);
+                            return (SearchCacheEntry::new((p_in, p_out), 0), level);
                         }
                         if p != 0.0 {
                             let (child_sol, backtrack_level) = self.solve_components(component, level + 1, bound_factor, discrepancy - visited);
                             visited += 1;
                             if backtrack_level != level {
                                 self.restore();
-                                fully_explored &= visited == number_children;
-                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0, fully_explored), backtrack_level);
+                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
                             }
                             let (child_p_in, child_p_out) = child_sol.bounds();
                             p_in += child_p_in * &p;
                             p_out += child_p_out * &p;
                             if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                                 self.restore();
-                                fully_explored &= visited == number_children;
-                                return (SearchCacheEntry::new((p_in, p_out), 0, fully_explored), level);
+                                return (SearchCacheEntry::new((p_in, p_out), 0), level);
                             }
                         } else {
                             visited += 1;
@@ -289,10 +280,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 }
                 self.restore();
             }
-            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, fully_explored);
+            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy);
             (cache_entry, level)
         } else {
-            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), discrepancy, true), level)
+            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), discrepancy), level)
         }
     }
 

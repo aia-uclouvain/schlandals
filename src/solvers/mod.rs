@@ -197,8 +197,6 @@ impl Eq for CacheKey {}
 pub struct SearchCacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
-    /// Has the node been fully explored ?
-    fully_explored: bool,
     /// Discrepancy at which the node has been explored
     discrepancy: usize,
 }
@@ -206,10 +204,9 @@ pub struct SearchCacheEntry {
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, fully_explored: bool) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize) -> Self {
         Self {
             bounds,
-            fully_explored,
             discrepancy
         }
     }
@@ -224,8 +221,4 @@ impl SearchCacheEntry {
         self.discrepancy
     }
 
-    /// Returns true if the sub-problem represented by this entry has been fully explored
-    pub fn fully_explored(&self) -> bool {
-        self.fully_explored
-    }
 }
