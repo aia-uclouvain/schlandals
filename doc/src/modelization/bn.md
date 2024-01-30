@@ -30,7 +30,7 @@ For each CPT entry of node \\( v \\), associated with value \\( v \\) and parent
 
 ## The Query
 
-Let \\( V \\) have domain \\( v_1, \ldots, v_m \\). Then, to encode the query \\( P(V = v_i \\), we add the clauses \\( \lnot v_i \\) for all \\( i \neq j \\).
+Let \\( V \\) have domain \\( v_1, \ldots, v_m \\). Then, to encode the query \\( P(V = v_i) \\), we add the clauses \\( \lnot v_i \\) for all \\( i \neq j \\).
 
 ## Example
 
@@ -87,4 +87,5 @@ c Query
 ## References
 
 [1] Mark Chavira and Adnan Darwiche. On probabilistic inference by weighted model counting. Artificial Intelligence, 172(6-7), 2008.
+
 [2] Anicet Bart, Frédéric Koriche, Jean-Marie Lagniez, and Pierre Marquis. An improved CNF encoding scheme for probabilistic inference. In Proceedings of the Twenty-second European Conference on Artificial Intelligence, 2016.
