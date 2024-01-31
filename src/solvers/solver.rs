@@ -64,11 +64,11 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Memory limit, in megabytes, when running a search over a sub-problem
     mlimit: u64,
     /// Cache used in the compilation to store the nodes associated with each sub-problem
-    compilation_cache: FxHashMap<CacheEntry, Option<NodeIndex>>,
+    compilation_cache: FxHashMap<CacheKey, Option<NodeIndex>>,
     /// Cache used during the search to store bounds associated with sub-problems
-    search_cache: FxHashMap<CacheEntry, Bounds>,
+    search_cache: FxHashMap<CacheKey, Bounds>,
     /// Statistics gathered during the solving
-    statistics: Statistics<S>
+    statistics: Statistics<S>,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -173,7 +173,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// sub-problem is solved and the result is inserted in the cache.
     fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, level: isize) -> (Bounds, isize) {
         self.statistics.cache_access();
-        let cache_key = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
+        let cache_key = self.component_extractor[component].get_cache_key();
         match self.search_cache.get(&cache_key) {
             None => {
                 self.statistics.cache_miss();
@@ -208,9 +208,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // When a sub-problem is UNSAT, this is the factor that must be used for the
             // computation of p_out
             let unsat_factor = maximum_probability / self.graph[distribution].remaining(&self.state);
-            // TODO: Order the variables by weight in the distribution (i.e., the iter_variables()
-            // should by default iterates on the variable with the highest probability). This will
-            // save some allocations during the search
             for variable in self.graph[distribution].iter_variables() {
                 if self.graph[variable].is_fixed(&self.state) {
                     continue;
@@ -308,7 +305,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let cache_key = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
+                let cache_key = self.component_extractor[component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
                         if let Some(n) = node {

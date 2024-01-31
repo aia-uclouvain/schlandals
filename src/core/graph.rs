@@ -107,7 +107,7 @@ impl Graph {
             watchers,
             distributions: vec![],
             min_var_unassigned: state.manage_usize(0),
-            max_var_unassigned: state.manage_usize(0),
+            max_var_unassigned: state.manage_usize(n_var),
             variables_bit,
             clauses_bit,
         }
@@ -281,34 +281,6 @@ impl Graph {
     }
     
     // --- QUERIES --- //
-    
-    /// Gets the cache key for the current subproblem. It is composed as follows
-    ///     1. The hash of the subproblem
-    ///     2. The u64 representing the minimum unassigned variable (vmin)
-    ///     3. The u64 representing the maximum unassigned variable (vmax)
-    ///     4. The bitwise representation of the status (fixed/not fixed), from vmin to vmax
-    ///     5. The bitwise represnetation of the status (constrained/unconstrained) of the clauses
-    /// 
-    /// In addition to that, the hash (xor of the random bitstring for the variables/clauses) is returned as a cache entry struct.
-    /// The idea is that using a xor for the hash is not perfect, two subproblems might have the same hash but be different. To avoid
-    /// returning a wrong result, the bitwise representation is given with the hash, starting from elements that are likely to be different
-    /// in different subproblem (min-max unfixed variable and variable status).
-    pub fn get_bit_representation(&mut self, state: &StateManager, component: ComponentIndex, extractor: &ComponentExtractor) -> CacheEntry{
-        let vmin = state.get_usize(self.min_var_unassigned);
-        let vmax = state.get_usize(self.max_var_unassigned);
-        let chash = extractor.get_comp_hash(component);
-        let mut v: Vec<u64> = vec![vmin as u64, vmax as u64];
-        for u in self.variables_bit[(vmin/64)..(vmax/64+1)].iter() {
-            v.push(state.get_u64(*u));
-        }
-        let cls = extractor.component_iter(component).collect::<Vec<ClauseIndex>>();
-        for clause in cls {
-            if !self[clause].is_learned() {
-                v.push(state.get_u64(self.clauses_bit[clause.0 / 64]));
-            }
-        }
-        CacheEntry::new(chash, v)
-    }
     
     /// Set a clause as unconstrained
     pub fn set_clause_unconstrained(&self, clause: ClauseIndex, state: &mut StateManager) {
