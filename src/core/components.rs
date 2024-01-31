@@ -29,8 +29,9 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::graph::{ClauseIndex, Graph, DistributionIndex};
-use crate::propagator::Propagator;
+use crate::{propagator::Propagator, solvers::CacheKey};
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
+use bitvec::prelude::*;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -76,7 +77,7 @@ pub struct ComponentExtractor {
 
 /// A Component is identified by two integers. The first is the index in the vector of clauses at
 /// which the component starts, and the second is the size of the component.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Component {
     /// First index of the component
     start: usize,
@@ -88,8 +89,14 @@ pub struct Component {
     number_distribution: usize,
     /// Hash of the component, computed during its detection
     hash: u64,
+    /// Maximum probability of the sub-problem represented by the component (i.e., all remaining
+    /// valid interpretation are models)
     max_probability: f64,
+    /// If the distributions are splitted into (non-)trainable, then this flags indicates if there
+    /// are trainable distributions in the component.
     has_learned_distribution: bool,
+    /// Bitwise representation of the problem
+    bit_repr: BitVec,
 }
 
 impl Component {
@@ -104,6 +111,10 @@ impl Component {
 
     pub fn has_learned_distribution(&self) -> bool {
         self.has_learned_distribution
+    }
+
+    pub fn get_cache_key(&self) -> CacheKey {
+        CacheKey::new(self.hash, self.bit_repr.clone())
     }
 }
 
@@ -122,6 +133,7 @@ impl ComponentExtractor {
             hash: 0,
             max_probability: 1.0,
             has_learned_distribution: false,
+            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses()),
         }];
         Self {
             clauses: nodes,
@@ -172,12 +184,14 @@ impl ComponentExtractor {
         hash: &mut u64,
         max_probability: &mut f64,
         has_learned_distribution: &mut bool,
+        bit_repr: &mut BitVec,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
             if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
                 if !g[clause].is_learned() {
                     *hash ^= g[clause].hash();
+                    *bit_repr.get_mut(g.number_variables() + clause.0).unwrap() = true;
                 }
                 // The clause is swap with the clause at position comp_sart + comp_size
                 let current_pos = self.clause_positions[clause.0];
@@ -196,7 +210,8 @@ impl ComponentExtractor {
                 for variable in g[clause].iter_variables() {
                     if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
                         self.seen_var[variable.0] = true;
-                        *hash ^= g[variable].hash()
+                        *hash ^= g[variable].hash();
+                        *bit_repr.get_mut(variable.0).unwrap() = true;
                     }
                 }
 
@@ -264,7 +279,7 @@ impl ComponentExtractor {
         // they do not share variables
         self.seen_var.fill(false);
         state.set_usize(self.base, end);
-        let super_comp = self.components[component.0];
+        let super_comp = &self.components[component.0];
         let mut start = super_comp.start;
         let mut distribution_start = super_comp.distribution_start;
         let end = start + super_comp.size;
@@ -279,6 +294,7 @@ impl ComponentExtractor {
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
                 let mut has_learned_distribution = false;
+                let mut bit_repr = bits![0].repeat(g.number_clauses() + g.number_variables());
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -289,10 +305,11 @@ impl ComponentExtractor {
                     &mut hash,
                     &mut max_probability,
                     &mut has_learned_distribution,
+                    &mut bit_repr,
                     state,
                 );
                 if number_distribution > 0 {
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution});
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution, bit_repr});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -371,49 +388,6 @@ impl ComponentExtractor {
             }
         }
     }
-
-    pub fn create_component_from(&mut self, clauses: &Vec<ClauseIndex>, state: &mut StateManager) -> ComponentIndex {
-        let start = 0;
-        let size = clauses.len();
-        let distribution_start = 0;
-        let number_distribution = 0;
-        let hash = 0;
-        let max_probability = 1.0;
-        let end = state.get_usize(self.limit);
-        self.components.truncate(end);
-        self.exploration_stack.clear();
-        self.seen_var.fill(false);
-        state.set_usize(self.base, end);
-        for (i, clause) in clauses.iter().copied().enumerate() {
-            let current_pos = self.clause_positions[clause.0];
-            let new_pos = i;
-            let moved_node = self.clauses[new_pos];
-            self.clauses.as_mut_slice().swap(new_pos, current_pos);
-            self.clause_positions[clause.0] = new_pos;
-            self.clause_positions[moved_node.0] = current_pos;
-        }
-        let component = Component{start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution: false};
-        self.components.push(component);
-        state.set_usize(self.limit, self.components.len());
-        ComponentIndex(self.components.len() - 1)
-    }
-
-    pub fn create_distribution_from(&mut self, component: ComponentIndex, distributions: impl Iterator<Item = DistributionIndex>) {
-        let start = 0;
-        let mut number_distribution = 0;
-        for (i, distribution) in distributions.enumerate() {
-            let current_pos = self.distribution_positions[distribution.0];
-            let new_pos = i;
-            let moved_node = self.distributions[new_pos];
-            self.distributions.as_mut_slice().swap(new_pos, current_pos);
-            self.distribution_positions[distribution.0] = new_pos;
-            self.distribution_positions[moved_node.0] = current_pos;
-            number_distribution += 1;
-        }
-        self.components[component.0].distribution_start = start;
-        self.components[component.0].number_distribution = number_distribution;
-    }
-
 }
 
 impl std::ops::Index<ComponentIndex> for ComponentExtractor {

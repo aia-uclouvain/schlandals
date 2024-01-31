@@ -18,6 +18,7 @@ use rug::Float;
 use crate::branching::*;
 
 use std::hash::Hash;
+use bitvec::prelude::*;
 
 
 /// Unit structure representing the the problem is UNSAT
@@ -161,11 +162,11 @@ pub(crate) use lds;
 #[derive(Default)]
 pub struct CacheKey {
     hash: u64,
-    repr: Vec<u64>,
+    repr: BitVec,
 }
 
 impl CacheKey {
-    pub fn new(hash: u64, repr: Vec<u64>) -> Self {
+    pub fn new(hash: u64, repr: BitVec) -> Self {
         Self {
             hash,
             repr
@@ -174,9 +175,11 @@ impl CacheKey {
 }
 
 impl Hash for CacheKey {
+
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash.hash(state);
     }
+
 }
 
 impl PartialEq for CacheKey {

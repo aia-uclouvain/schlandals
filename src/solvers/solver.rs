@@ -67,7 +67,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Cache used during the search to store bounds associated with sub-problems
     search_cache: FxHashMap<CacheKey, SearchCacheEntry>,
     /// Statistics gathered during the solving
-    statistics: Statistics<S>
+    statistics: Statistics<S>,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -180,7 +180,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// sub-problem is solved and the result is inserted in the cache.
     fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, discrepancy: usize, level: isize) -> (SearchCacheEntry, isize) {
         self.statistics.cache_access();
-        let cache_key = self.graph.get_bit_representation(&self.state, component, &self.component_extractor);
+        let cache_key = self.component_extractor[component].get_cache_key();
         match self.search_cache.get(&cache_key) {
             None => {
                 self.statistics.cache_miss();
@@ -217,21 +217,18 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // computation of p_out
             let unsat_factor = maximum_probability / self.graph[distribution].remaining(&self.state);
             // Number of explored children
-            let mut visited = 0;
-            // Number of children to explore
+            let mut idx = 0;
             for variable in self.graph[distribution].iter_variables() {
-                // We've used all the possible discrepancy, we can not explore any more children
-                if visited == discrepancy {
-                    break;
-                }
                 if self.graph[variable].is_fixed(&self.state) {
                     continue;
+                }
+                if idx > discrepancy {
+                    break;
                 }
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(backtrack_level) => {
-                        visited += 1;
                         self.statistics.unsat();
                         // The assignment triggered an UNSAT, so the whole sub-problem is part of
                         // the non-models.
@@ -260,8 +257,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             return (SearchCacheEntry::new((p_in, p_out), 0), level);
                         }
                         if p != 0.0 {
-                            let (child_sol, backtrack_level) = self.solve_components(component, level + 1, bound_factor, discrepancy - visited);
-                            visited += 1;
+                            let new_discrepancy = discrepancy - idx;
+                            let (child_sol, backtrack_level) = self.solve_components(component, level + 1, bound_factor, new_discrepancy);
                             if backtrack_level != level {
                                 self.restore();
                                 return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
@@ -273,11 +270,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 self.restore();
                                 return (SearchCacheEntry::new((p_in, p_out), 0), level);
                             }
-                        } else {
-                            visited += 1;
                         }
                     }
                 }
+                idx += 1;
                 self.restore();
             }
             let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy);
@@ -326,7 +322,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
-                let cache_key = self.graph.get_bit_representation(&self.state, sub_component, &self.component_extractor);
+                let cache_key = self.component_extractor[component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
                         if let Some(n) = node {
@@ -469,18 +465,20 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.state.save_state();
 
         let mut discrepancy = 4;
+        println!("Sarting LDS");
         loop {
             let (solution, _) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
             let (p_in, p_out) = solution.bounds();
             let lb = p_in * preproc_in.clone();
             let ub: Float = 1.0 - (preproc_out.clone() + p_out * preproc_in.clone());
-            println!("Discrepancy {} lb {} ub {}", discrepancy, lb, ub);
+            let discrepancy_epsilon = (ub.clone() / lb.clone()).sqrt() - 1;
+            println!("Discrepancy {} lb {} ub {} discrepancy epsilon {}", discrepancy, lb, ub, discrepancy_epsilon);
             if ub <= lb.clone() * (1.0 + self.epsilon).powf(2.0) + 0.000001 {
                 let proba = (lb*ub).sqrt();
                 self.statistics.print();
                 return ProblemSolution::Ok(proba)
             }
-            discrepancy *= 2;
+            discrepancy += 4;
         }
     }
 }
