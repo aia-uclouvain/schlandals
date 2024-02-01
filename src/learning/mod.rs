@@ -28,25 +28,91 @@ pub trait Learning {
 
 pub struct LearnParameters {
     /// The initial learning rate
-    pub lr: f64,
+    lr: f64,
     /// The number of epochs
-    pub nepochs: usize,
-    /// The timeout in seconds
-    pub timeout: u64,
+    nepochs: usize,
+    /// The timeout used for the compilations, in seconds
+    timeout: u64,
+    /// The timeout used for the training loop, in seconds
+    learn_timeout: u64,
     /// The loss function
-    pub loss: Loss,
+    loss: Loss,
     /// The optimizer
-    pub optimizer: Optimizer,
+    optimizer: Optimizer,
     /// The learning rate decay
-    pub lr_drop: f64,
+    lr_drop: f64,
     /// The number of epochs after which the learning rate is dropped
-    pub epoch_drop: usize,
+    epoch_drop: usize,
     /// The error threshold under which the training is stopped
-    pub stopping_criterion: f64,
+    early_stop_threshold: f64,
     /// The minimum delta between two epochs to consider that the training is still improving
-    pub delta_early_stop: f64,
+    early_stop_delta: f64,
     /// The number of epochs to wait before stopping the training if the loss is not improving
-    pub patience: usize,
+    patience: usize,
+}
+
+impl LearnParameters {
+    
+    pub fn new(lr: f64, nepochs: usize, timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, early_stop_threshold: f64, early_stop_delta: f64, patience: usize) -> Self {
+        Self { lr, nepochs, timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, patience }
+    }
+
+    /// Returns the learning rate
+    pub fn lr(&self) -> f64 {
+        self.lr
+    }
+
+    /// Returns the maximum number of epochs allowed for the learning
+    pub fn nepochs(&self) -> usize {
+        self.nepochs
+    }
+
+    /// Returns the timeout used for the compilation of the queries (in seconds)
+    pub fn timeout(&self) -> u64 {
+        self.timeout
+    }
+
+    /// Return the timeout used for the learning loop (in seconds)
+    pub fn learning_timeout(&self) -> u64 {
+        self.learn_timeout
+    }
+
+    /// Return the loss
+    pub fn loss(&self) -> Loss {
+        self.loss
+    }
+
+    /// Return the optimizer
+    pub fn optimizer(&self) -> Optimizer {
+        self.optimizer
+    }
+
+    /// Returns the decay factor of the learning rate
+    pub fn lr_drop(&self) -> f64 {
+        self.lr_drop
+    }
+
+    /// Returns the frequence (number of epoch) at which the learning rate is decreased
+    pub fn epoch_drop(&self) -> usize {
+        self.epoch_drop
+    }
+
+    /// Returns the loss threshold at which the learning can do an early stopping
+    pub fn early_stop_threshold(&self) -> f64 {
+        self.early_stop_threshold
+    }
+
+    /// Returns the delta for early stopping. If the improvement between two successive epochs (in
+    /// terms of loss) is less than this value, the training is considered to be stalling
+    pub fn early_stop_delta(&self) -> f64 {
+        self.early_stop_delta
+    }
+
+    /// Required number non-improved epochs (see `early_stop_delta`) for the early stopping to be
+    /// triggered
+    pub fn patience(&self) -> usize {
+        self.patience
+    }
 }
 
 /// This trait provide multiple functions to use on loss functions. In particular, every loss

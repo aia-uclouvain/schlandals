@@ -28,6 +28,9 @@ use crate::PEAK_ALLOC;
 use super::statistics::Statistics;
 use rug::Float;
 use super::*;
+use std::time::Instant;
+
+type SearchResult = (SearchCacheEntry, isize);
 
 /// This structure represent a general solver in Schlandals. It stores a representation of the
 /// problem and various structure that are used when solving it.
@@ -68,6 +71,10 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     search_cache: FxHashMap<CacheKey, SearchCacheEntry>,
     /// Statistics gathered during the solving
     statistics: Statistics<S>,
+    /// Time limit accorded to the solver
+    timeout: u64,
+    /// Start time of the solver
+    start: Instant,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -80,6 +87,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         propagator: Propagator,
         mlimit: u64,
         epsilon: f64,
+        timeout: u64,
     ) -> Self {
         Self {
             graph,
@@ -92,6 +100,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             compilation_cache: FxHashMap::default(),
             search_cache: FxHashMap::default(),
             statistics: Statistics::default(),
+            timeout,
+            start: Instant::now(),
         }
     }
 
@@ -108,12 +118,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn search(&mut self) -> ProblemSolution {
+        self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
         let preproc = preprocessor.preprocess(false);
         if preproc.is_none() {
-            return ProblemSolution::Err(Unsat);
+            return ProblemSolution::Err(Error::Unsat);
         }
         let preproc_in = preproc.unwrap();
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
@@ -123,18 +134,21 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-
-        let (solution, _) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
-        let (p_in, p_out) = solution.bounds();
-        let lb = p_in * preproc_in.clone();
-        let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-        let proba = (lb*ub).sqrt();
-        self.statistics.print();
-        ProblemSolution::Ok(proba)
+        match self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX) {
+            Some((solution, _)) => {
+                let (p_in, p_out) = solution.bounds();
+                let lb = p_in * preproc_in.clone();
+                let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
+                let proba = (lb*ub).sqrt();
+                self.statistics.print();
+                ProblemSolution::Ok(proba)
+            },
+            None => ProblemSolution::Err(Error::Timeout),
+        }
     }
 
     /// Split the component into multiple sub-components and solve each of them
-    fn solve_components(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize) -> (SearchCacheEntry, isize) {
+    fn solve_components(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize) -> Option<SearchResult> {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.search_cache.clear();
         }
@@ -156,46 +170,59 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.statistics.decomposition(number_components);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
+                if self.start.elapsed().as_secs() >= self.timeout {
+                    return None;
+                }
                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
-                let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, discrepancy, level);
-                if backtrack_level != level {
-                    let entry = SearchCacheEntry::new((p_in, maximum_probability), discrepancy);
-                    self.restore();
-                    return (entry, backtrack_level);
+                if let Some((sub_problem, backtrack_level)) = self.get_bounds_from_cache(sub_component, new_bound_factor, discrepancy, level) {
+                    if backtrack_level != level {
+                        let entry = SearchCacheEntry::new((p_in, maximum_probability), discrepancy);
+                        self.restore();
+                        return Some((entry, backtrack_level));
+                    }
+                    // If any of the component is not fully explored, then so is the node
+                    let (sub_p_in, sub_p_out) = sub_problem.bounds();
+                    p_in *= sub_p_in;
+                    p_out *= sub_maximum_probability - sub_p_out.clone();
+                } else {
+                    return None;
                 }
-                // If any of the component is not fully explored, then so is the node
-                let (sub_p_in, sub_p_out) = sub_problem.bounds();
-                p_in *= sub_p_in;
-                p_out *= sub_maximum_probability - sub_p_out.clone();
             }
         }
         self.restore();
         let entry = SearchCacheEntry::new((p_in, maximum_probability - p_out), discrepancy);
-        (entry, level - 1)
+        Some((entry, level - 1))
     }
 
     /// Retrieves the bounds of a sub-problem from the cache. If the sub-problem has never been
     /// explored or that the bounds, given the bounding factor, are not good enough, the
     /// sub-problem is solved and the result is inserted in the cache.
-    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, discrepancy: usize, level: isize) -> (SearchCacheEntry, isize) {
+    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, discrepancy: usize, level: isize) -> Option<SearchResult> {
         self.statistics.cache_access();
         let cache_key = self.component_extractor[component].get_cache_key();
         match self.search_cache.get(&cache_key) {
             None => {
                 self.statistics.cache_miss();
-                let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy);
-                self.search_cache.insert(cache_key, solution.clone());
-                (solution, backtrack_level)
+
+                if let Some((solution, backtrack_level)) = self.branch(component, level, bound_factor, discrepancy) {
+                    self.search_cache.insert(cache_key, solution.clone());
+                    Some((solution, backtrack_level))
+                } else {
+                    None
+                }
             },
             Some(cache_entry) => {
                 let (p_in, p_out) = cache_entry.bounds();
                 if cache_entry.discrepancy() > discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
-                    (cache_entry.clone(), level)
+                    Some((cache_entry.clone(), level))
                 } else {
-                    let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy);
-                    self.search_cache.insert(cache_key, new_solution.clone());
-                    (new_solution, backtrack_level)
+                    if let Some((new_solution, backtrack_level)) = self.branch(component, level, bound_factor, discrepancy) {
+                        self.search_cache.insert(cache_key, new_solution.clone());
+                        Some((new_solution, backtrack_level))
+                    } else {
+                        None
+                    }
                 }
             },
         }
@@ -205,7 +232,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// resulting from the branching, recursively.
     /// Returns the bounds of the sub-problem as well as the level to which the solver must
     /// backtrack.
-    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize) -> (SearchCacheEntry, isize) {
+    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize) -> Option<SearchResult> {
         if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, component) {
             self.statistics.or_node();
             let maximum_probability = self.component_extractor[component].max_probability();
@@ -225,6 +252,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if idx > discrepancy {
                     break;
                 }
+                if self.start.elapsed().as_secs() >= self.timeout {
+                    return None;
+                }
                 let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
@@ -237,7 +267,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
+                            return Some((SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level));
                         }
                     },
                     Ok(_) => {
@@ -254,21 +284,24 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // bounds are close enough
                         if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                             self.restore();
-                            return (SearchCacheEntry::new((p_in, p_out), 0), level);
+                            return Some((SearchCacheEntry::new((p_in, p_out), 0), level));
                         }
                         if p != 0.0 {
                             let new_discrepancy = discrepancy - idx;
-                            let (child_sol, backtrack_level) = self.solve_components(component, level + 1, bound_factor, new_discrepancy);
-                            if backtrack_level != level {
-                                self.restore();
-                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level);
-                            }
-                            let (child_p_in, child_p_out) = child_sol.bounds();
-                            p_in += child_p_in * &p;
-                            p_out += child_p_out * &p;
-                            if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
-                                self.restore();
-                                return (SearchCacheEntry::new((p_in, p_out), 0), level);
+                            if let Some((child_sol, backtrack_level)) = self.solve_components(component, level + 1, bound_factor, new_discrepancy) {
+                                if backtrack_level != level {
+                                    self.restore();
+                                    return Some((SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), 0), backtrack_level));
+                                }
+                                let (child_p_in, child_p_out) = child_sol.bounds();
+                                p_in += child_p_in * &p;
+                                p_out += child_p_out * &p;
+                                if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
+                                    self.restore();
+                                    return Some((SearchCacheEntry::new((p_in, p_out), 0), level));
+                                }
+                            } else {
+                                return None;
                             }
                         }
                     }
@@ -277,9 +310,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 self.restore();
             }
             let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy);
-            (cache_entry, level)
+            Some((cache_entry, level))
         } else {
-            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), discrepancy), level)
+            Some((SearchCacheEntry::new((f128!(1.0), f128!(0.0)), discrepancy), level))
         }
     }
 
@@ -322,6 +355,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
+                if self.start.elapsed().as_secs() >= self.timeout {
+                    return None;
+                }
                 let cache_key = self.component_extractor[component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
@@ -351,14 +387,17 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 // Still some distributions to branch on, but no more to learn.
                                 // This is a partial compilation so we switch to the search solver
                                 let maximum_probability = self.component_extractor[sub_component].max_probability();
-                                let (child_sol, _) = self.get_bounds_from_cache(sub_component, new_bound_factor, usize::MAX, level);
-                                let (child_p_in, child_p_out) = child_sol.bounds();
-                                let child_value = (child_p_in * (maximum_probability - child_p_out.clone())).sqrt();
-                                let child = dac.add_approximate_node(child_value.to_f64());
-                                if prod_node.is_none() {
-                                    prod_node = Some(dac.add_prod_node());
+                                if let Some((child_sol, _)) = self.get_bounds_from_cache(sub_component, new_bound_factor, usize::MAX, level) {
+                                    let (child_p_in, child_p_out) = child_sol.bounds();
+                                    let child_value = (child_p_in * (maximum_probability - child_p_out.clone())).sqrt();
+                                    let child = dac.add_approximate_node(child_value.to_f64());
+                                    if prod_node.is_none() {
+                                        prod_node = Some(dac.add_prod_node());
+                                    }
+                                    dac.add_node_output(child, prod_node.unwrap());
+                                } else {
+                                    return None;
                                 }
-                                dac.add_node_output(child, prod_node.unwrap());
                             }
                         }
                     },
@@ -378,6 +417,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         for variable in self.graph[distribution].iter_variables() {
             if self.graph[variable].is_fixed(&self.state) {
                 continue;
+            }
+            if self.start.elapsed().as_secs() >= self.timeout {
+                return None;
             }
             self.state.save_state();
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
@@ -452,7 +494,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
         let preproc = preprocessor.preprocess(false);
         if preproc.is_none() {
-            return ProblemSolution::Err(Unsat);
+            return ProblemSolution::Err(Error::Unsat);
         }
         let preproc_in = preproc.unwrap();
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
@@ -462,23 +504,25 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        self.state.save_state();
+        let target_epsilon = self.epsilon;
 
         let mut discrepancy = 4;
-        println!("Sarting LDS");
+        let mut best_proba = f128!(0.0);
         loop {
-            let (solution, _) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
-            let (p_in, p_out) = solution.bounds();
-            let lb = p_in * preproc_in.clone();
-            let ub: Float = 1.0 - (preproc_out.clone() + p_out * preproc_in.clone());
-            let discrepancy_epsilon = (ub.clone() / lb.clone()).sqrt() - 1;
-            println!("Discrepancy {} lb {} ub {} discrepancy epsilon {}", discrepancy, lb, ub, discrepancy_epsilon);
-            if ub <= lb.clone() * (1.0 + self.epsilon).powf(2.0) + 0.000001 {
-                let proba = (lb*ub).sqrt();
-                self.statistics.print();
-                return ProblemSolution::Ok(proba)
+            if let Some((solution, _)) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy) {
+                let (p_in, p_out) = solution.bounds();
+                let lb = p_in * preproc_in.clone();
+                let ub: Float = 1.0 - (preproc_out.clone() + p_out * preproc_in.clone());
+                let best_epsilon = (ub.clone() / lb.clone()).to_f64().sqrt() - 1.0;
+                println!("Discrepancy {} lb {} ub {} discrepancy epsilon {}", discrepancy, lb, ub, best_epsilon);
+                best_proba = (lb*ub).sqrt();
+                if best_epsilon <= target_epsilon {
+                    return ProblemSolution::Ok(best_proba);
+                }
+                discrepancy += 1;
+            } else {
+                return ProblemSolution::Ok(best_proba);
             }
-            discrepancy += 4;
         }
     }
 }

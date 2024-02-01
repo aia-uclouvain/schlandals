@@ -20,13 +20,14 @@ use crate::branching::*;
 use std::hash::Hash;
 use bitvec::prelude::*;
 
-
-/// Unit structure representing the the problem is UNSAT
 #[derive(Debug)]
-pub struct Unsat;
+pub enum Error {
+    Unsat,
+    Timeout,
+}
 
 /// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Result<Float, Unsat>;
+pub type ProblemSolution = Result<Float, Error>;
 
 pub type Bounds = (Float, Float);
 
@@ -47,7 +48,7 @@ pub enum GenericSolver {
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $s:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
@@ -61,38 +62,38 @@ macro_rules! make_solver {
             if $s {
                 match $b {
                     Branching::MinInDegree => {
-                        let solver = Solver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::SMinInDegree(solver)
                     },
                     Branching::MinOutDegree => {
-                        let solver = Solver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::SMinOutDegree(solver)
                     },
                     Branching::MaxDegree => {
-                        let solver = Solver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::SMaxDegree(solver)
                     },
                     Branching::VSIDS => {
-                        let solver = Solver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::SVSIDS(solver)
                     },
                 }
             } else {
                 match $b {
                     Branching::MinInDegree => {
-                        let solver = Solver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::QMinInDegree(solver)
                     },
                     Branching::MinOutDegree => {
-                        let solver = Solver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::QMinOutDegree(solver)
                     },
                     Branching::MaxDegree => {
-                        let solver = Solver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::QMaxDegree(solver)
                     },
                     Branching::VSIDS => {
-                        let solver = Solver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e);
+                        let solver = Solver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, $e, $t);
                         GenericSolver::QVSIDS(solver)
                     },
                 }

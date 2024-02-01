@@ -38,7 +38,7 @@ use propagator::Propagator;
 mod common;
 mod branching;
 pub mod core;
-mod solvers;
+pub mod solvers;
 mod parser;
 mod propagator;
 mod preprocess;
@@ -97,10 +97,10 @@ impl std::fmt::Display for ApproximateMethod {
     }
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64) -> ProblemSolution {
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, false);
+            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
             let mut res: Option<Dac<Float>> = compile!(compiler);
             if let Some(ref mut dac) = &mut res {
                 dac.evaluate();
@@ -123,7 +123,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
                 }
                 ProblemSolution::Ok(proba)
             } else {
-                ProblemSolution::Err(Unsat)
+                ProblemSolution::Err(Error::Timeout)
             }
         },
         FileType::FDAC => {
@@ -139,17 +139,17 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), test_inputs, test_expected))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), test_inputs, test_expected))
             }
         },
         #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer, test_inputs, test_expected))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer, test_inputs, test_expected))
             }
         }
     }
@@ -184,8 +184,8 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     learner.train(&params);
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, statistics);
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
+    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
     match approx {
         ApproximateMethod::Bounds => search!(solver),
         ApproximateMethod::LDS => lds!(solver),
