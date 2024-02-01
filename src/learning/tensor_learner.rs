@@ -70,7 +70,7 @@ impl <const S: bool> TensorLearner<S>
 {
     /// Creates a new learner for the inputs given. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, optimizer: OptChoice, test_inputs:Vec<PathBuf>, mut test_expected_o:Vec<f64>) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, timeout: u64, optimizer: OptChoice, test_inputs:Vec<PathBuf>, mut test_expected_o:Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
         // Retrieves the distributions values and computes their unsoftmaxed values
@@ -85,8 +85,8 @@ impl <const S: bool> TensorLearner<S>
         }).collect::<Vec<Tensor>>();
 
         // Compiling the train and test queries into arithmetic circuits
-        let mut train_dacs = generate_dacs(inputs, branching, epsilon);
-        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon);
+        let mut train_dacs = generate_dacs(inputs, branching, epsilon, timeout);
+        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, timeout);
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
@@ -175,7 +175,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
         let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
-        let to = Duration::from_secs(params.timeout);
+        let to = Duration::from_secs(params.learning_timeout());
 
         // Evaluate the test set before training, if it exists
         if self.test.len()!=0{
@@ -183,7 +183,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             let mut loss_epoch = Tensor::from(0.0);
             let mut test_loss = vec![0.0; self.test.len()];
             for i in 0..self.test.len() {
-                let loss_i = match params.loss {
+                let loss_i = match params.loss() {
                     Loss::MAE => self.test[i].circuit_probability().l1_loss(&self.test.expected(i), Reduction::Mean),
                     Loss::MSE => self.test[i].circuit_probability().mse_loss(&self.test.expected(i), Reduction::Mean),
                 };
@@ -193,22 +193,22 @@ impl<const S: bool> Learning for TensorLearner<S> {
             self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
 
-        /// Training loop
+        // Training loop
         let mut train_loss = vec![0.0; self.train.len()];
-        for e in 0..params.nepochs {
+        for e in 0..params.nepochs() {
             // Timeout
             if start.elapsed() > to { 
                 break;
             }
             // Update the learning rate
-            let learning_rate = params.lr * params.lr_drop.powf(((1+e) as f64/ params.epoch_drop as f64).floor());
+            let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
             self.optimizer.set_lr(learning_rate);
             // Forward pass
             let predictions = self.evaluate();
             // Compute the loss
             let mut loss_epoch = Tensor::from(0.0);
             for i in 0..self.train.len() {
-                let loss_i = match params.loss {
+                let loss_i = match params.loss() {
                     Loss::MAE => self.train[i].circuit_probability().l1_loss(&self.train.expected(i), Reduction::Mean),
                     Loss::MSE => self.train[i].circuit_probability().mse_loss(&self.train.expected(i), Reduction::Mean),
                 };
@@ -221,7 +221,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             // Log the epoch
             self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions);
             // Early stopping
-            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.stopping_criterion, params.patience, params.delta_early_stop) {
+            if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.early_stop_threshold(), params.patience(), params.early_stop_delta()) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
                 break;
             }
@@ -234,7 +234,7 @@ impl<const S: bool> Learning for TensorLearner<S> {
             let mut loss_epoch = Tensor::from(0.0);
             let mut test_loss = vec![0.0; self.test.len()];
             for i in 0..self.test.len() {
-                let loss_i = match params.loss {
+                let loss_i = match params.loss() {
                     Loss::MAE => self.test[i].circuit_probability().l1_loss(&self.test.expected(i), Reduction::Mean),
                     Loss::MSE => self.test[i].circuit_probability().mse_loss(&self.test.expected(i), Reduction::Mean),
                 };

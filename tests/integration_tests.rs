@@ -16,7 +16,7 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<search_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, 0.0).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, 0.0, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
@@ -24,7 +24,7 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0).unwrap();
+                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 assert!((expected - sol).abs() < 0.000001);
             }
@@ -59,7 +59,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_0_ $b _ $name>]() {
                 let epsilon = 0.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -68,7 +68,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_5_ $b _ $name>]() {
                 let epsilon = 0.05;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -77,7 +77,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_20_ $b _ $name>]() {
                 let epsilon = 0.2;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -86,7 +86,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_50_ $b _ $name>]() {
                 let epsilon = 0.5;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }
@@ -95,7 +95,7 @@ macro_rules! test_approximate_input_with_branching {
             fn [<approximate_search_100_ $b _ $name>]() {
                 let epsilon = 1.0;
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon).unwrap();
+                let sol = search(PathBuf::from(filename), Branching::$b, false, None, epsilon, u64::MAX).unwrap();
                 let expected = Float::with_val(113, $value);
                 compare_approximate(sol, expected, epsilon);
             }

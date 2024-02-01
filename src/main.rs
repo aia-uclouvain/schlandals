@@ -18,13 +18,15 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use schlandals::learning::LearnParameters;
-
+use schlandals::solvers::Error;
 
 #[derive(Debug, Parser)]
 #[clap(name="Schlandals", version, author, about)]
 pub struct App {
     #[clap(subcommand)]
     command: Command,
+    #[clap(long,short)]
+    timeout: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -90,7 +92,7 @@ enum Command {
         do_log: bool,
         /// If present, define the learning timeout
         #[clap(long, default_value_t=u64::MAX)]
-        timeout: u64,
+        ltimeout: u64,
         /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
         #[clap(short, long, default_value_t=0.0)]
         epsilon: f64,
@@ -118,11 +120,11 @@ enum Command {
         /// The stopping criterion for the training
         /// (i.e. if the loss is below this value, stop the training)
         #[clap(long, default_value_t=0.0001)]
-        stopping_criterion: f64,
+        early_stop_threshold: f64,
         /// The minimum of improvement in the loss to consider that the training is still improving
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=0.00001)]
-        delta_early_stop: f64,
+        early_stop_delta: f64,
         /// The number of epochs to wait before stopping the training if the loss is not improving
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=5)]
@@ -132,14 +134,23 @@ enum Command {
 
 fn main() {
     let app = App::parse();
+    let timeout = match app.timeout {
+        Some(t) => t,
+        None => u64::MAX,
+    };
     match app.command {
         Command::Search { input, branching, statistics, memory , epsilon} => {
             let e = match epsilon {
                 Some(v) => v,
                 None => 0.0,
             };
-            match schlandals::search(input, branching, statistics, memory, e) {
-                Err(_) => println!("Model UNSAT"),
+            match schlandals::search(input, branching, statistics, memory, e, timeout) {
+                Err(e) => {
+                    match e {
+                        Error::Unsat => println!("Model UNSAT"),
+                        Error::Timeout => println!("Timeout"),
+                    };
+                },
                 Ok(p) => println!("{}", p),
             };
         },
@@ -148,26 +159,32 @@ fn main() {
                 Some(v) => v,
                 None => 0.0,
             };
-            match schlandals::compile(input, branching, fdac, dotfile, e) {
-                Err(_) => println!("Model UNSAT"),
+            match schlandals::compile(input, branching, fdac, dotfile, e, timeout) {
+                Err(e) => {
+                    match e {
+                        Error::Unsat => println!("Model UNSAT"),
+                        Error::Timeout => println!("Timeout"),
+                    };
+                },
                 Ok(p) => println!("{}", p),
             };
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
-            do_log , timeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
-            epoch_drop, stopping_criterion, delta_early_stop, patience} => {
-            let params = LearnParameters {
+            do_log , ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
+            epoch_drop, early_stop_threshold, early_stop_delta, patience} => {
+            let params = LearnParameters::new(
                 lr,
                 nepochs,
                 timeout,
+                ltimeout,
                 loss,
                 optimizer,
                 lr_drop,
                 epoch_drop,
-                stopping_criterion,
-                delta_early_stop,
+                early_stop_threshold,
+                early_stop_delta,
                 patience,
-            };
+            );
             if do_log && outfolder.is_none() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);

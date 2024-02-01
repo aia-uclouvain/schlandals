@@ -41,9 +41,7 @@
 
 use std::cmp::Ordering;
 
-use crate::core::components::{ComponentIndex, ComponentExtractor};
 use search_trail::*;
-use crate::common::CacheEntry;
 use super::literal::*;
 use super::variable::*;
 use super::clause::*;
