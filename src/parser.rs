@@ -54,6 +54,36 @@ pub enum FileType {
     FDAC,
 }
 
+pub fn graph_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, state: &mut StateManager) -> Graph {
+    let mut number_var = 0;
+    for clause in clauses.iter() {
+        number_var = number_var.max(clause.iter().map(|l| l.abs() as usize).max().unwrap());
+    }
+    let mut g = Graph::new(state, number_var, clauses.len());
+    g.add_distributions(&distributions, state);
+    for clause in clauses.iter() {
+        let mut literals: Vec<Literal> = vec![];
+        let mut head: Option<Literal> = None;
+        for lit in clause.iter().copied() {
+            if lit == 0 {
+                panic!("Variables in clauses can not be 0");
+            }
+            let var = VariableIndex(lit.abs() as usize - 1);
+            let trail_value_index = g[var].get_value_index();
+            let literal = Literal::from_variable(var, lit > 0, trail_value_index);
+            if lit > 0 {
+                if head.is_some() {
+                    panic!("The clauses {} has more than one positive literal", clause.iter().map(|i| format!("{}", i)).collect::<Vec<String>>().join(" "));
+                }
+                head = Some(literal);
+            }
+            literals.push(literal);
+        }
+        g.add_clause(literals, head, state, false);
+    }
+    g
+}
+
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,
@@ -72,13 +102,9 @@ pub fn graph_from_ppidimacs(
 
     let number_var = split_header.nth(2).unwrap().parse::<usize>().unwrap();
     let number_clauses = split_header.next().unwrap().parse::<usize>().unwrap();
-    let mut number_probabilistic = 0;
     
     let mut g = Graph::new(state, number_var, number_clauses);
     
-    for d in distributions.iter() {
-        number_probabilistic += d.len();
-    }
     g.add_distributions(&distributions, state);
     
     // Second pass to parse the clauses
@@ -104,13 +130,7 @@ pub fn graph_from_ppidimacs(
                         for lit in clause.split_whitespace() {
                             let trail_value_index = g[VariableIndex(lit.parse::<isize>().unwrap().abs() as usize - 1)].get_value_index();
                             let literal = Literal::from_str(lit, trail_value_index);
-                            if literal.to_variable().0 < number_probabilistic {
-                                // The variable is probabilistic, put at the end of the vector
-                                literals.push(literal);
-                            } else {
-                                // The variable is deterministic, put at the beginning of the vector
-                                literals.insert(0, literal);
-                            }
+                            literals.push(literal);
                             if literal.is_positive() {
                                 if head.is_some() {
                                     panic!("The clause {} has multiple positive literals", line);
@@ -189,29 +209,3 @@ pub fn type_of_input(filepath: &PathBuf) -> FileType {
         panic!("Unexpected file format to read from. Header does not match .cnf or .fdac file: {}", header);
     }
 }
-/*
-#[cfg(test)]
-mod test_ppidimacs_parsing {
-
-    use super::graph_from_ppidimacs;
-    use crate::core::graph::VariableIndex;
-    use crate::core::trail::StateManager;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_file() {
-        let mut file = PathBuf::new();
-        let mut state = StateManager::default();
-        file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
-        let (g, _) = graph_from_ppidimacs(&file, &mut state);
-        // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
-        assert_eq!(17, g.number_nodes());
-        assert_eq!(5, g.number_distributions());
-
-        let nodes: Vec<VariableIndex> = g.nodes_iter().collect();
-        for i in 0..10 {
-            assert!(g.is_node_probabilistic(nodes[i]));
-        }
-    }
-}
-*/

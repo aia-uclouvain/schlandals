@@ -17,7 +17,6 @@
 use rug::Float;
 use std::path::PathBuf;
 use rayon::prelude::*;
-use crate::branching::*;
 use crate::Branching;
 use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
@@ -39,8 +38,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Option<Dac<R>>>
-    where R: SemiRing
+pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Option<Dac<R>>>
 {
     inputs.par_iter().map(|input| {
         // We compile the input. This can either be a .cnf file or a fdac file.
@@ -49,7 +47,7 @@ pub fn generate_dacs<R>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64
             FileType::CNF => {
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
-                let compiler = make_solver!(input, branching, epsilon, None, timeout, false);
+                let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
                 compile!(compiler)
             },
             FileType::FDAC => {

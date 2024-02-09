@@ -108,7 +108,7 @@ enum Command {
         #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
         semiring: schlandals::Semiring,
         /// The optimizer to use if `tensor` is selected as semiring
-        #[clap(long, short, default_value_t=schlandals::Optimizer::SGD, value_enum)]
+        #[clap(long, short, default_value_t=schlandals::Optimizer::Adam, value_enum)]
         optimizer: schlandals::Optimizer,
         /// The drop in the learning rate to apply at each step
         #[clap(long, default_value_t=0.75)]
