@@ -7,3 +7,4 @@ pyschlandals/pipytoken
 .vimspector.json
 ./*.cnf
 doc/book
+doc/figures/
