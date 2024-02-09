@@ -1,12 +1,12 @@
 [package]
 name = "schlandals"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 authors = ["Alexandre Dubray <alexandre.dubray@uclouvain.be>"]
 readme = "README.md"
 repository = "https://github.com/aia-uclouvain/schlandals"
-description = "A tool for doing probabilistic inference by projected weighted model counting."
+description = "A tool for probabilistic inference by projected weighted model counting."
 license = "AGPL-3.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -27,7 +27,6 @@ bitvec = ">=1.0.1"
 tch = { version = ">=0.14.0", optional = true }
 
 [dev-dependencies]
-criterion = "0.4.0"
 paste = "1.0.12"
 tempfile = "3"
 
