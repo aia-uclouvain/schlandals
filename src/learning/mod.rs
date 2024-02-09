@@ -32,7 +32,7 @@ pub struct LearnParameters {
     /// The number of epochs
     nepochs: usize,
     /// The timeout used for the compilations, in seconds
-    timeout: u64,
+    compilation_timeout: u64,
     /// The timeout used for the training loop, in seconds
     learn_timeout: u64,
     /// The loss function
@@ -53,8 +53,8 @@ pub struct LearnParameters {
 
 impl LearnParameters {
     
-    pub fn new(lr: f64, nepochs: usize, timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, early_stop_threshold: f64, early_stop_delta: f64, patience: usize) -> Self {
-        Self { lr, nepochs, timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, patience }
+    pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, early_stop_threshold: f64, early_stop_delta: f64, patience: usize) -> Self {
+        Self { lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, patience }
     }
 
     /// Returns the learning rate
@@ -68,8 +68,8 @@ impl LearnParameters {
     }
 
     /// Returns the timeout used for the compilation of the queries (in seconds)
-    pub fn timeout(&self) -> u64 {
-        self.timeout
+    pub fn compilation_timeout(&self) -> u64 {
+        self.compilation_timeout
     }
 
     /// Return the timeout used for the learning loop (in seconds)

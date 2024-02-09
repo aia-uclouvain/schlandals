@@ -19,8 +19,4 @@ problem.add_clause([16, -13, -8])
 problem.add_clause([16, -14, -10])
 problem.add_clause([-15])
 
-# For one shot compilation/evaluation, just use compile():
-print(problem.compile())
-
-# However, you might want to store the compiled AC or visualize it as a DOT file
-problem.compile(fdac="out.ac", dotfile="ac.dot")
+print(problem.solve())

@@ -27,7 +27,6 @@ use clap::ValueEnum;
 use rug::Float;
 
 use crate::core::components::ComponentExtractor;
-use crate::branching::*;
 use solvers::ProblemSolution;
 use crate::solvers::*;
 use crate::parser::*;
@@ -97,34 +96,51 @@ impl std::fmt::Display for ApproximateMethod {
     }
 }
 
+pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> ProblemSolution {
+    let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
+    search!(solver)
+}
+
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
+    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
+    match approx {
+        ApproximateMethod::Bounds => search!(solver),
+        ApproximateMethod::LDS => lds!(solver),
+    }
+}
+
+fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> ProblemSolution {
+    let mut res: Option<Dac<Float>> = compile!(compiler);
+    if let Some(ref mut dac) = &mut res {
+        dac.evaluate();
+        let proba = dac.circuit_probability().clone();
+        if let Some(f) = dotfile {
+            let out = dac.as_graphviz();
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write(out.as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+            }
+        }
+        if let Some(f) = fdac {
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write(format!("{}", dac).as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+            }
+            
+        }
+        ProblemSolution::Ok((proba.clone(), proba))
+    } else {
+        ProblemSolution::Err(Error::Timeout)
+    }
+}
+
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
             let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
-            let mut res: Option<Dac<Float>> = compile!(compiler);
-            if let Some(ref mut dac) = &mut res {
-                dac.evaluate();
-                let proba = dac.circuit_probability().clone();
-                if let Some(f) = dotfile {
-                    let out = dac.as_graphviz();
-                    let mut outfile = File::create(f).unwrap();
-                    match outfile.write(out.as_bytes()) {
-                        Ok(_) => (),
-                        Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
-                    }
-                }
-                if let Some(f) = fdac {
-                    let mut outfile = File::create(f).unwrap();
-                    match outfile.write(format!("{}", dac).as_bytes()) {
-                        Ok(_) => (),
-                        Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
-                    }
-                    
-                }
-                ProblemSolution::Ok((proba.clone(), proba.clone()))
-            } else {
-                ProblemSolution::Err(Error::Timeout)
-            }
+            _compile(compiler, fdac, dotfile)
         },
         FileType::FDAC => {
             let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
@@ -135,21 +151,27 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     }
 }
 
+pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> ProblemSolution {
+    let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
+    _compile(solver, fdac, dotfile)
+}
+
+
 pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
             }
         },
         #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer(), test_inputs, test_expected))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer(), test_inputs, test_expected))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
             }
         }
     }
@@ -183,15 +205,6 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
     learner.train(&params);
 }
-
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
-    match approx {
-        ApproximateMethod::Bounds => search!(solver),
-        ApproximateMethod::LDS => lds!(solver),
-    }
-}
-
 
 impl std::fmt::Display for Loss {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

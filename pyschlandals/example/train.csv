@@ -1,0 +1,5 @@
+Instance,Probability
+train_input/asia_xray_true.cnf,0.11029
+train_input/asia_xray_false.cnf,0.88971
+train_input/asia_dyspnea_true.cnf,0.435971
+train_input/asia_dyspnea_false.cnf,0.564029

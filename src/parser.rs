@@ -54,6 +54,36 @@ pub enum FileType {
     FDAC,
 }
 
+pub fn graph_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, state: &mut StateManager) -> Graph {
+    let mut number_var = 0;
+    for clause in clauses.iter() {
+        number_var = number_var.max(clause.iter().map(|l| l.abs() as usize).max().unwrap());
+    }
+    let mut g = Graph::new(state, number_var, clauses.len());
+    g.add_distributions(&distributions, state);
+    for clause in clauses.iter() {
+        let mut literals: Vec<Literal> = vec![];
+        let mut head: Option<Literal> = None;
+        for lit in clause.iter().copied() {
+            if lit == 0 {
+                panic!("Variables in clauses can not be 0");
+            }
+            let var = VariableIndex(lit.abs() as usize - 1);
+            let trail_value_index = g[var].get_value_index();
+            let literal = Literal::from_variable(var, lit > 0, trail_value_index);
+            if lit > 0 {
+                if head.is_some() {
+                    panic!("The clauses {} has more than one positive literal", clause.iter().map(|i| format!("{}", i)).collect::<Vec<String>>().join(" "));
+                }
+                head = Some(literal);
+            }
+            literals.push(literal);
+        }
+        g.add_clause(literals, head, state, false);
+    }
+    g
+}
+
 pub fn graph_from_ppidimacs(
     filepath: &PathBuf,
     state: &mut StateManager,

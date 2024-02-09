@@ -527,12 +527,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 return ProblemSolution::Ok((lb, ub))
             }
             let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
-            if (lb.clone() - ub.clone()).abs() <= FLOAT_CMP_THRESHOLD {
-                print!("{} {} {} {} {}", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
-                return ProblemSolution::Ok((lb, ub));
-            }
-            print!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
-            if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
+            println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
+            if ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
                 return ProblemSolution::Ok((lb, ub));
             }
             discrepancy += 1;
