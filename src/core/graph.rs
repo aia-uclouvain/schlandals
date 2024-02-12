@@ -77,14 +77,8 @@ pub struct Graph {
     distributions: Vec<Distribution>,
     /// Store for each variables the clauses it watches
     watchers: Vec<Vec<ClauseIndex>>,
-    /// Index of the first not fixed variable in the variables vector
-    min_var_unassigned: ReversibleUsize,
-    /// Index of the last not fixed variable in the variables vector
-    max_var_unassigned: ReversibleUsize,
-    /// bitwise representation of the state (fixed/not fixed) of the variables
-    variables_bit: Vec<ReversibleU64>,
-    /// bitwise representation of the state (constrained/unconstrained) of the clauses
-    clauses_bit: Vec<ReversibleU64>,
+    /// Number of clauses in the problem
+    number_clauses_problem: usize,
 }
 
 impl Graph {
@@ -95,21 +89,12 @@ impl Graph {
     pub fn new(state: &mut StateManager, n_var: usize, n_clause: usize) -> Self {
         let variables = (0..n_var).map(|i| Variable::new(i, None, None, state)).collect();
         let watchers = (0..n_var).map(|_| vec![]).collect();
-        
-        let number_word_variable = (n_var / 64) + if n_var % 64 == 0 { 0 } else { 1 };
-        let variables_bit = (0..number_word_variable).map(|_| state.manage_u64(!0)).collect();
-
-        let number_word_clause = (n_clause / 64) + if n_clause % 64 == 0 { 0 } else { 1 };
-        let clauses_bit = (0..number_word_clause).map(|_| state.manage_u64(!0)).collect();
         Self {
             variables,
             clauses: vec![],
             watchers,
             distributions: vec![],
-            min_var_unassigned: state.manage_usize(0),
-            max_var_unassigned: state.manage_usize(n_var),
-            variables_bit,
-            clauses_bit,
+            number_clauses_problem: n_clause,
         }
     }
 
@@ -160,7 +145,6 @@ impl Graph {
         state: &mut StateManager,
         is_learned: bool,
     ) -> ClauseIndex {
-
         let cid = ClauseIndex(self.clauses.len());
         // We sort the literals by probabilistic/non-probabilistic
         let number_probabilistic = literals.iter().copied().filter(|l| self[l.to_variable()].is_probabilitic()).count();
@@ -235,36 +219,12 @@ impl Graph {
         self[variable].set_value(value, state);
         self[variable].set_decision_level(level);
         self[variable].set_reason(reason, state);
-        
-        // Updating the bitwise representation of the variables state
-        let bit_vec_idx = variable.0 / 64;
-        let bit_idx = variable.0 % 64;
-        let cur_word = state.get_u64(self.variables_bit[bit_vec_idx]);
-        state.set_u64(self.variables_bit[bit_vec_idx], cur_word & !(1 << bit_idx));
 
         // If probabilistic and false, update the counter
         if !value && self[variable].is_probabilitic() {
             let distribution = self[variable].distribution().unwrap();
             self[distribution].increment_number_false(state);
             self[distribution].remove_probability_mass(self[variable].weight().unwrap(), state);
-        }
-
-        //  Update the boundaries of min/max variable not fixed if necessary
-        if variable.0 == state.get_usize(self.min_var_unassigned) {
-            let mut cur = variable;
-            let end = state.get_usize(self.max_var_unassigned);
-            while cur.0 <= end && self[cur].is_fixed(state) {
-                cur += 1;
-            }
-            state.set_usize(self.min_var_unassigned, cur.0);
-        }
-        if variable.0 == state.get_usize(self.max_var_unassigned) {
-            let mut cur = variable;
-            let end = state.get_usize(self.min_var_unassigned);
-            while cur.0 >= end && self[cur].is_fixed(state) {
-                cur -= 1;
-            }
-            state.set_usize(self.max_var_unassigned, cur.0);
         }
     }
 
@@ -296,13 +256,6 @@ impl Graph {
     /// Set a clause as unconstrained
     pub fn set_clause_unconstrained(&self, clause: ClauseIndex, state: &mut StateManager) {
         self[clause].set_unconstrained(state);
-        
-        // Update the bitwise representation
-        if !self[clause].is_learned() {
-            let id = self.clauses_bit[clause.0 / 64];
-            let w = state.get_u64(id);
-            state.set_u64(id, w & !(1 << (clause.0 % 64)));
-        }
     }
     
     // --- GETTERS --- //
@@ -310,6 +263,11 @@ impl Graph {
     /// Returns the number of clause in the graph
     pub fn number_clauses(&self) -> usize {
         self.clauses.len()
+    }
+
+    /// Returns the number of unlearned clauses (i.e., the number of clauses in the initial problem
+    pub fn number_clauses_probem(&self) -> usize {
+        self.number_clauses_problem
     }
 
     /// Returns the number of variable in the graph

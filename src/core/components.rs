@@ -133,7 +133,7 @@ impl ComponentExtractor {
             hash: 0,
             max_probability: 1.0,
             has_learned_distribution: false,
-            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses()),
+            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses_probem()),
         }];
         Self {
             clauses: nodes,
@@ -294,7 +294,7 @@ impl ComponentExtractor {
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
                 let mut has_learned_distribution = false;
-                let mut bit_repr = bits![0].repeat(g.number_clauses() + g.number_variables());
+                let mut bit_repr = bits![0].repeat(g.number_clauses_probem() + g.number_variables());
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,

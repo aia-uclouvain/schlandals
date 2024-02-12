@@ -147,9 +147,9 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
         #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer(), test_inputs, test_expected))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.timeout(), params.optimizer(), test_inputs, test_expected))
             }
         }
     }

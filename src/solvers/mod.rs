@@ -201,17 +201,14 @@ impl Eq for CacheKey {}
 pub struct SearchCacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
-    /// Discrepancy at which the node has been explored
-    discrepancy: usize,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize) -> Self {
+    pub fn new(bounds: Bounds) -> Self {
         Self {
             bounds,
-            discrepancy
         }
     }
 
@@ -219,10 +216,4 @@ impl SearchCacheEntry {
     pub fn bounds(&self) -> &Bounds {
         &self.bounds
     }
-
-    /// Returns the discrepancy of the node
-    pub fn discrepancy(&self) -> usize {
-        self.discrepancy
-    }
-
 }

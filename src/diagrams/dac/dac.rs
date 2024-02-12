@@ -37,17 +37,13 @@ use std::io::{BufRead, BufReader, Write};
 use rustc_hash::FxHashMap;
 use crate::common::*;
 
+use crate::diagrams::*;
 use crate::core::graph::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
 
 use super::node::*;
 use rug::Float;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeIndex(pub usize);
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct LayerIndex(usize);
 
 /// Structure representing the arithmetic circuit.
 pub struct Dac<R>

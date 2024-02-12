@@ -35,7 +35,7 @@
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
 use crate::diagrams::dac::dac::*;
-use crate::diagrams::dac::node::TypeNode;
+use crate::diagrams::TypeNode;
 use super::logger::Logger;
 use crate::parser::*;
 use crate::Branching;
