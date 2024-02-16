@@ -30,6 +30,7 @@ use crate::core::components::ComponentExtractor;
 use crate::branching::*;
 use solvers::ProblemSolution;
 use crate::solvers::*;
+use crate::solvers::discrepancy::*;
 use crate::parser::*;
 
 use propagator::Propagator;
@@ -184,11 +185,17 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     learner.train(&params);
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, discrepancy: DiscrepancyStrategy, discrepancy_argument: Option<usize>) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
     match approx {
         ApproximateMethod::Bounds => search!(solver),
-        ApproximateMethod::LDS => lds!(solver),
+        ApproximateMethod::LDS => {
+            if discrepancy_argument.is_none() {
+                panic!("Can not launch LDS without arguments");
+            }
+            let strategy = discrepancy.to_strategy(discrepancy_argument.unwrap());
+            lds!(solver, strategy)
+        },
     }
 }
 

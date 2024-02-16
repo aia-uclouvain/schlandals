@@ -16,6 +16,7 @@
 
 use rug::Float;
 use crate::branching::*;
+use crate::core::graph::DistributionIndex;
 
 use std::hash::Hash;
 use bitvec::prelude::*;
@@ -33,6 +34,7 @@ pub type Bounds = (Float, Float);
 
 pub mod solver;
 mod statistics;
+pub mod discrepancy;
 
 pub use solver::Solver;
 
@@ -118,16 +120,16 @@ macro_rules! search {
 }
 
 macro_rules! lds {
-    ($s:expr) => {
+    ($s:expr, $d:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.lds(),
-            GenericSolver::SMinOutDegree(mut solver) => solver.lds(),
-            GenericSolver::SMaxDegree(mut solver) => solver.lds(),
-            GenericSolver::SVSIDS(mut solver) => solver.lds(),
-            GenericSolver::QMinInDegree(mut solver) => solver.lds(),
-            GenericSolver::QMinOutDegree(mut solver) => solver.lds(),
-            GenericSolver::QMaxDegree(mut solver) => solver.lds(),
-            GenericSolver::QVSIDS(mut solver) => solver.lds(),
+            GenericSolver::SMinInDegree(mut solver) => solver.lds($d),
+            GenericSolver::SMinOutDegree(mut solver) => solver.lds($d),
+            GenericSolver::SMaxDegree(mut solver) => solver.lds($d),
+            GenericSolver::SVSIDS(mut solver) => solver.lds($d),
+            GenericSolver::QMinInDegree(mut solver) => solver.lds($d),
+            GenericSolver::QMinOutDegree(mut solver) => solver.lds($d),
+            GenericSolver::QMaxDegree(mut solver) => solver.lds($d),
+            GenericSolver::QVSIDS(mut solver) => solver.lds($d),
         }
     }
 }
@@ -201,19 +203,34 @@ impl Eq for CacheKey {}
 pub struct SearchCacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
+    /// Maximum discrepancy used for that node
+    discrepancy: usize,
+    /// The distribution on which to branch in this problem
+    distribution: Option<DistributionIndex>,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>) -> Self {
         Self {
             bounds,
+            discrepancy,
+            distribution
         }
     }
 
     /// Returns a reference to the bounds of this entry
     pub fn bounds(&self) -> &Bounds {
         &self.bounds
+    }
+
+    /// Returns the discrepancy of the node
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    pub fn distribution(&self) -> Option<DistributionIndex> {
+        self.distribution
     }
 }

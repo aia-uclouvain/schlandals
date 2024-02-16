@@ -116,6 +116,10 @@ impl Component {
     pub fn get_cache_key(&self) -> CacheKey {
         CacheKey::new(self.hash, self.bit_repr.clone())
     }
+
+    pub fn number_distribution(&self) -> usize {
+        self.number_distribution
+    }
 }
 
 impl ComponentExtractor {
@@ -363,11 +367,6 @@ impl ComponentExtractor {
         self.distributions[start..end].iter().copied()
     }
 
-    /// Returns the number of distributions in the component
-    pub fn component_number_distribution(&self, component: ComponentIndex) -> usize {
-        self.components[component.0].number_distribution
-    }
-    
     /// Adds a clause to a component. This function is called when the solver encounters an UNSAT and needs to learn a clause.
     /// During this process we ensure that the learned clause is horn and can be safely added in the component for further detections.
     pub fn add_clause_to_component(&mut self, component: ComponentIndex, clause: ClauseIndex) {

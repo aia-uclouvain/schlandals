@@ -248,7 +248,7 @@ impl Graph {
 
     /// Decrements the number of constrained clauses a distribution is in
     pub fn decrement_distribution_constrained_clause_counter(&self, distribution: DistributionIndex, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.distributions[distribution.0].number_clause_unconstrained)
+        state.decrement_usize(self.distributions[distribution.0].number_clause_unconstrained())
     }
     
     // --- QUERIES --- //

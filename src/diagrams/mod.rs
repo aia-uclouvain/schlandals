@@ -16,7 +16,6 @@
 
 pub mod dac;
 pub mod semiring;
-pub mod partial_diagram;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// Types of node in an AC
