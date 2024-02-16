@@ -115,13 +115,14 @@ impl LubyDiscrepancy {
 impl Discrepancy for LubyDiscrepancy {
 
     fn update_discrepancy(&mut self) {
-        if (self.iter + 1) % 2 == 0 {
-            self.discrepancy = 2_usize.pow((self.iter + 1).ilog2()) * self.multiplier;
+        let increment = if (self.iter + 1) % 2 == 0 {
+            2_usize.pow((self.iter + 1).ilog2()) * self.multiplier
         } else {
             let index = self.iter - 2_usize.pow((self.iter as u32 / 2 ) - 1);
-            self.discrepancy = self.increments[index];
-        }
-        self.increments.push(self.discrepancy);
+            self.increments[index]
+        };
+        self.increments.push(increment);
+        self.discrepancy += increment;
     }
 
     fn discrepancy(&self) -> usize {
