@@ -513,17 +513,23 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let discrepancy = strategy.discrepancy();
             match self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy) {
                 Some(((p_in, p_out), _)) => {
-                    let lb = p_in * preproc_in.clone();
-                    let ub: Float = 1.0 - (preproc_out + p_out * preproc_in.clone());
-                    let best_epsilon = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
-                    best_lb = lb.clone();
-                    best_ub = ub.clone();
-                    println!("{} {} {} {}", discrepancy, lb, ub, best_epsilon);
-                    let proba = (lb*ub).sqrt();
-                    if best_epsilon <= target_epsilon + 0.0001{
-                        return ProblemSolution::Ok(proba);
+                    let lb = (p_in * preproc_in.clone()).max(&f128!(0.0));
+                    let removed = preproc_out + p_out * preproc_in.clone();
+                    let ub: Float = 1.0 - if removed <= 1.0 { removed } else { f128!(1.0) };
+                    if float_eq!(lb.clone(), ub.clone()) {
+                        println!("{} {} {} {}", discrepancy, lb, lb, 0.0);
+                        return ProblemSolution::Ok(lb);
+                    } else {
+                        let best_epsilon = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
+                        best_lb = lb.clone();
+                        best_ub = ub.clone();
+                        println!("{} {} {} {}", discrepancy, lb, ub, best_epsilon);
+                        let proba = (lb*ub).sqrt();
+                        if best_epsilon <= target_epsilon + 0.0001{
+                            return ProblemSolution::Ok(proba);
+                        }
+                        strategy.update_discrepancy();
                     }
-                    strategy.update_discrepancy();
                 },
                 None => {
                     let proba = (best_lb * best_ub).sqrt();
