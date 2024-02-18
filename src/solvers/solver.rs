@@ -140,7 +140,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             Some(((p_in, p_out), _)) => {
                 let lb = p_in * preproc_in.clone();
                 let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-                println!("lb {} ub {}", lb, ub);
+                print!("{} {}", lb, ub);
                 let proba = (lb*ub).sqrt();
                 self.statistics.print();
                 ProblemSolution::Ok(proba)
@@ -516,16 +516,18 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     let lb = (p_in * preproc_in.clone()).max(&f128!(0.0));
                     let removed = preproc_out + p_out * preproc_in.clone();
                     let ub: Float = 1.0 - if removed <= 1.0 { removed } else { f128!(1.0) };
+                    let best_epsilon = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
                     if float_eq!(lb.clone(), ub.clone()) {
-                        println!("{} {} {} {}", discrepancy, lb, lb, 0.0);
+                        assert!(best_epsilon <= 0.0001);
+                        print!("{} {} {} {} {}", discrepancy, lb, ub, 0.0, self.start.elapsed().as_secs());
                         return ProblemSolution::Ok(lb);
                     } else {
-                        let best_epsilon = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
                         best_lb = lb.clone();
                         best_ub = ub.clone();
-                        println!("{} {} {} {}", discrepancy, lb, ub, best_epsilon);
+                        print!("{} {} {} {} {}", discrepancy, lb, ub, best_epsilon, self.start.elapsed().as_secs());
                         let proba = (lb*ub).sqrt();
-                        if best_epsilon <= target_epsilon + 0.0001{
+                        //if best_epsilon <= target_epsilon + 0.0001{
+                        if best_epsilon < 0.01 {
                             return ProblemSolution::Ok(proba);
                         }
                         strategy.update_discrepancy();

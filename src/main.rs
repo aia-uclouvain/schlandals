@@ -159,7 +159,7 @@ fn main() {
                         Error::Timeout => println!("Timeout"),
                     };
                 },
-                Ok(p) => println!("{}", p),
+                Ok(p) => (), //println!("{}", p),
             };
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon} => {

@@ -22,7 +22,7 @@ macro_rules! f128 {
 
 macro_rules! float_eq {
     ($x:expr, $y:expr) => {
-        ($x - $y).abs() <= 0.00000001
+        ($x - $y).abs() <= 0.000001
     }
 }
 
