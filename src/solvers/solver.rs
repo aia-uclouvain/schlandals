@@ -331,6 +331,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// Compiles the problem represented by this solver into a (potentially partial) arithmetic
     /// circuit. Return None if the problem is UNSAT.
     pub fn compile<R: SemiRing>(&mut self) -> Option<Dac<R>> {
+        self.start = Instant::now();
         // Same as for the search, first we preprocess
         self.propagator.init(self.graph.number_clauses());
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
@@ -490,6 +491,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     pub fn lds(&mut self, mut strategy: Box<dyn Discrepancy>) -> ProblemSolution {
+        self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
@@ -505,7 +507,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        let target_epsilon = self.epsilon;
 
         let mut best_lb = f128!(0.0);
         let mut best_ub = f128!(1.0);
@@ -516,18 +517,15 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     let lb = (p_in * preproc_in.clone()).max(&f128!(0.0));
                     let removed = preproc_out + p_out * preproc_in.clone();
                     let ub: Float = 1.0 - if removed <= 1.0 { removed } else { f128!(1.0) };
-                    let best_epsilon = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
                     if float_eq!(lb.clone(), ub.clone()) {
-                        assert!(best_epsilon <= 0.0001);
                         print!("{} {} {} {} {}", discrepancy, lb, ub, 0.0, self.start.elapsed().as_secs());
                         return ProblemSolution::Ok(lb);
                     } else {
                         best_lb = lb.clone();
                         best_ub = ub.clone();
-                        print!("{} {} {} {} {}", discrepancy, lb, ub, best_epsilon, self.start.elapsed().as_secs());
-                        let proba = (lb*ub).sqrt();
-                        //if best_epsilon <= target_epsilon + 0.0001{
-                        if best_epsilon < 0.01 {
+                        print!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
+                        if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
+                            let proba = (lb*ub).sqrt();
                             return ProblemSolution::Ok(proba);
                         }
                         strategy.update_discrepancy();
