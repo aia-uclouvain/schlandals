@@ -104,9 +104,9 @@ impl LubyDiscrepancy {
 
     pub fn new(multiplier: usize) -> Self {
         Self {
-            discrepancy: 1,
+            discrepancy: multiplier,
             iter: 1,
-            increments: vec![],
+            increments: vec![1],
             multiplier,
         }
     }
@@ -115,14 +115,15 @@ impl LubyDiscrepancy {
 impl Discrepancy for LubyDiscrepancy {
 
     fn update_discrepancy(&mut self) {
-        let increment = if (self.iter + 1) % 2 == 0 {
-            2_usize.pow((self.iter + 1).ilog2()) * self.multiplier
+        self.iter += 1;
+        let increment = if (self.iter + 1).is_power_of_two() {
+            2_usize.pow((self.iter + 1).ilog2() - 1)
         } else {
-            let index = self.iter - 2_usize.pow((self.iter as u32 / 2 ) - 1);
+            let index = self.iter - 2_usize.pow(self.iter.ilog2());
             self.increments[index]
         };
         self.increments.push(increment);
-        self.discrepancy += increment;
+        self.discrepancy += increment*self.multiplier;
     }
 
     fn discrepancy(&self) -> usize {
