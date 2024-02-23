@@ -122,7 +122,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
                     }
                     
                 }
-                ProblemSolution::Ok(proba)
+                ProblemSolution::Ok((proba.clone(), proba.clone()))
             } else {
                 ProblemSolution::Err(Error::Timeout)
             }
@@ -131,7 +131,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
             let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
             dac.evaluate();
             let proba = dac.circuit_probability().clone();
-            ProblemSolution::Ok(proba)
+            ProblemSolution::Ok((proba.clone(), proba.clone()))
         },
     }
 }

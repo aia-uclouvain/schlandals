@@ -29,6 +29,7 @@ use crate::PEAK_ALLOC;
 use super::discrepancy::Discrepancy;
 use super::statistics::Statistics;
 use rug::Float;
+use rug::Assign;
 use super::*;
 use std::time::Instant;
 
@@ -140,9 +141,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let lb = p_in * preproc_in.clone();
         let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
         print!("{} {}", lb, ub);
-        let proba = (lb*ub).sqrt();
         self.statistics.print();
-        ProblemSolution::Ok(proba)
+        ProblemSolution::Ok((lb, ub))
     }
 
     /// Split the component into multiple sub-components and solve each of them
@@ -168,8 +168,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.statistics.decomposition(number_components);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
+                // If the solver has no more time, assume that there are no solutions in the
+                // remaining of the components. This way we always produce a valid lower/upper
+                // bound.
                 if self.start.elapsed().as_secs() >= self.timeout {
-                    break
+                    return ((f128!(0.0), f128!(0.0)), level - 1);
                 }
                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
@@ -242,10 +245,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if child_id > discrepancy {
                     break;
                 }
+                let v_weight = self.graph[variable].weight().unwrap();
                 if self.start.elapsed().as_secs() >= self.timeout {
+                    // Same as above, no more time so we assume that there are no solution in this
+                    // branch.
                     break;
                 }
-                let v_weight = self.graph[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(backtrack_level) => {
@@ -490,6 +495,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
+        let mut best_lb = f128!(0.0);
+        let mut best_ub = f128!(1.0);
 
         loop {
             let discrepancy = strategy.discrepancy();
@@ -497,14 +504,19 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let lb = (p_in * preproc_in.clone()).max(&f128!(0.0));
             let removed = preproc_out + p_out * preproc_in.clone();
             let ub: Float = 1.0 - if removed <= 1.0 { removed } else { f128!(1.0) };
+            best_lb.assign(&lb);
+            best_ub.assign(&ub);
+            if self.start.elapsed().as_secs() >= self.timeout {
+                println!("{} {} {} {}", discrepancy, best_lb, best_ub, self.start.elapsed().as_secs());
+                return ProblemSolution::Ok((best_lb, best_ub))
+            }
             if float_eq!(lb.clone(), ub.clone()) {
                 println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
-                return ProblemSolution::Ok(lb);
+                return ProblemSolution::Ok((lb, ub));
             } else {
                 println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
                 if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
-                    let proba = (lb*ub).sqrt();
-                    return ProblemSolution::Ok(proba);
+                    return ProblemSolution::Ok((lb, ub));
                 }
                 strategy.update_discrepancy();
             }

@@ -27,10 +27,9 @@ pub enum Error {
     Timeout,
 }
 
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Result<Float, Error>;
-
 pub type Bounds = (Float, Float);
+/// Type alias used for the solution of the problem, which is either a Float or UNSAT
+pub type ProblemSolution = Result<Bounds, Error>;
 
 pub mod solver;
 mod statistics;

@@ -174,7 +174,7 @@ fn main() {
                         Error::Timeout => println!("Timeout"),
                     };
                 },
-                Ok(p) => println!("{}", p),
+                Ok(p) => {},//println!("{}", p),
             };
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
