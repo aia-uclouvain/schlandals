@@ -206,7 +206,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             },
             Some(cache_entry) => {
                 let (p_in, p_out) = cache_entry.bounds();
-                if cache_entry.discrepancy() > discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
+                if cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
                     (cache_entry.clone(), level)
                 } else {
                     let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, cache_entry.distribution());
@@ -501,9 +501,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         loop {
             let discrepancy = strategy.discrepancy();
             let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
-            let lb = (p_in * preproc_in.clone()).max(&f128!(0.0));
+            let lb = p_in * preproc_in.clone();
             let removed = preproc_out + p_out * preproc_in.clone();
-            let ub: Float = 1.0 - if removed <= 1.0 { removed } else { f128!(1.0) };
+            let ub: Float = 1.0 -  removed;
             best_lb.assign(&lb);
             best_ub.assign(&ub);
             if self.start.elapsed().as_secs() >= self.timeout {
