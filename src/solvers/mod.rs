@@ -119,16 +119,16 @@ macro_rules! search {
 }
 
 macro_rules! lds {
-    ($s:expr, $d:expr) => {
+    ($s:expr, $d:expr, $ds:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.lds($d),
-            GenericSolver::SMinOutDegree(mut solver) => solver.lds($d),
-            GenericSolver::SMaxDegree(mut solver) => solver.lds($d),
-            GenericSolver::SVSIDS(mut solver) => solver.lds($d),
-            GenericSolver::QMinInDegree(mut solver) => solver.lds($d),
-            GenericSolver::QMinOutDegree(mut solver) => solver.lds($d),
-            GenericSolver::QMaxDegree(mut solver) => solver.lds($d),
-            GenericSolver::QVSIDS(mut solver) => solver.lds($d),
+            GenericSolver::SMinInDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::SMinOutDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::SMaxDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::SVSIDS(mut solver) => solver.lds($d,$ds),
+            GenericSolver::QMinInDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::QMinOutDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::QMaxDegree(mut solver) => solver.lds($d,$ds),
+            GenericSolver::QVSIDS(mut solver) => solver.lds($d,$ds),
         }
     }
 }

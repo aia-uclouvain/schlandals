@@ -78,6 +78,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     timeout: u64,
     /// Start time of the solver
     start: Instant,
+    discrepancy_threshold: f64,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -105,6 +106,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             statistics: Statistics::default(),
             timeout,
             start: Instant::now(),
+            discrepancy_threshold: 1.0,
         }
     }
 
@@ -206,7 +208,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             },
             Some(cache_entry) => {
                 let (p_in, p_out) = cache_entry.bounds();
-                if cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
+                let ub = self.component_extractor[component].max_probability() - p_out.clone();
+                let d_ratio = p_in.clone() / ub;
+                if d_ratio > self.discrepancy_threshold || cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
                     (cache_entry.clone(), level)
                 } else {
                     let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, cache_entry.distribution());
@@ -478,8 +482,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 // --- LDS ---
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    pub fn lds(&mut self, mut strategy: Box<dyn Discrepancy>) -> ProblemSolution {
+    pub fn lds(&mut self, mut strategy: Box<dyn Discrepancy>, discrepancy_threshold: f64) -> ProblemSolution {
         self.start = Instant::now();
+        self.discrepancy_threshold = discrepancy_threshold;
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
@@ -499,7 +504,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut best_ub = f128!(1.0);
 
         loop {
-            let discrepancy = strategy.discrepancy();
+            let discrepancy = if best_lb.clone() / best_ub.clone() < discrepancy_threshold {
+                strategy.discrepancy()
+            } else {
+                self.discrepancy_threshold = 1.0;
+                usize::MAX
+            };
             let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
             let lb = p_in * preproc_in.clone();
             let removed = preproc_out + p_out * preproc_in.clone();
@@ -510,16 +520,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 println!("{} {} {} {}", discrepancy, best_lb, best_ub, self.start.elapsed().as_secs());
                 return ProblemSolution::Ok((best_lb, best_ub))
             }
-            if float_eq!(lb.clone(), ub.clone()) {
-                println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
+            println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
+            if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
                 return ProblemSolution::Ok((lb, ub));
-            } else {
-                println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
-                if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
-                    return ProblemSolution::Ok((lb, ub));
-                }
-                strategy.update_discrepancy();
             }
+            strategy.update_discrepancy();
         }
     }
 }

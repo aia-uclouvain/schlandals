@@ -16,7 +16,6 @@
 
 use clap::{Parser, Subcommand};
 use schlandals::ApproximateMethod;
-use schlandals::solvers::discrepancy::DiscrepancyStrategy;
 use std::path::PathBuf;
 use std::process;
 use schlandals::learning::LearnParameters;
@@ -53,13 +52,9 @@ enum Command {
         /// If epsilon present, use the appropriate approximate method
         #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
         approx: ApproximateMethod,
-        /// The increment strategy for LDS
-        #[clap(short, long, value_enum, default_value_t=DiscrepancyStrategy::Exponential)]
-        discrepancy: DiscrepancyStrategy,
-        /// The parameter of the discrepancy strategy. If monotonic, the increment in discrepancy;
-        /// if exponential, the base of the exponent, and if luby, the multiplier of the sequence.
-        #[clap(short, long)]
-        lds_arg: Option<usize>,
+        /// The ratio (lower bound / upper bound) at which the LDS switch to a full solving
+        #[clap(long, default_value_t=1.0)]
+        discrepancy_threshold: f64,
     },
     /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
@@ -151,8 +146,8 @@ fn main() {
         None => u64::MAX,
     };
     match app.command {
-        Command::Search { input, branching, statistics, memory , epsilon, approx, discrepancy, lds_arg} => {
-            match schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, discrepancy, lds_arg) {
+        Command::Search { input, branching, statistics, memory , epsilon, approx, discrepancy_threshold} => {
+            match schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, discrepancy_threshold) {
                 Err(e) => {
                     match e {
                         Error::Unsat => println!("Model UNSAT"),
