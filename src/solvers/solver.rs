@@ -446,7 +446,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             for literal in self.propagator.assignments_iter(&self.state) {
                 let variable = literal.to_variable();
                 // Only take probabilistic variables set to true
-                if self.graph[variable].is_probabilitic() && literal.is_positive() {
+                if self.graph[variable].is_probabilitic() && literal.is_positive() && self.graph[variable].weight().unwrap() != 1.0 {
                     let distribution = self.graph[variable].distribution().unwrap();
                     // This represent which "probability index" is send to the node
                     let value_index = variable.0 - self.graph[distribution].start().0;
