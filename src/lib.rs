@@ -30,7 +30,6 @@ use crate::core::components::ComponentExtractor;
 use crate::branching::*;
 use solvers::ProblemSolution;
 use crate::solvers::*;
-use crate::solvers::discrepancy::*;
 use crate::parser::*;
 
 use propagator::Propagator;
@@ -190,8 +189,7 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
     match approx {
         ApproximateMethod::Bounds => search!(solver),
         ApproximateMethod::LDS => {
-            let strategy = Box::new(MonotonicDiscrepancy::new(1));
-            lds!(solver, strategy, discrepancy_threshold)
+            lds!(solver, discrepancy_threshold)
         },
     }
 }

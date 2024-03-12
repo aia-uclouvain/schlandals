@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, Graph};
+use crate::core::graph::{DistributionIndex, ClauseIndex, Graph};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
@@ -26,10 +26,8 @@ use crate::common::*;
 use crate::diagrams::NodeIndex;
 use crate::diagrams::dac::dac::Dac;
 use crate::PEAK_ALLOC;
-use super::discrepancy::Discrepancy;
 use super::statistics::Statistics;
-use rug::Float;
-use rug::Assign;
+use rug::{Assign, Float};
 use super::*;
 use std::time::Instant;
 
@@ -69,7 +67,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Memory limit, in megabytes, when running a search over a sub-problem
     mlimit: u64,
     /// Cache used in the compilation to store the nodes associated with each sub-problem
-    compilation_cache: FxHashMap<CacheKey, Option<NodeIndex>>,
+    compilation_cache: FxHashMap<CacheKey, NodeIndex>,
     /// Cache used during the search to store bounds associated with sub-problems
     search_cache: FxHashMap<CacheKey, SearchCacheEntry>,
     /// Statistics gathered during the solving
@@ -79,6 +77,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Start time of the solver
     start: Instant,
     discrepancy_threshold: f64,
+    exploring_new_search_space: bool,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -107,6 +106,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             timeout,
             start: Instant::now(),
             discrepancy_threshold: 1.0,
+            exploring_new_search_space: true,
         }
     }
 
@@ -201,19 +201,22 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let cache_key = self.component_extractor[component].get_cache_key();
         match self.search_cache.get(&cache_key) {
             None => {
+                let ret = self.exploring_new_search_space;
+                self.exploring_new_search_space = true;
                 self.statistics.cache_miss();
-                let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, None);
+                let subproblem_limit = self.graph.last_clause_subproblem();
+                let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, None, subproblem_limit);
                 self.search_cache.insert(cache_key, solution.clone());
+                self.exploring_new_search_space = ret;
                 (solution, backtrack_level)
             },
             Some(cache_entry) => {
                 let (p_in, p_out) = cache_entry.bounds();
-                let ub = self.component_extractor[component].max_probability() - p_out.clone();
-                let d_ratio = p_in.clone() / ub;
-                if d_ratio > self.discrepancy_threshold || cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
+                if cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
                     (cache_entry.clone(), level)
                 } else {
-                    let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, cache_entry.distribution());
+                    let subproblem_limit = if !self.exploring_new_search_space { cache_entry.subproblem_limit() } else { self.graph.last_clause_subproblem() };
+                    let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, cache_entry.distribution(), subproblem_limit);
                     self.search_cache.insert(cache_key, new_solution.clone());
                     (new_solution, backtrack_level)
                 }
@@ -225,7 +228,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// resulting from the branching, recursively.
     /// Returns the bounds of the sub-problem as well as the level to which the solver must
     /// backtrack.
-    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize, choice: Option<DistributionIndex>) -> SearchResult {
+    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize, choice: Option<DistributionIndex>, subproblem_limit: ClauseIndex) -> SearchResult {
         let decision = if choice.is_some() {
             choice
         } else {
@@ -246,7 +249,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if self.graph[variable].is_fixed(&self.state) {
                     continue;
                 }
-                if child_id > discrepancy {
+                if child_id == discrepancy {
                     break;
                 }
                 let v_weight = self.graph[variable].weight().unwrap();
@@ -256,7 +259,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     break;
                 }
                 self.state.save_state();
-                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level, subproblem_limit) {
                     Err(backtrack_level) => {
                         self.statistics.unsat();
                         // The assignment triggered an UNSAT, so the whole sub-problem is part of
@@ -266,7 +269,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), discrepancy, Some(distribution)), backtrack_level);
+                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution), subproblem_limit), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -283,19 +286,20 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // bounds are close enough
                         if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                             self.restore();
-                            return (SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution)), level);
+                            return (SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution), subproblem_limit), level);
                         }
                         if p != 0.0 {
-                            let ((child_p_in, child_p_out), backtrack_level) = self.solve_components(component, level + 1, bound_factor, discrepancy - child_id);
+                            let new_discrepancy = discrepancy - child_id;
+                            let ((child_p_in, child_p_out), backtrack_level) = self.solve_components(component, level + 1, bound_factor, new_discrepancy);
                             if backtrack_level != level {
                                 self.restore();
-                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), discrepancy, Some(distribution)), backtrack_level);
+                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution), subproblem_limit), backtrack_level);
                             }
                             p_in += child_p_in * &p;
                             p_out += child_p_out * &p;
                             if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                                 self.restore();
-                                return (SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution)), level);
+                                return (SearchCacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), subproblem_limit), level);
                             }
                         }
                     }
@@ -303,10 +307,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 self.restore();
                 child_id += 1;
             }
-            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution));
+            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution), subproblem_limit);
             (cache_entry, level)
         } else {
-            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), discrepancy, None), level)
+            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), usize::MAX, None, subproblem_limit), level)
         }
     }
 
@@ -356,11 +360,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let cache_key = self.component_extractor[component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
-                        if let Some(n) = node {
+                        if node.0 != 0 {
                             if prod_node.is_none() {
                                 prod_node = Some(dac.add_prod_node());
                             }
-                            dac.add_node_output(*n, prod_node.unwrap());
+                            dac.add_node_output(*node, prod_node.unwrap());
                         } else {
                             return None;
                         }
@@ -373,9 +377,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                         prod_node = Some(dac.add_prod_node());
                                     }
                                     dac.add_node_output(child, prod_node.unwrap());
-                                    self.compilation_cache.insert(cache_key, Some(child));
+                                    self.compilation_cache.insert(cache_key, child);
                                 } else {
-                                    self.compilation_cache.insert(cache_key, None);
+                                    self.compilation_cache.insert(cache_key, NodeIndex(0));
                                     return None;
                                 }
                             } else {
@@ -416,7 +420,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 return None;
             }
             self.state.save_state();
-            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
+            let lim = self.graph.last_clause_subproblem();
+            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level, lim) {
                 Err(backtrack_level) => {
                     if backtrack_level != level {
                         return None;
@@ -482,7 +487,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 // --- LDS ---
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    pub fn lds(&mut self, mut strategy: Box<dyn Discrepancy>, discrepancy_threshold: f64) -> ProblemSolution {
+    pub fn lds(&mut self, discrepancy_threshold: f64) -> ProblemSolution {
+        let epsilon_cmp = self.epsilon;
+        self.epsilon = 0.0;
         self.start = Instant::now();
         self.discrepancy_threshold = discrepancy_threshold;
         self.propagator.init(self.graph.number_clauses());
@@ -502,14 +509,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.propagator.set_forced();
         let mut best_lb = f128!(0.0);
         let mut best_ub = f128!(1.0);
-
+        let mut discrepancy = 1;
         loop {
-            let discrepancy = if best_lb.clone() / best_ub.clone() < discrepancy_threshold {
-                strategy.discrepancy()
-            } else {
-                self.discrepancy_threshold = 1.0;
-                usize::MAX
-            };
+            //self.search_cache.clear();
+            self.exploring_new_search_space = false;
             let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
             let lb = p_in * preproc_in.clone();
             let removed = preproc_out + p_out * preproc_in.clone();
@@ -520,11 +523,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 println!("{} {} {} {}", discrepancy, best_lb, best_ub, self.start.elapsed().as_secs());
                 return ProblemSolution::Ok((best_lb, best_ub))
             }
-            println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
-            if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
+            println!("{} {} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs(), (ub.clone() / lb.clone()).sqrt() - 1);
+            self.statistics.print();
+            if ub <= lb.clone()*(1.0 + epsilon_cmp).powf(2.0) + FLOAT_CMP_THRESHOLD {
+                self.statistics.print();
                 return ProblemSolution::Ok((lb, ub));
             }
-            strategy.update_discrepancy();
+            discrepancy = if lb.clone() / ub.clone() > discrepancy_threshold { usize::MAX } else { discrepancy + 1};
         }
     }
 }

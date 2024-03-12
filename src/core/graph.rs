@@ -265,6 +265,10 @@ impl Graph {
         self.clauses.len()
     }
 
+    pub fn last_clause_subproblem(&self) -> ClauseIndex {
+        ClauseIndex(self.clauses.len() - 1)
+    }
+
     /// Returns the number of unlearned clauses (i.e., the number of clauses in the initial problem
     pub fn number_clauses_probem(&self) -> usize {
         self.number_clauses_problem

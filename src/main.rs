@@ -154,7 +154,7 @@ fn main() {
                         Error::Timeout => println!("Timeout"),
                     };
                 },
-                Ok(p) => (), //println!("{}", p),
+                Ok(_p) => (), //println!("{}", p),
             };
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon} => {
@@ -169,7 +169,7 @@ fn main() {
                         Error::Timeout => println!("Timeout"),
                     };
                 },
-                Ok(p) => {},//println!("{}", p),
+                Ok(_p) => {},//println!("{}", p),
             };
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 

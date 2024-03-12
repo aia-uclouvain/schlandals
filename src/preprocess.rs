@@ -59,7 +59,7 @@ where
 
         for variable in self.graph.variables_iter() {
             if self.graph[variable].is_probabilitic() && self.graph[variable].weight().unwrap() == 1.0 {
-                self.propagator.add_to_propagation_stack(variable, true, None);
+                self.propagator.add_to_propagation_stack(variable, true, 0, None);
             }
         }
         
@@ -67,10 +67,10 @@ where
         for clause in self.graph.clauses_iter() {
             if self.graph[clause].is_unit(self.state) {
                 let l = self.graph[clause].get_unit_assigment(self.state);
-                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), None);
+                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
             }
         }
-        match self.propagator.propagate(self.graph, self.state, ComponentIndex(0), self.component_extractor, 0, false) {
+        match self.propagator.propagate(self.graph, self.state, ComponentIndex(0), self.component_extractor, 0, false, self.graph.last_clause_subproblem()) {
             Err(_) => return None,
             Ok(_) => {
                 p *= self.propagator.get_propagation_prob();
@@ -79,10 +79,11 @@ where
         if backbone {
             let backbone = self.identify_backbone();
             for (variable, value) in backbone.iter().copied() {
-                self.propagator.add_to_propagation_stack(variable, value, None);
+                self.propagator.add_to_propagation_stack(variable, value, 0, None);
             }
             if !backbone.is_empty() {
-                self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, false).unwrap();
+                let limit = self.graph.last_clause_subproblem();
+                self.propagator.propagate(&mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, false, limit).unwrap();
                 p *= self.propagator.get_propagation_prob().clone();
             }
         }
@@ -95,10 +96,11 @@ where
             if !self.graph[variable].is_probabilitic() && !self.graph[variable].is_fixed(&self.state) {
                 self.state.save_state();
                 for (v, value) in backbone.iter().copied() {
-                    self.propagator.add_to_propagation_stack(v, value, None)
+                    self.propagator.add_to_propagation_stack(v, value, 0, None)
                 }
-                self.propagator.add_to_propagation_stack(variable, true, None);
-                let sat_true = match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
+                self.propagator.add_to_propagation_stack(variable, true, 0, None);
+                let lim = self.graph.last_clause_subproblem();
+                let sat_true = match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, lim) {
                     Err(_) => false,
                     Ok(_) => {
                         self.sat()
@@ -108,9 +110,10 @@ where
 
                 self.state.save_state();
                 for (v, value) in backbone.iter().copied() {
-                    self.propagator.add_to_propagation_stack(v, value, None)
+                    self.propagator.add_to_propagation_stack(v, value, 0, None)
                 }
-                let sat_false = match self.propagator.propagate_variable(variable, false, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
+                let lim = self.graph.last_clause_subproblem();
+                let sat_false = match self.propagator.propagate_variable(variable, false, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, lim) {
                     Err(_) => false,
                     Ok(_) => {
                         self.sat()
@@ -138,7 +141,8 @@ where
         if let Some(distribution) = decision {
             for variable in self.graph[distribution].iter_variables() {
                 self.state.save_state();
-                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0) {
+                let lim = self.graph.last_clause_subproblem();
+                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, ComponentIndex(0), &mut self.component_extractor, 0, lim) {
                     Err(_) => {
                     }
                     Ok(_) => {

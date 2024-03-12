@@ -16,7 +16,7 @@
 
 use rug::Float;
 use crate::branching::*;
-use crate::core::graph::DistributionIndex;
+use crate::core::graph::{DistributionIndex, ClauseIndex};
 
 use std::hash::Hash;
 use bitvec::prelude::*;
@@ -33,7 +33,6 @@ pub type ProblemSolution = Result<Bounds, Error>;
 
 pub mod solver;
 mod statistics;
-pub mod discrepancy;
 
 pub use solver::Solver;
 
@@ -119,16 +118,16 @@ macro_rules! search {
 }
 
 macro_rules! lds {
-    ($s:expr, $d:expr, $ds:expr) => {
+    ($s:expr, $ds:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::SMinOutDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::SMaxDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::SVSIDS(mut solver) => solver.lds($d,$ds),
-            GenericSolver::QMinInDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::QMinOutDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::QMaxDegree(mut solver) => solver.lds($d,$ds),
-            GenericSolver::QVSIDS(mut solver) => solver.lds($d,$ds),
+            GenericSolver::SMinInDegree(mut solver) => solver.lds($ds),
+            GenericSolver::SMinOutDegree(mut solver) => solver.lds($ds),
+            GenericSolver::SMaxDegree(mut solver) => solver.lds($ds),
+            GenericSolver::SVSIDS(mut solver) => solver.lds($ds),
+            GenericSolver::QMinInDegree(mut solver) => solver.lds($ds),
+            GenericSolver::QMinOutDegree(mut solver) => solver.lds($ds),
+            GenericSolver::QMaxDegree(mut solver) => solver.lds($ds),
+            GenericSolver::QVSIDS(mut solver) => solver.lds($ds),
         }
     }
 }
@@ -206,16 +205,18 @@ pub struct SearchCacheEntry {
     discrepancy: usize,
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
+    subproblem_limit: ClauseIndex,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, subproblem_limit: ClauseIndex) -> Self {
         Self {
             bounds,
             discrepancy,
-            distribution
+            distribution,
+            subproblem_limit
         }
     }
 
@@ -231,5 +232,9 @@ impl SearchCacheEntry {
 
     pub fn distribution(&self) -> Option<DistributionIndex> {
         self.distribution
+    }
+
+    pub fn subproblem_limit(&self) -> ClauseIndex {
+        self.subproblem_limit
     }
 }
