@@ -94,6 +94,14 @@ impl Distribution {
     pub fn start(&self) -> VariableIndex {
         self.first
     }
+
+    pub fn set_start(&mut self, start: VariableIndex) {
+        self.first = start;
+    }
+
+    pub fn set_size(&mut self, size: usize) {
+        self.size = size;
+    }
     
     pub fn is_constrained(&self, state: &StateManager) -> bool {
         state.get_bool(self.constrained)
@@ -124,6 +132,8 @@ impl Distribution {
     pub fn number_clause_unconstrained(&self) -> ReversibleUsize {
         self.number_clause_unconstrained
     }
+
+    pub fn size(&self) -> usize { self.size }
 
     // --- ITERATOR --- //
 

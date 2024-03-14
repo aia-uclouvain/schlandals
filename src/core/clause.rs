@@ -29,6 +29,7 @@ use super::graph::ClauseIndex;
 use super::sparse_set::SparseSet;
 use super::watched_vector::WatchedVector;
 use super::literal::Literal;
+use rustc_hash::FxHashMap;
 
 use super::graph::{DistributionIndex, VariableIndex, Graph};
 
@@ -48,6 +49,7 @@ pub struct Clause {
     hash: u64,
     /// Has the clause been learned during the search
     is_learned: bool,
+    in_degree: usize,
 }
 
 impl Clause {
@@ -60,7 +62,8 @@ impl Clause {
             children: SparseSet::new(state),
             parents: SparseSet::new(state),
             hash: rand::random(),
-            is_learned
+            is_learned,
+            in_degree: 0,
         }
     }
     
@@ -226,6 +229,41 @@ impl Clause {
     /// Returns an iterator on the probabilistic varaibles in the clause
     pub fn iter_probabilistic_variables(&self) -> impl Iterator<Item = VariableIndex> + '_ {
         self.literals.iter_end().map(|l| l.to_variable())
+    }
+
+    pub fn clear(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
+        self.children.clear(map, state);
+        self.parents.clear(map, state);
+    }
+
+    pub fn clear_literals(&mut self, map: &FxHashMap<VariableIndex, VariableIndex>) {
+        if let Some(lit) = self.head() {
+            let variable = lit.to_variable();
+            if let Some(new_variable) = map.get(&variable).copied() {
+                let pos = lit.is_positive();
+                let idx = lit.trail_index();
+                self.head = Some(Literal::from_variable(new_variable, pos, idx));
+            } else {
+                self.head = None;
+            }
+        }
+        self.literals.reduce(map);
+    }
+
+    pub fn remove_literals(&mut self, variable: VariableIndex) {
+        self.literals.remove(variable);
+    }
+
+    pub fn get_watchers(&self) -> Vec<Option<VariableIndex>> {
+        self.literals.get_watchers()
+    }
+
+    pub fn increment_in_degree(&mut self) {
+        self.in_degree += 1;
+    }
+
+    pub fn in_degree(&self) -> usize {
+        self.in_degree
     }
     
 }

@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, ClauseIndex, Graph};
+use crate::core::graph::{DistributionIndex, Graph};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
@@ -122,8 +122,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-        let preproc = preprocessor.preprocess(false);
+        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+        let preproc = preprocessor.preprocess();
         if preproc.is_none() {
             return ProblemSolution::Err(Error::Unsat);
         }
@@ -131,6 +131,16 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
             self.graph[d].remaining(&self.state)
         }).product::<f64>();
+        if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
+            let lb = preproc_in.clone();
+            let ub = f128!(1.0 - preproc_out);
+            print!("{} {} {}", lb, ub, self.start.elapsed().as_secs());
+            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
+        }
+        self.graph.clear_after_preprocess(&mut self.state);
+        let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
+        self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
+        self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
 
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
@@ -322,10 +332,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.start = Instant::now();
         // Same as for the search, first we preprocess
         self.propagator.init(self.graph.number_clauses());
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-        if preprocessor.preprocess(false).is_none() {
+        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+        if preprocessor.preprocess().is_none() {
             return None;
         }
+        self.graph.clear_after_preprocess(&mut self.state);
+        let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
+        self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
 
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
@@ -481,8 +494,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-        let preproc = preprocessor.preprocess(false);
+        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+        let preproc = preprocessor.preprocess();
         if preproc.is_none() {
             return ProblemSolution::Err(Error::Unsat);
         }
@@ -490,6 +503,16 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
             self.graph[d].remaining(&self.state)
         }).product::<f64>();
+        if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
+            let lb = preproc_in.clone();
+            let ub = f128!(1.0 - preproc_out);
+            print!("{} {} {} {}", 1, lb, ub, self.start.elapsed().as_secs());
+            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
+        }
+        self.graph.clear_after_preprocess(&mut self.state);
+        let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
+        self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
+        self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
 
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
@@ -505,7 +528,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             best_lb.assign(&lb);
             best_ub.assign(&ub);
             if self.start.elapsed().as_secs() >= self.timeout {
-                println!("{} {} {} {}", discrepancy, best_lb, best_ub, self.start.elapsed().as_secs());
                 return ProblemSolution::Ok((best_lb, best_ub))
             }
             if float_eq!(lb.clone(), ub.clone()) {

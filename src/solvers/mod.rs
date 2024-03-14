@@ -16,7 +16,7 @@
 
 use rug::Float;
 use crate::branching::*;
-use crate::core::graph::{DistributionIndex, ClauseIndex};
+use crate::core::graph::DistributionIndex;
 
 use std::hash::Hash;
 use bitvec::prelude::*;

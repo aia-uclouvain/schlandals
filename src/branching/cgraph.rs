@@ -39,7 +39,7 @@ impl BranchingDecision for MinInDegree {
         for clause in component_extractor.component_iter(component) {
             if g[clause].is_constrained(state) && !g[clause].is_learned() && g[clause].has_probabilistic(state) {
                 let score = g[clause].number_constrained_parents(state);
-                let tie = g[clause].number_parents();
+                let tie = g[clause].in_degree();
                 if score < best_score || (score == best_score && tie < best_tie) {
                     match g[clause].get_constrained_distribution(state, g) {
                         Some(d) => {

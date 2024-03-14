@@ -64,6 +64,10 @@ impl Literal {
     pub fn is_variable_fixed(&self, state: &StateManager) -> bool {
         state.get_option_bool(self.1).is_some()
     }
+
+    pub fn trail_index(&self) -> ReversibleOptionBool {
+        self.1
+    }
 }
 
 impl std::fmt::Display for Literal {

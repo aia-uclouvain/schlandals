@@ -70,7 +70,7 @@ pub struct WatchedVectorIndex(pub usize);
 #[derive(Debug)]
 pub struct Graph {
     /// Vector containing the nodes of the graph
-    pub variables: Vec<Variable>,
+    variables: Vec<Variable>,
     /// Vector containing the clauses of the graph
     clauses: Vec<Clause>,
     /// Vector containing the distributions of the graph
@@ -167,17 +167,6 @@ impl Graph {
         
         let literal_vector = WatchedVector::new(literals, number_deterministic, state);
         
-        // The first two deterministic variables in the clause watch the clause
-        for i in 0..number_deterministic.min(2) {
-            let variable = literal_vector[i].to_variable();
-            self.watchers[variable.0].push(cid);
-        }
-        
-        for i in 0..number_probabilistic.min(2) {
-            let variable = literal_vector[number_deterministic + i].to_variable();
-            self.watchers[variable.0].push(cid);
-        }
-        
         let mut clause = Clause::new(cid.0, literal_vector, head, is_learned, state);
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
         for literal in clause.iter().collect::<Vec<Literal>>() {
@@ -188,6 +177,7 @@ impl Graph {
                     for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);
                         self[child].add_parent(cid, state);
+                        self[child].increment_in_degree();
                     }
                 }
             } else {
@@ -196,6 +186,7 @@ impl Graph {
                     for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
                         clause.add_parent(parent, state);
                         self[parent].add_child(cid, state);
+                        clause.increment_in_degree();
                     }
                 }
             }
@@ -207,6 +198,103 @@ impl Graph {
         }
         self.clauses.push(clause);
         cid
+    }
+
+
+    /// Clears unnecessary space for the problem. After pre-processing, some variables, clauses or
+    /// distributions might not be used anymore, we can remove them from the representation.
+    pub fn clear_after_preprocess(&mut self, state: &mut StateManager) {
+        // First, we delete the clauses 
+        let mut clauses_map: FxHashMap<ClauseIndex, ClauseIndex> = FxHashMap::default();
+        let mut new_clause_index = 0;
+        for (i, clause) in self.clauses_iter().enumerate() {
+            if self[clause].is_constrained(state) {
+                clauses_map.insert(clause, ClauseIndex(new_clause_index));
+                self.clauses.swap(i, new_clause_index);
+                new_clause_index += 1;
+            }
+        }
+        self.clauses.truncate(new_clause_index);
+        self.clauses.shrink_to_fit();
+
+        for clause in self.clauses_iter() {
+            self[clause].clear(&clauses_map, state);
+        }
+
+        let mut distributions_map: FxHashMap<DistributionIndex, DistributionIndex> = FxHashMap::default();
+        let mut new_distribution_index = 0;
+        for (i, distribution) in self.distributions_iter().enumerate() {
+            if self[distribution].is_constrained(state) || self[distribution].number_unfixed(state) <= 1 {
+                let new_size = self[distribution].number_unfixed(state);
+                self[distribution].set_size(new_size);
+                distributions_map.insert(distribution, DistributionIndex(new_distribution_index));
+                self.distributions.swap(i, new_distribution_index);
+                new_distribution_index += 1;
+            }
+        }
+        self.distributions.truncate(new_distribution_index);
+        self.distributions.shrink_to_fit();
+
+        let mut variables_map: FxHashMap<VariableIndex, VariableIndex> = FxHashMap::default();
+        let mut new_variable_index = 0;
+        for (i, variable) in self.variables_iter().enumerate() {
+            let number_remaining_clauses = self[variable].clear_clauses(&clauses_map);
+            let is_unconstrained = if self[variable].is_probabilitic() {
+                let distribution = self[variable].distribution().unwrap();
+                (number_remaining_clauses == 0 && distributions_map.get(&distribution).is_none()) || self[variable].is_fixed(state)
+            } else {
+                number_remaining_clauses == 0 || self[variable].is_fixed(state)
+            };
+            if is_unconstrained {
+                continue;
+            }
+            if self[variable].is_probabilitic() {
+                let old_distribution = self[variable].distribution().unwrap();
+                let new_distribution = distributions_map.get(&old_distribution).copied().unwrap();
+                self[variable].set_distribution(new_distribution);
+            }
+            variables_map.insert(variable, VariableIndex(new_variable_index));
+            self.variables.swap(i, new_variable_index);
+            self.watchers.swap(i, new_variable_index);
+            new_variable_index += 1;
+        }
+
+        self.variables.truncate(new_variable_index);
+        self.variables.shrink_to_fit();
+        self.watchers.truncate(new_variable_index);
+        self.watchers.shrink_to_fit();
+
+        let mut current_distribution = self.variables[0].distribution().unwrap();
+        self[current_distribution].set_start(VariableIndex(0));
+        for variable in self.variables_iter() {
+            if let Some(distribution) = self[variable].distribution() {
+                if distribution != current_distribution {
+                    self[distribution].set_start(variable);
+                    current_distribution = distribution;
+                }
+            }
+        }
+
+        for distribution in self.distributions_iter() {
+            let start = self[distribution].start();
+            let size = self[distribution].size();
+            for variable in self.variables_iter() {
+                if let Some(d) = self[variable].distribution() {
+                    if d == distribution {
+                        assert!(variable >= start && variable < start + size);
+                    }
+                }
+            }
+        }
+
+        for clause in self.clauses_iter() {
+            self[clause].clear_literals(&variables_map);
+            for option_v in self[clause].get_watchers() {
+                if let Some(v) = option_v {
+                    self.watchers[v.0].push(clause);
+                }
+            }
+        }
     }
     
     // --- GRAPH MODIFICATIONS --- //

@@ -27,6 +27,7 @@
 use search_trail::{StateManager, BoolManager, ReversibleBool};
 use super::literal::Literal;
 use super::graph::VariableIndex;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
 pub struct WatchedVector {
@@ -125,6 +126,58 @@ impl WatchedVector {
     /// Returns the index of the first probabilistic variable in the clause.
     pub fn limit(&self) -> usize {
         self.limit
+    }
+
+    pub fn reduce(&mut self, map: &FxHashMap<VariableIndex, VariableIndex>) {
+        for i in (0..self.literals.len()).rev() {
+            let v = self.literals[i].to_variable();
+            match  map.get(&v).copied() {
+                Some(new_v) => {
+                    let is_pos = self.literals[i].is_positive();
+                    let idx = self.literals[i].trail_index();
+                    self.literals[i] = Literal::from_variable(new_v, is_pos, idx);
+                }
+                None => {
+                    if i < self.limit {
+                        self.literals.remove(i);
+                        self.limit -= 1;
+                    } else {
+                        self.literals.swap_remove(i);
+                    }
+                },
+            };
+        }
+    }
+
+    pub fn remove(&mut self, variable: VariableIndex) {
+        for i in 0..self.literals.len() {
+            if variable == self.literals[i].to_variable() {
+                if i < self.limit {
+                    self.literals.remove(i);
+                    self.limit -= 1;
+                } else {
+                    self.literals.swap_remove(i);
+                }
+                break;
+            }
+        }
+    }
+
+    pub fn get_watchers(&self) -> Vec<Option<VariableIndex>> {
+        let mut watchers: Vec<Option<VariableIndex>> = vec![];
+        for i in 0..self.limit.min(2) {
+            watchers.push(Some(self.literals[i].to_variable()));
+        }
+        for _ in watchers.len()..2 {
+            watchers.push(None);
+        }
+        for i in self.limit..(self.limit + 2).min(self.literals.len()) {
+            watchers.push(Some(self.literals[i].to_variable()));
+        }
+        for _ in watchers.len()..4 {
+            watchers.push(None);
+        }
+        watchers
     }
 
     // --- ITERATOR --- //

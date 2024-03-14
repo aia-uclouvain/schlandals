@@ -220,7 +220,9 @@ impl ComponentExtractor {
                 }
 
                 // Explores the clauses that share a distribution with the current clause
+                // TODO: Might break here
                 if g[clause].has_probabilistic(state) {
+                    // TODO: Might break here
                     for variable in g[clause].iter_probabilistic_variables() {
                         if !g[variable].is_fixed(state) {
                             let distribution = g[variable].distribution().unwrap();
@@ -236,11 +238,14 @@ impl ComponentExtractor {
                                 }
                                 *max_probability *= g[distribution].remaining(state);
                                 *comp_number_distribution += 1;
+                                // TODO: Might also break here? 
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
+                                        // TODO: Might also break here? 
                                         for c in g[v].iter_clauses_negative_occurence() {      
                                             self.exploration_stack.push(c);
                                         }
+                                        // TODO: Might also break here? 
                                         for c in g[v].iter_clauses_positive_occurence() {
                                             self.exploration_stack.push(c);
                                         }
@@ -252,10 +257,12 @@ impl ComponentExtractor {
                 }
                 
                 // Recursively explore the nodes in the connected components
+                // TODO: Might also break here? 
                 for parent in g[clause].iter_parents(state) {
                     self.exploration_stack.push(parent);
                 }
                 
+                // TODO: Might also break here? 
                 for child in g[clause].iter_children(state) {
                     self.exploration_stack.push(child);
                 }
@@ -386,6 +393,29 @@ impl ComponentExtractor {
                 comp.start += 1;
             }
         }
+    }
+
+    pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize, max_probability: f64) {
+        self.clauses.truncate(number_clause);
+        self.clauses.shrink_to_fit();
+        self.clause_positions.truncate(number_clause);
+        self.clause_positions.shrink_to_fit();
+        self.seen_var.truncate(number_variables);
+        self.seen_var.shrink_to_fit();
+        self.distributions.truncate(number_distribution);
+        self.distributions.shrink_to_fit();
+        self.distribution_positions.truncate(number_distribution);
+        self.distribution_positions.shrink_to_fit();
+        self.components[0] = Component {
+            start: 0,
+            size: self.clauses.len(),
+            distribution_start: 0,
+            number_distribution: self.distributions.len(),
+            hash: 0,
+            max_probability,
+            has_learned_distribution: false,
+            bit_repr: bits![1].repeat(number_variables + number_clause),
+        };
     }
 }
 

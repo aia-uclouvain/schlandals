@@ -199,7 +199,7 @@ impl Propagator {
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, skip_additional: bool) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, is_preproc: bool) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
@@ -236,17 +236,37 @@ impl Propagator {
             }
             
             let is_p = g[variable].is_probabilitic();
-            for i in (0..g.number_watchers(variable)).rev() {
-                let clause = g.get_clause_watched(variable, i);
-                if g[clause].is_constrained(state) {
-                    let new_watcher = g[clause].notify_variable_value(variable, value, is_p, state);
-                    if new_watcher != variable {
-                        g.remove_watcher(variable, i);
-                        g.add_watcher(new_watcher, clause);
+            if !is_preproc {
+                for i in (0..g.number_watchers(variable)).rev() {
+                    let clause = g.get_clause_watched(variable, i);
+                    if g[clause].is_constrained(state) {
+                        let new_watcher = g[clause].notify_variable_value(variable, value, is_p, state);
+                        if new_watcher != variable {
+                            g.remove_watcher(variable, i);
+                            g.add_watcher(new_watcher, clause);
+                        }
+                        if g[clause].is_unit(state) {
+                            let l = g[clause].get_unit_assigment(state);
+                            self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, level, Some(Reason::Clause(clause)));
+                        }
                     }
-                    if g[clause].is_unit(state) {
-                        let l = g[clause].get_unit_assigment(state);
-                        self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, level, Some(Reason::Clause(clause)));
+                }
+            } else {
+                if value {
+                    for clause in g[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
+                        g[clause].remove_literals(variable);
+                        if g[clause].is_unit(state) {
+                            let l = g[clause].get_unit_assigment(state);
+                            self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, level, Some(Reason::Clause(clause)));
+                        }
+                    }
+                } else {
+                    for clause in g[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                        g[clause].remove_literals(variable);
+                        if g[clause].is_unit(state) {
+                            let l = g[clause].get_unit_assigment(state);
+                            self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, level, Some(Reason::Clause(clause)));
+                        }
                     }
                 }
             }
@@ -267,15 +287,13 @@ impl Propagator {
                 }
             }
         }
-        if !skip_additional {
-            self.set_reachability(g, state, component, extractor);
-            for clause in extractor.component_iter(component) {
-                if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
-                    self.add_unconstrained_clause(clause, g, state);
-                }
+        self.set_reachability(g, state, component, extractor);
+        for clause in extractor.component_iter(component) {
+            if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
+                self.add_unconstrained_clause(clause, g, state);
             }
-            self.propagate_unconstrained_clauses(g, state);
         }
+        self.propagate_unconstrained_clauses(g, state);
         PropagationResult::Ok(())
     }
 
@@ -521,6 +539,13 @@ impl Propagator {
 
     pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
         self.assignments.iter().copied()
+    }
+
+    pub fn reduce(&mut self, number_clauses: usize, number_variables: usize) {
+        self.clause_flags.truncate(number_clauses);
+        self.clause_flags.shrink_to_fit();
+        self.lit_flags.truncate(number_variables);
+        self.lit_flags.shrink_to_fit();
     }
 }
 
