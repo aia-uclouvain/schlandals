@@ -118,16 +118,16 @@ macro_rules! search {
 }
 
 macro_rules! lds {
-    ($s:expr, $ds:expr) => {
+    ($s:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.lds($ds),
-            GenericSolver::SMinOutDegree(mut solver) => solver.lds($ds),
-            GenericSolver::SMaxDegree(mut solver) => solver.lds($ds),
-            GenericSolver::SVSIDS(mut solver) => solver.lds($ds),
-            GenericSolver::QMinInDegree(mut solver) => solver.lds($ds),
-            GenericSolver::QMinOutDegree(mut solver) => solver.lds($ds),
-            GenericSolver::QMaxDegree(mut solver) => solver.lds($ds),
-            GenericSolver::QVSIDS(mut solver) => solver.lds($ds),
+            GenericSolver::SMinInDegree(mut solver) => solver.lds(),
+            GenericSolver::SMinOutDegree(mut solver) => solver.lds(),
+            GenericSolver::SMaxDegree(mut solver) => solver.lds(),
+            GenericSolver::SVSIDS(mut solver) => solver.lds(),
+            GenericSolver::QMinInDegree(mut solver) => solver.lds(),
+            GenericSolver::QMinOutDegree(mut solver) => solver.lds(),
+            GenericSolver::QMaxDegree(mut solver) => solver.lds(),
+            GenericSolver::QVSIDS(mut solver) => solver.lds(),
         }
     }
 }
@@ -205,18 +205,16 @@ pub struct SearchCacheEntry {
     discrepancy: usize,
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
-    subproblem_limit: ClauseIndex,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, subproblem_limit: ClauseIndex) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>) -> Self {
         Self {
             bounds,
             discrepancy,
             distribution,
-            subproblem_limit
         }
     }
 
@@ -232,9 +230,5 @@ impl SearchCacheEntry {
 
     pub fn distribution(&self) -> Option<DistributionIndex> {
         self.distribution
-    }
-
-    pub fn subproblem_limit(&self) -> ClauseIndex {
-        self.subproblem_limit
     }
 }

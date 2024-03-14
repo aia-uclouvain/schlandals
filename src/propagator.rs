@@ -101,10 +101,10 @@ impl Propagator {
     }
     
     /// Propagates a variable to the given value. The component of the variable is also given to be able to use the {f-t}-reachability.
-    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, limit: ClauseIndex) -> PropagationResult {
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
         g[variable].set_reason(None, state);
         self.add_to_propagation_stack(variable, value, level, None);
-        self.propagate(g, state, component, extractor, level, false, limit)
+        self.propagate(g, state, component, extractor, level, false)
     }
     
     /// Adds a clause to be processed as unconstrained
@@ -199,7 +199,7 @@ impl Propagator {
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, skip_additional: bool, limit: ClauseIndex) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, skip_additional: bool) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
@@ -226,11 +226,11 @@ impl Propagator {
             g.set_variable(variable, value, l, reason, state);
             
             if value {
-                for clause in g[variable].iter_clauses_positive_occurence().filter(|c| *c <= limit) {
+                for clause in g[variable].iter_clauses_positive_occurence(){
                     g.set_clause_unconstrained(clause, state);
                 }
             } else {
-                for clause in g[variable].iter_clauses_negative_occurence().filter(|c| *c <= limit) {
+                for clause in g[variable].iter_clauses_negative_occurence(){
                     g.set_clause_unconstrained(clause, state);
                 }
             }
@@ -238,9 +238,6 @@ impl Propagator {
             let is_p = g[variable].is_probabilitic();
             for i in (0..g.number_watchers(variable)).rev() {
                 let clause = g.get_clause_watched(variable, i);
-                if clause > limit {
-                    continue;
-                }
                 if g[clause].is_constrained(state) {
                     let new_watcher = g[clause].notify_variable_value(variable, value, is_p, state);
                     if new_watcher != variable {
@@ -271,7 +268,7 @@ impl Propagator {
             }
         }
         if !skip_additional {
-            self.set_reachability(g, state, component, extractor, limit);
+            self.set_reachability(g, state, component, extractor);
             for clause in extractor.component_iter(component) {
                 if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
                     self.add_unconstrained_clause(clause, g, state);
@@ -315,9 +312,9 @@ impl Propagator {
     }
     
     /// Sets the t-reachability and f-reachability for all clauses in the component
-    fn set_reachability(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor, limit: ClauseIndex) {
+    fn set_reachability(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
         // First we update the parents/child in the graph and clear the flags
-        for clause in extractor.component_iter(component).filter(|c| *c <= limit) {
+        for clause in extractor.component_iter(component){
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
             }
@@ -333,7 +330,7 @@ impl Propagator {
             }
         }
 
-        for clause in extractor.component_iter(component).filter(|c| *c <= limit) {
+        for clause in extractor.component_iter(component){
             if g[clause].is_constrained(state) && !g[clause].is_learned() {
                 debug_assert!(!g[clause].is_unit(state));
                 match g[clause].head() {

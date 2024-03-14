@@ -22,4 +22,11 @@ macro_rules! f128 {
 
 pub const FLOAT_CMP_THRESHOLD: f64 = 0.000001;
 
+macro_rules! float_eq {
+    ($x:expr, $y:expr) => {
+        ($x - $y).abs() <= FLOAT_CMP_THRESHOLD
+    }
+}
+
 pub(crate) use f128;
+pub(crate) use float_eq;

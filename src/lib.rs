@@ -184,13 +184,11 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     learner.train(&params);
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, discrepancy_threshold: f64) -> ProblemSolution {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
     match approx {
         ApproximateMethod::Bounds => search!(solver),
-        ApproximateMethod::LDS => {
-            lds!(solver, discrepancy_threshold)
-        },
+        ApproximateMethod::LDS => lds!(solver),
     }
 }
 
