@@ -27,7 +27,7 @@ use crate::diagrams::NodeIndex;
 use crate::diagrams::dac::dac::Dac;
 use crate::PEAK_ALLOC;
 use super::statistics::Statistics;
-use rug::{Assign, Float};
+use rug::Float;
 use super::*;
 use std::time::Instant;
 
@@ -517,27 +517,23 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        let mut best_lb = f128!(0.0);
-        let mut best_ub = f128!(1.0);
         let mut discrepancy = 1;
         loop {
             let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
             let lb = p_in * preproc_in.clone();
             let removed = preproc_out + p_out * preproc_in.clone();
             let ub: Float = 1.0 -  removed;
-            best_lb.assign(&lb);
-            best_ub.assign(&ub);
             if self.start.elapsed().as_secs() >= self.timeout {
-                return ProblemSolution::Ok((best_lb, best_ub))
+                return ProblemSolution::Ok((lb, ub))
             }
-            if float_eq!(lb.clone(), ub.clone()) {
-                println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
+            let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
+            if (lb.clone() - ub.clone()).abs() <= FLOAT_CMP_THRESHOLD {
+                print!("{} {} {} {} {}", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
                 return ProblemSolution::Ok((lb, ub));
-            } else {
-                println!("{} {} {} {}", discrepancy, lb, ub, self.start.elapsed().as_secs());
-                if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
-                    return ProblemSolution::Ok((lb, ub));
-                }
+            }
+            print!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
+            if ub <= lb.clone()*(1.0 + self.epsilon).powf(2.0) {
+                return ProblemSolution::Ok((lb, ub));
             }
             discrepancy += 1;
         }
