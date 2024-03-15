@@ -166,6 +166,18 @@ impl Graph {
         });
         
         let literal_vector = WatchedVector::new(literals, number_deterministic, state);
+
+        if is_learned {
+            for i in 0..number_deterministic.min(2) {
+                let variable = literal_vector[i].to_variable();
+                self.watchers[variable.0].push(cid);
+            }
+            
+            for i in 0..number_probabilistic.min(2) {
+                let variable = literal_vector[number_deterministic + i].to_variable();
+                self.watchers[variable.0].push(cid);
+            }
+        }
         
         let mut clause = Clause::new(cid.0, literal_vector, head, is_learned, state);
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
