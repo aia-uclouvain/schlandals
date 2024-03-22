@@ -118,26 +118,23 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self) -> ProblemSolution {
+    pub fn search(&mut self) -> Solution {
         self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
         let preproc = preprocessor.preprocess();
         if preproc.is_none() {
-            return ProblemSolution::Err(Error::Unsat);
+            return Solution::new(f128!(0.0), 0.0, false);
         }
         let preproc_in = preproc.unwrap();
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
             self.graph[d].remaining(&self.state)
         }).product::<f64>();
-        if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
-            let lb = preproc_in.clone();
-            let ub = f128!(1.0 - preproc_out);
-            print!("{} {} {}", lb, ub, self.start.elapsed().as_secs());
-            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
-        }
         self.graph.clear_after_preprocess(&mut self.state);
+        if self.graph.number_clauses() == 0 {
+            return Solution::new(preproc_in, 1.0 - preproc_out, true);
+        }
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
         self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
@@ -148,9 +145,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
         let lb = p_in * preproc_in.clone();
         let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-        print!("{} {}", lb, ub);
+        let phat = (lb.clone()*ub.clone()).sqrt();
+        let eps = (ub / lb).sqrt().to_f64() - 1.0;
         self.statistics.print();
-        ProblemSolution::Ok((lb, ub))
+        return Solution::new(phat, eps, true);
     }
 
     /// Split the component into multiple sub-components and solve each of them
@@ -490,26 +488,23 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 // --- LDS ---
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    pub fn lds(&mut self) -> ProblemSolution {
+    pub fn lds(&mut self) -> Solution {
         self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
         let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
         let preproc = preprocessor.preprocess();
         if preproc.is_none() {
-            return ProblemSolution::Err(Error::Unsat);
+            return Solution::new(f128!(0.0), 0.0, false);
         }
         let preproc_in = preproc.unwrap();
         let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
             self.graph[d].remaining(&self.state)
         }).product::<f64>();
-        if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
-            let lb = preproc_in.clone();
-            let ub = f128!(1.0 - preproc_out);
-            print!("{} {} {} {}", 1, lb, ub, self.start.elapsed().as_secs());
-            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
-        }
         self.graph.clear_after_preprocess(&mut self.state);
+        if self.graph.number_clauses() == 0 {
+            return Solution::new(preproc_in, 1.0 - preproc_out, true);
+        }
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
         self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
@@ -523,13 +518,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let lb = p_in * preproc_in.clone();
             let removed = preproc_out + p_out * preproc_in.clone();
             let ub: Float = 1.0 -  removed;
-            if self.start.elapsed().as_secs() >= self.timeout {
-                return ProblemSolution::Ok((lb, ub))
-            }
-            let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
+            let epsilon_iter = (ub.clone() / lb.clone()).sqrt().to_f64() - 1.0;
             println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
-            if ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
-                return ProblemSolution::Ok((lb, ub));
+            if self.start.elapsed().as_secs() >= self.timeout || ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
+                return Solution::new((lb*ub).sqrt(), epsilon_iter, true);
             }
             discrepancy += 1;
         }
