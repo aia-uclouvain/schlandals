@@ -1,0 +1,303 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Bayesian Networks - The Schlandals Book</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded affix "><a href="../install.html">Installation</a></li><li class="chapter-item expanded "><a href="../modelization/index.html"><strong aria-hidden="true">1.</strong> Schlandals Modelization</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../modelization/bn.html" class="active"><strong aria-hidden="true">1.1.</strong> Bayesian Networks</a></li><li class="chapter-item expanded "><a href="../modelization/pg.html"><strong aria-hidden="true">1.2.</strong> Probabilistic Graphs</a></li><li class="chapter-item expanded "><a href="../modelization/problog.html"><strong aria-hidden="true">1.3.</strong> ProbLog Programs</a></li></ol></li><li class="chapter-item expanded "><a href="../inference/index.html"><strong aria-hidden="true">2.</strong> Probabilistic Inference</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../inference/search.html"><strong aria-hidden="true">2.1.</strong> Search solver</a></li><li class="chapter-item expanded "><a href="../inference/compilation.html"><strong aria-hidden="true">2.2.</strong> Compiler</a></li></ol></li><li class="chapter-item expanded "><a href="../learning/index.html"><strong aria-hidden="true">3.</strong> Learning Distributions Parameters</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../learning/settings.html"><strong aria-hidden="true">3.1.</strong> Learning Settings</a></li></ol></li><li class="chapter-item expanded "><a href="../python.html"><strong aria-hidden="true">4.</strong> Python Interface</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Schlandals Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="modelizing-bayesian-networks"><a class="header" href="#modelizing-bayesian-networks">Modelizing Bayesian Networks</a></h1>
+<p>Let \( B \) be a Bayesian Network over variables \( \mathcal{V} = {V_1, \ldots, V_n} \).
+As of now, Schlandals can handle queries of the type \( P(V_i = v) \) (for any \( v \) of \( V_i \)'s domain)).
+Notice that by rewriting queries of the type \( P(V_i = v \mid E = e) \) as the quotient of two marginal probabilities, Schlandals can also solve conditional probability queries.
+As an example, below is a Bayesian network with four variables.</p>
+<p><img src="bn.svg" alt="" /></p>
+<p>Notice that our encoding is very similar to WMC encodings. For more informations about the WMC encodings used in our experiments, see [1,2]</p>
+<h2 id="the-variables"><a class="header" href="#the-variables">The Variables</a></h2>
+<p>As explained in <a href="./language.html">here</a>, we need two types of variables: probabilistic and deterministic.
+Probabilistic variables are denoted \( \theta \) and use the following terminology.
+The variable \( \theta_v^{u_1, \ldots, u_p} \) is used for the CPT entry of node \( V \) associated with value \( v \) and parents' value \(u_1, \ldots, u_p \).
+In the example above, there are two probabilistic variables for node \( A \), \( \theta_{a_0}, \theta_{a_1} \). On the other hand, node B has four probabilistic variables \( \theta_{b_0}^{a_0},\theta_{b_1}^{a_0}, \theta_{b_0}^{a_1}, \theta_{b_1}^{a_1} \).
+Moreover, the partitioning in distribution follows the structure of the Bayesian Networks; every line in a given CPT constitutes a distribution.
+In the example, we have \( D_1 = {\theta_{a_0}, \theta_{a_1} }, D_2 = {\theta_{b_0}^{a_0}, \theta_{b_1}^{a_0}}, D_3 = {\theta_{b_0}^{a_1}, \theta_{b_1}^{a_1}}, \ldots \).
+Finally, we have one deterministic variables \( \lambda_v \) for each value \( v \) of node \( V \).</p>
+<p>The intuition is that the variables \( \lambda_v \) represent whether or not node \( V \) takes that particular value.
+On the other hand, the \( \theta_{v}^{p_1, \ldots, p_n} \) variables are used to give the correct weight to the interpretations.</p>
+<h2 id="the-clauses"><a class="header" href="#the-clauses">The Clauses</a></h2>
+<p>While similar in WMC encodings, the clauses contain one significant difference; the head of the implication is a non-weighted variable.
+This small difference is useful for the additional propagation performed by Schlandals.
+For each CPT entry of node \( v \), associated with value \( v \) and parents value \( p_1, \ldots, p_n \), we have the clause
+\[ \lambda_{p_1} \land \ldots \land \lambda_{p_n} \land \theta_{v}^{p_1, \ldots, p_n} \implies \lambda_{v} \]</p>
+<h2 id="the-query"><a class="header" href="#the-query">The Query</a></h2>
+<p>Let \( V \) have domain \( v_1, \ldots, v_m \). Then, to encode the query \( P(V = v_i) \), we add the clauses \( \lnot v_i \) for all \( i \neq j \).</p>
+<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<p>The encoding (in DIMACS-style format) is show below for the query \( P(D = d_0) \).
+Notice that the probailistic variables start at 1 and are in contiguous blocks.</p>
+<pre><code>p cnf 26 19
+c Probabilistic variables 1 2
+c p distribution 0.2 0.8
+c Probabilistic variables 3 4
+c p distribution 0.6 0.4
+c Probabilistic variables 5 6
+c p distribution 0.3 0.7
+c Probabilistic variables 7 8
+c p distribution 0.25 0.75
+c Probabilistic variables 9 10
+c p distribution 0.75 0.25
+c Probabilistic variables 11 12
+c p distribution 1.0 0.0
+c Probabilistic variables 13 14
+c p distribution 0.35 0.65
+c Probabilistic variables 15 16
+c p distribution 0.8 0.2
+c Probabilistic variables 17 18
+c p distribution 0.0 1.0
+c CPT for A. Variable for a_0 = 19, a_1 = 20
+-1 19 0
+-2 20 0
+c CPT for B. Variable for b_0 = 21, b_1 = 22
+-3 -19 21 0
+-4 -19 22 0
+-5 -20 21 0
+-6 -20 22 0
+c CPT for C. Variable for c_0 = 23, c_1 = 24
+-7 -19 23 0
+-8 -19 24 0
+-9 -20 23 0
+-10 -20 24 0
+c CPT for D. Variable for d_0 = 25, d_1 = 26
+-11 -21 -23 25 0
+-12 -21 -23 26 0
+-13 -21 -24 25 0
+-14 -21 -24 26 0
+-15 -22 -23 25 0
+-16 -22 -23 26 0
+-17 -22 -24 25 0
+-18 -22 -24 26 0
+c Query
+-25
+</code></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<p>[1] Mark Chavira and Adnan Darwiche. On probabilistic inference by weighted model counting. Artificial Intelligence, 172(6-7), 2008.</p>
+<p>[2] Anicet Bart, Frédéric Koriche, Jean-Marie Lagniez, and Pierre Marquis. An improved CNF encoding scheme for probabilistic inference. In Proceedings of the Twenty-second European Conference on Artificial Intelligence, 2016.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../modelization/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../modelization/pg.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../modelization/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../modelization/pg.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

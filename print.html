@@ -1,0 +1,823 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>The Schlandals Book</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded affix "><a href="install.html">Installation</a></li><li class="chapter-item expanded "><a href="modelization/index.html"><strong aria-hidden="true">1.</strong> Schlandals Modelization</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="modelization/bn.html"><strong aria-hidden="true">1.1.</strong> Bayesian Networks</a></li><li class="chapter-item expanded "><a href="modelization/pg.html"><strong aria-hidden="true">1.2.</strong> Probabilistic Graphs</a></li><li class="chapter-item expanded "><a href="modelization/problog.html"><strong aria-hidden="true">1.3.</strong> ProbLog Programs</a></li></ol></li><li class="chapter-item expanded "><a href="inference/index.html"><strong aria-hidden="true">2.</strong> Probabilistic Inference</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="inference/search.html"><strong aria-hidden="true">2.1.</strong> Search solver</a></li><li class="chapter-item expanded "><a href="inference/compilation.html"><strong aria-hidden="true">2.2.</strong> Compiler</a></li></ol></li><li class="chapter-item expanded "><a href="learning/index.html"><strong aria-hidden="true">3.</strong> Learning Distributions Parameters</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="learning/settings.html"><strong aria-hidden="true">3.1.</strong> Learning Settings</a></li></ol></li><li class="chapter-item expanded "><a href="python.html"><strong aria-hidden="true">4.</strong> Python Interface</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Schlandals Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p>Schlandals is a state-of-the-art <em>Projected Weighted Model Counter</em> specialized for probabilistic inference over discrete probability distributions.
+Currently, there are known modelization for the following problems</p>
+<ul>
+<li>Computing the marginal probabilities of a variable in a Bayesian Network</li>
+<li>Computing the probability that two nodes are connected in a probabilistic graph</li>
+<li>Computing the probability of <a href="https://github.com/ML-KULeuven/problog">ProbLog</a> programs</li>
+</ul>
+<p>For more information on how to use Schlandals and its mechanics, check <a href="https://aia-uclouvain.github.io/schlandals">the documentation</a> (still in construction).
+You can cite Schlandals using the following bibtex entry</p>
+<pre><code>@InProceedings{dubray_et_al:LIPIcs.CP.2023.15,
+  author =	{Dubray, Alexandre and Schaus, Pierre and Nijssen, Siegfried},
+  title =	{{Probabilistic Inference by Projected Weighted Model Counting on Horn Clauses}},
+  booktitle =	{29th International Conference on Principles and Practice of Constraint Programming (CP 2023)},
+  pages =	{15:1--15:17},
+  series =	{Leibniz International Proceedings in Informatics (LIPIcs)},
+  ISBN =	{978-3-95977-300-3},
+  ISSN =	{1868-8969},
+  year =	{2023},
+  volume =	{280},
+  editor =	{Yap, Roland H. C.},
+  publisher =	{Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik},
+  address =	{Dagstuhl, Germany},
+  URL =		{https://drops.dagstuhl.de/opus/volltexte/2023/19052},
+  URN =		{urn:nbn:de:0030-drops-190520},
+  doi =		{10.4230/LIPIcs.CP.2023.15},
+  annote =	{Keywords: Model Counting, Bayesian Networks, Probabilistic Networks}
+}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<p>Before installing Schlandals, be sure to have <a href="https://www.rust-lang.org/tools/install">the rust toolchain installed</a>.</p>
+<h2 id="from-source-recommended"><a class="header" href="#from-source-recommended">From source (recommended)</a></h2>
+<p>We assume that the commands are ran from <code>CURRENT_DIR</code></p>
+<pre><code class="language-bash">git clone git@github.com:aia-uclouvain/schlandals.git &amp;&amp; cd schlandals &amp;&amp; cargo build --release
+ln -s $CURRENT_DIR/schlandals/target/release/schlandals $HOME/.local/bin
+</code></pre>
+<p>This compiles the code in <code>release</code> mode (with optimizations included) and add a symbolic links to the local binaries directory.</p>
+<h2 id="using-cargo"><a class="header" href="#using-cargo">Using Cargo</a></h2>
+<p>Note that the code is still actively developed and it should not be expected that the version of the code on crates.io is the most up-to-date.
+The main branch of Schlandals should be stable enough for most use cases.</p>
+<pre><code class="language-bash">cargo install schlandals
+</code></pre>
+<p>This will put the <code>schlandals</code> executable in <code>~/.cargo/bin/</code></p>
+<h2 id="building-schlandals-with-torch-support"><a class="header" href="#building-schlandals-with-torch-support">Building Schlandals with Torch support</a></h2>
+<p>Schlandals supports <a href="./learning/README.html">learning parameters</a> using Torch tensors.
+We use the <a href="https://github.com/LaurentMazare/tch-rs">tch-rs crate</a> for the bindings with libtorch tensors and this feature can be installed by
+adding <code>--features tensor</code> as a flag to the install (<code>cargo install schlandals --features tensor</code>) or build (<code>cargo build --release --features tensor</code>) commands.
+Note that this requires to have libtorch install on your system and some environment variables set. For more information, see <a href="https://github.com/LaurentMazare/tch-rs?tab=readme-ov-file#getting-started">tch install page</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="modelization"><a class="header" href="#modelization">Modelization</a></h1>
+<p>In this section, we describe how to encode problems in Schlandals.
+We first give the theoretical foundations to understand these encodings, and then each sub-section shows how to encode a specific problem.
+We currently have encodings (or translations) for</p>
+<ul>
+<li><a href="modelization/./bn.html">Bayesian Networks</a></li>
+<li><a href="modelization/./pg.html">Reachability in Probabilistic Graphs</a></li>
+<li><a href="modelization/./problog.html">ProbLog Programs</a></li>
+</ul>
+<h2 id="a-restricted-propositional-logic-language"><a class="header" href="#a-restricted-propositional-logic-language">A Restricted Propositional Logic Language</a></h2>
+<p>Schlandals works on propositional formulas in Conjunctive Normal Form (CNF) containing only Horn clauses.
+In Horn clauses, at most one literal has a positive polarity.
+For example, \( \lnot x \lor \lnot y \lor z \) is a valid Horn clause as only \( z \) has a positive polarity.
+Using the logical equivalence \( (A \implies B) \Leftrightarrow (\lnot A \lor B) \), Horn clauses are implications with potentially empty consequences.</p>
+<p>Let \( F \) be a Horn formula over variables \( \mathcal{X} \). In Schlandals, the variables are partitioned into two sets \( \mathcal{P} \) and \( \mathcal{Y} \).
+The set \( \mathcal{Y} \) of variables contains classical boolean variables (deterministic variables), while the set \( \mathcal{P} \) includes the variables associated with the distributions (probabilistic variables).
+Let us assume that \( n \) distributions are defined for the problem.
+Then, \( \mathcal{P} = \cup_{i = 1}^n D_i \) with \( D_i \cap D_j = \emptyset \) for all \( i \neq j \).
+Moreove, every variable \( v \in D \) has a weight \( P(v) \) and \( \sum_{v \in D_i} P(v) = 1 \).</p>
+<p>Let \( I = \mathbf{x} \) be an assignment to the variables \( \mathcal{X} \). We say that \( I \) is an interpretation of \( F \), and it is a model if \( F[I] = \top \) (i.e., evaluating \( F \) with the values in \( I \) reduce to true).
+In Schlandals, there is an additional constraint: a model \( I \) is valid only if it sets exactly one variable to \( \top \) per distribution.</p>
+<p>If we denote \( v_i \) the value set to \( \top \) in distribution \( D_i \), the weight of a model \( I \) can be computed as \[ \omega(I) = \prod_{i = 1}^n P(v_i) \]
+If \( \mathcal{M} \) denotes the set of models of \( F \), then the goal is to compute \[ \sum_{I \in \mathcal{M}} \omega(I) \].</p>
+<h2 id="a-modified-dimacs-format"><a class="header" href="#a-modified-dimacs-format">A Modified DIMACS Format</a></h2>
+<p>Schlandals reads its inputs from a modified <a href="https://mccompetition.org/assets/files/2021/competition2021.pdf">DIMACS format</a>.
+It follows the same rules as the DIMACS format, with an additional rule for the distributions (and it ignores the lines starting with <code>c p weight</code> used in other weighted model counters).
+Below is an example of a modified DIMACS file</p>
+<pre><code>p cnf 16 11
+c Lines starting with `c` alone are comments.
+c The first line must be the head in the form of "p cnf &lt;number variable&gt; &lt;number clauses&gt;
+c The distributions are defined by lines starting with "c p distribution"
+c Each value in a distribution is assigned to a variable, starting from 1. Hence, the first N variables
+c are used for the distributions.
+c p distribution 0.2 0.8
+c p distribution 0.3 0.7
+c p distribution 0.4 0.6
+c p distribution 0.1 0.9
+c p distribution 0.5 0.5
+c Finally, the clauses are encoded as in DIMACS.
+11 -1 0
+12 -2 0
+13 -11 -3 0
+13 -12 -5 0
+14 -11 -4 0
+14 -12 -6 0
+15 -13 -7 0
+15 -14 -9 0
+16 -13 -8 0
+16 -14 -10 0
+-12 0
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="modelizing-bayesian-networks"><a class="header" href="#modelizing-bayesian-networks">Modelizing Bayesian Networks</a></h1>
+<p>Let \( B \) be a Bayesian Network over variables \( \mathcal{V} = {V_1, \ldots, V_n} \).
+As of now, Schlandals can handle queries of the type \( P(V_i = v) \) (for any \( v \) of \( V_i \)'s domain)).
+Notice that by rewriting queries of the type \( P(V_i = v \mid E = e) \) as the quotient of two marginal probabilities, Schlandals can also solve conditional probability queries.
+As an example, below is a Bayesian network with four variables.</p>
+<p><img src="modelization/bn.svg" alt="" /></p>
+<p>Notice that our encoding is very similar to WMC encodings. For more informations about the WMC encodings used in our experiments, see [1,2]</p>
+<h2 id="the-variables"><a class="header" href="#the-variables">The Variables</a></h2>
+<p>As explained in <a href="modelization/./language.html">here</a>, we need two types of variables: probabilistic and deterministic.
+Probabilistic variables are denoted \( \theta \) and use the following terminology.
+The variable \( \theta_v^{u_1, \ldots, u_p} \) is used for the CPT entry of node \( V \) associated with value \( v \) and parents' value \(u_1, \ldots, u_p \).
+In the example above, there are two probabilistic variables for node \( A \), \( \theta_{a_0}, \theta_{a_1} \). On the other hand, node B has four probabilistic variables \( \theta_{b_0}^{a_0},\theta_{b_1}^{a_0}, \theta_{b_0}^{a_1}, \theta_{b_1}^{a_1} \).
+Moreover, the partitioning in distribution follows the structure of the Bayesian Networks; every line in a given CPT constitutes a distribution.
+In the example, we have \( D_1 = {\theta_{a_0}, \theta_{a_1} }, D_2 = {\theta_{b_0}^{a_0}, \theta_{b_1}^{a_0}}, D_3 = {\theta_{b_0}^{a_1}, \theta_{b_1}^{a_1}}, \ldots \).
+Finally, we have one deterministic variables \( \lambda_v \) for each value \( v \) of node \( V \).</p>
+<p>The intuition is that the variables \( \lambda_v \) represent whether or not node \( V \) takes that particular value.
+On the other hand, the \( \theta_{v}^{p_1, \ldots, p_n} \) variables are used to give the correct weight to the interpretations.</p>
+<h2 id="the-clauses"><a class="header" href="#the-clauses">The Clauses</a></h2>
+<p>While similar in WMC encodings, the clauses contain one significant difference; the head of the implication is a non-weighted variable.
+This small difference is useful for the additional propagation performed by Schlandals.
+For each CPT entry of node \( v \), associated with value \( v \) and parents value \( p_1, \ldots, p_n \), we have the clause
+\[ \lambda_{p_1} \land \ldots \land \lambda_{p_n} \land \theta_{v}^{p_1, \ldots, p_n} \implies \lambda_{v} \]</p>
+<h2 id="the-query"><a class="header" href="#the-query">The Query</a></h2>
+<p>Let \( V \) have domain \( v_1, \ldots, v_m \). Then, to encode the query \( P(V = v_i) \), we add the clauses \( \lnot v_i \) for all \( i \neq j \).</p>
+<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<p>The encoding (in DIMACS-style format) is show below for the query \( P(D = d_0) \).
+Notice that the probailistic variables start at 1 and are in contiguous blocks.</p>
+<pre><code>p cnf 26 19
+c Probabilistic variables 1 2
+c p distribution 0.2 0.8
+c Probabilistic variables 3 4
+c p distribution 0.6 0.4
+c Probabilistic variables 5 6
+c p distribution 0.3 0.7
+c Probabilistic variables 7 8
+c p distribution 0.25 0.75
+c Probabilistic variables 9 10
+c p distribution 0.75 0.25
+c Probabilistic variables 11 12
+c p distribution 1.0 0.0
+c Probabilistic variables 13 14
+c p distribution 0.35 0.65
+c Probabilistic variables 15 16
+c p distribution 0.8 0.2
+c Probabilistic variables 17 18
+c p distribution 0.0 1.0
+c CPT for A. Variable for a_0 = 19, a_1 = 20
+-1 19 0
+-2 20 0
+c CPT for B. Variable for b_0 = 21, b_1 = 22
+-3 -19 21 0
+-4 -19 22 0
+-5 -20 21 0
+-6 -20 22 0
+c CPT for C. Variable for c_0 = 23, c_1 = 24
+-7 -19 23 0
+-8 -19 24 0
+-9 -20 23 0
+-10 -20 24 0
+c CPT for D. Variable for d_0 = 25, d_1 = 26
+-11 -21 -23 25 0
+-12 -21 -23 26 0
+-13 -21 -24 25 0
+-14 -21 -24 26 0
+-15 -22 -23 25 0
+-16 -22 -23 26 0
+-17 -22 -24 25 0
+-18 -22 -24 26 0
+c Query
+-25
+</code></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<p>[1] Mark Chavira and Adnan Darwiche. On probabilistic inference by weighted model counting. Artificial Intelligence, 172(6-7), 2008.</p>
+<p>[2] Anicet Bart, Frédéric Koriche, Jean-Marie Lagniez, and Pierre Marquis. An improved CNF encoding scheme for probabilistic inference. In Proceedings of the Twenty-second European Conference on Artificial Intelligence, 2016.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="modelizing-probabilistic-graph"><a class="header" href="#modelizing-probabilistic-graph">Modelizing Probabilistic Graph</a></h1>
+<p>Let \( G = (V, E) \) be a graph (undirected or directed) such that each edge \( e \in E \) is present in the graph with a probability \( p(e) \).
+Given a source \( s \) and a target \( t \) the goal is to compute the probability that \( s \) and \( t \) are connected.
+Below is an example of such graph, with five nodes and a query would be to compute the probability that \( A \) and \( E \) are connected.
+Our encoding is the same as the one presentend in [1] except for the distribution. Notice that the encoding also works for undirected graphs.</p>
+<p><img src="modelization/pg.svg" alt="" /></p>
+<h2 id="the-variables-1"><a class="header" href="#the-variables-1">The Variables</a></h2>
+<p>One distribution is defined for each edge \( e \in E \) with \( D_e = \theta_{e}, \theta_{\lnot e} \) representing, respectively, that the edge is present or not.
+In addition to that, each node \(v \in V \) has an associated deterministic variable \( \lambda_{v} \) that is true if the node \( v \) is reachable from the source, given the choices on the edge variables.</p>
+<h2 id="the-clauses-1"><a class="header" href="#the-clauses-1">The Clauses</a></h2>
+<p>The encoding uses the transitivity property of the graph: If a node \(v_1 \in V \) is reachable from the source and the edge \( e = (v_1, v_2) \in E \) is present, then \(v_2\) is reachable from the source.
+That means that for every edge \(e = (v_1, v_2) \in E\), there is a clause \[ \lambda_{v_1} \land \theta_{e} \implies \lambda_{v_2} \]</p>
+<h2 id="the-query-1"><a class="header" href="#the-query-1">The Query</a></h2>
+<p>The query is encoded by imposing the fact that the source \( s \) is reachable from the source, and the target \( t \) is not: \( \lambda_{s} \) and \( \lnot \lambda_{t} \).</p>
+<h2 id="example-1"><a class="header" href="#example-1">Example</a></h2>
+<p>The encoding (in DIMACS-style format) is show below for the query \( P(A \text{ connected to } E) \).</p>
+<pre><code>p cnf 26 19
+c Edge from A to B with variables 1 2
+c p distribution 0.4 0.6
+c Edge from A to C with variables 3 4
+c p distribution 0.8 0.2
+c Edge from B to D with variables 5 6
+c p distribution 0.5 0.5
+c Edge from C to D with variables 7 8
+c p distribution 0.6 0.4
+c Edge from C to E with variables 9 10
+c p distribution 0.7 0.3
+c Edge from D to E with variables 11 12
+c p distribution 0.3 0.7
+c Deterministic variables: Node A 13 Node B 14 node C 15 Node D 16 Node E 17
+-13 -1 14 0
+-13 -3 15 0
+-14 -5 16 0
+-15 -7 16 0
+-15 -9 17 0
+-16 -11 17 0
+c Query
+13 0
+-17 0
+</code></pre>
+<h2 id="references-1"><a class="header" href="#references-1">References</a></h2>
+<p>[1] Leonardo Duenas-Osorio, Kuldeep Meel, Roger Paredes, and Moshe Vardi. Counting-based reliability estimation for power-transmission grids. In Proceedings of the AAAI Conference on Artificial Intelligence, 2017.</p>
+<div style="break-before: page; page-break-before: always;"></div><div style="break-before: page; page-break-before: always;"></div><h1 id="probabilistic-inference"><a class="header" href="#probabilistic-inference">Probabilistic Inference</a></h1>
+<p>Schlandals provides exact and \( \epsilon \)-bounded approximate inference methods.
+It can be used either as a DPLL-style search-based solver or as a compiler that outputs an arithmetic circuit.
+Beware that, currently; the compiler is just a search-solver saving its trace. Hence, you should use the search solver if you do not need to keep the circuits for further computation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="search-based-inference"><a class="header" href="#search-based-inference">Search-based Inference</a></h1>
+<p>The search-based inference algorithm is a modified DPLL search that branches over the distributions and has specialized propagation for Horn clauses. For a complete description of the algorithm, see [1].</p>
+<p>As an example, let use the Bayesian Network from <a href="inference/../modelization/bn.html">the encoding page</a>, which encoding is shown below (assuming it is saved in a file name <code>bn.cnf</code>)</p>
+<pre><code>p cnf 26 19
+c p distribution 0.2 0.8
+c p distribution 0.6 0.4
+c p distribution 0.3 0.7
+c p distribution 0.25 0.75
+c p distribution 0.75 0.25
+c p distribution 1.0 0.0
+c p distribution 0.35 0.65
+c p distribution 0.8 0.2
+c p distribution 0.0 1.0
+-1 19 0
+-2 20 0
+-3 -19 21 0
+-4 -19 22 0
+-5 -20 21 0
+-6 -20 22 0
+-7 -19 23 0
+-8 -19 24 0
+-9 -20 23 0
+-10 -20 24 0
+-11 -21 -23 25 0
+-12 -21 -23 26 0
+-13 -21 -24 25 0
+-14 -21 -24 26 0
+-15 -22 -23 25 0
+-16 -22 -23 26 0
+-17 -22 -24 25 0
+-18 -22 -24 26 0
+-26 0
+</code></pre>
+<h2 id="exact-search"><a class="header" href="#exact-search">Exact search</a></h2>
+<p>The easiest way to run the solver is by using the following command, which outputs a probability of 0.6145.</p>
+<pre><code>schlandals search -i bn.cnf
+</code></pre>
+<p>If you want to run with a limit on the memory used by Schlandals, use</p>
+<pre><code>schlandals search -i bn.cnf -m 1000
+</code></pre>
+<p>This command runs the solver with a memory limit of 1GB. Currently, no strategy is implemented to clean the cache smartly; when the memory limit is reached, the cache is completely cleared, and the exploration continues.</p>
+<h2 id="approximate-inference"><a class="header" href="#approximate-inference">Approximate inference</a></h2>
+<p>Schlandals can provide approximate probability with \( \epsilon \) error bounds. That is, if \( p \) is the true probability, an \( \epsilon \)-bounded approximation \( \tilde p \) is such that \[ \frac{p}{1 + \epsilon} \leq \tilde p \leq p (1 + \epsilon) \].
+To use such approximate algorithm, add the <code>--epsilon</code> command line argument</p>
+<pre><code>schlandals search -i bn.cnf -e 0.3
+</code></pre>
+<p>Notice that running the solver with <code>-e 0.0</code> performs an exact search.</p>
+<h2 id="command-line-options"><a class="header" href="#command-line-options">Command line options</a></h2>
+<pre><code>[schlandals@schlandalspc] schlandals search --help
+DPLL-style search based solver
+
+Usage: schlandals search [OPTIONS] --input &lt;INPUT&gt;
+
+Options:
+  -i, --input &lt;INPUT&gt;
+          The input file
+
+  -b, --branching &lt;BRANCHING&gt;
+          How to branch
+          
+          [default: min-in-degree]
+
+          Possible values:
+          - min-in-degree:  Minimum In-degree of a clause in the implication-graph
+          - min-out-degree: Minimum Out-degree of a clause in the implication-graph
+          - max-degree:     Maximum degree of a clause in the implication-graph
+          - vsids:          Variable State Independent Decaying Sum
+
+  -s, --statistics
+          Collect stats during the search, default yes
+
+  -m, --memory &lt;MEMORY&gt;
+          The memory limit, in mega-bytes
+
+  -e, --epsilon &lt;EPSILON&gt;
+          Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
+
+  -h, --help
+          Print help (see a summary with '-h')
+</code></pre>
+<h2 id="references-2"><a class="header" href="#references-2">References</a></h2>
+<p>[1] Alexandre Dubray, Pierre Schaus, and Siegfried Nijssen. Probabilistic Inference by Projected Weighted Model Counting on Horn Clauses. In 29th International Conference on Principles and Practice of Constraint Programming (CP 2023), 2023</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="schlandals-as-compiler"><a class="header" href="#schlandals-as-compiler">Schlandals as Compiler</a></h1>
+<p>It is also possible to run the solver as a compiler.
+That is, running a search based solver, but keeping in memory the trace of the algorithm.
+This is mainly used for learning distributions' parameters as there is an overhead of keeping the trace.
+As an example, let use the Bayesian Network from <a href="inference/../modelization/bn.html">the encoding page</a>, which encoding is shown below (assuming it is saved in a file name <code>bn.cnf</code>)</p>
+<pre><code>p cnf 26 19
+c p distribution 0.2 0.8
+c p distribution 0.6 0.4
+c p distribution 0.3 0.7
+c p distribution 0.25 0.75
+c p distribution 0.75 0.25
+c p distribution 1.0 0.0
+c p distribution 0.35 0.65
+c p distribution 0.8 0.2
+c p distribution 0.0 1.0
+-1 19 0
+-2 20 0
+-3 -19 21 0
+-4 -19 22 0
+-5 -20 21 0
+-6 -20 22 0
+-7 -19 23 0
+-8 -19 24 0
+-9 -20 23 0
+-10 -20 24 0
+-11 -21 -23 25 0
+-12 -21 -23 26 0
+-13 -21 -24 25 0
+-14 -21 -24 26 0
+-15 -22 -23 25 0
+-16 -22 -23 26 0
+-17 -22 -24 25 0
+-18 -22 -24 26 0
+-26 0
+</code></pre>
+<h2 id="compiling"><a class="header" href="#compiling">Compiling</a></h2>
+<p>To run a compilation and evaluate the given arithmetic circuit, use the following command (which only output the probability).</p>
+<pre><code>schlandals compile -i bn.cnf
+</code></pre>
+<h2 id="visualizing-the-arithmetic-circuit"><a class="header" href="#visualizing-the-arithmetic-circuit">Visualizing the Arithmetic Circuit</a></h2>
+<p>It is possible to dump the computed arithmetic circuit into a DOT file. Then it can be visualized using DOT (either by running <code>dot</code> locally or <a href="https://dreampuf.github.io/GraphvizOnline/">online</a>).</p>
+<pre><code class="language-bash">schlandals compile -i bn.cnf --dotfile bn.dot
+dot -T svg -o ac.dot bn.dot
+</code></pre>
+<p>The produced arithmetic circuit is shown below
+<img src="inference/ac.svg" alt="" /></p>
+<h2 id="storing-the-arithmetic-circuit-for-reuse"><a class="header" href="#storing-the-arithmetic-circuit-for-reuse">Storing the Arithmetic Circuit for Reuse</a></h2>
+<p>Schlandals also provide a way to store the circuits in a standardized format so that it can be reuse without recompiling the input problem.</p>
+<pre><code class="language-bash">schlandals compile -i bn.cnf --fdac bn.fdac
+</code></pre>
+<p>The command above writes the following content in <code>bn.fdac</code></p>
+<pre><code>outputs 29 29 26 22 15 14 16 16 19 14 14 18 27 23 17 19 18 19 25 21 21 20 20 24 23 22 25 24 27 26 28 28 29
+inputs 7 4 8 4 5 6 11 12 8 13 11 6 17 18 15 16 3 21 10 20 23 19 22 14 2 25 9 24 26 27 0 1 28
+d 8 1 0 1 0 0
+d 5 0 1 1 0 0
+d 0 0 2 1 0 0
+d 3 0 3 1 0 0
+d 1 0 4 2 0 0
+d 1 1 6 1 0 0
+d 7 0 7 2 0 0
+d 3 1 9 1 0 0
+d 6 0 10 2 0 0
+d 0 1 12 1 0 0
+d 2 0 13 1 0 0
+d 4 0 14 2 0 0
+d 4 1 16 1 0 0
+d 2 1 17 1 0 0
+x 18 1 0 3
+x 19 1 3 1
+x 20 1 4 2
+x 21 1 6 1
+x 22 1 7 2
+x 23 1 9 3
++ 24 1 12 2
++ 25 1 14 2
+x 26 1 16 2
+x 27 1 18 2
++ 28 1 20 2
++ 29 1 22 2
+x 30 1 24 2
+x 31 1 26 2
++ 32 1 28 2
+x 33 0 30 3
+</code></pre>
+<p>The first two lines are vectors that store the input/output relationships of the nodes.
+Then, there is one line per node.
+- If the line starts with <code>d</code>, it is a distribution node. It sends the value of a distribution to its output. The next two integers are the distribution id and the id of the sent value. For example, the first node is associated with distribution <code>8</code> and sends its second value (index starts at 0). The remaining four integers represent the slice (start index + size) in the output (first two) and input (last two) vectors.
+- If the line start with a <code>+</code>, it is a sum node. The four integers are slice indicators in the output/input vectors.
+- If the line starts with a <code>x</code>, it is a product node. The four integers are slice indicators in the output/input vectors.</p>
+<h2 id="command-line-arguments"><a class="header" href="#command-line-arguments">Command Line Arguments</a></h2>
+<pre><code class="language-[schlandals@schlandalspc] schlandals compile --help">Use the DPLL-search structure to produce an arithmetic circuit for the problem
+
+Usage: schlandals compile [OPTIONS] --input &lt;INPUT&gt;
+
+Options:
+  -i, --input &lt;INPUT&gt;
+          The input file
+
+  -b, --branching &lt;BRANCHING&gt;
+          How to branch
+          
+          [default: min-in-degree]
+
+          Possible values:
+          - min-in-degree:  Minimum In-degree of a clause in the implication-graph
+          - min-out-degree: Minimum Out-degree of a clause in the implication-graph
+          - max-degree:     Maximum degree of a clause in the implication-graph
+          - vsids:          Variable State Independent Decaying Sum
+
+      --fdac &lt;FDAC&gt;
+          If present, store a textual representation of the compiled circuit
+
+      --dotfile &lt;DOTFILE&gt;
+          If present, store a DOT representation of the compiled circuit
+
+  -e, --epsilon &lt;EPSILON&gt;
+          Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
+
+  -h, --help
+          Print help (see a summary with '-h')
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="learning-distribution-parameters-on-a-set-of-queries"><a class="header" href="#learning-distribution-parameters-on-a-set-of-queries">Learning Distribution Parameters on a Set of Queries</a></h1>
+<p>Schlandals provides a module that allows to learn distribution parameters for a set of queries on a probabilistic problem.
+It can be used with a float or a tensor semiring and it is compatible with exact and partial compilation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="learning-settings"><a class="header" href="#learning-settings">Learning Settings</a></h1>
+<h2 id="basic-setting"><a class="header" href="#basic-setting">Basic Setting</a></h2>
+<p>To initiate training, a minimum requirement is an input file in CSV format. This file should include a list of CNF files, describing the queries to learn from, along with the expected output for each query. The CSV structure should follow the one of following example (saved as train.csv).</p>
+<pre><code>File, Probability
+path_query1.cnf, 0.6
+path_query2.cnf, 0.2
+path_query3.cnf, 0.8
+</code></pre>
+<p>Queries within the same CSV file should pertain to the same probabilistic problem and thus share a common set of distributions.</p>
+<p>The initial distribution values for training are derived from the first CNF file in the query list. Users can choose these initial values e.g., randomly or based on prior knowledge of the probabilistic problem.</p>
+<p>The learning can be initiated with the default parameters using the following command.</p>
+<pre><code>schlandals learn --trainfile train.csv
+</code></pre>
+<p>In this basic setup, arithmetic circuits based on queries are compiled exactly.</p>
+<h2 id="partial-compilation"><a class="header" href="#partial-compilation">Partial Compilation</a></h2>
+<p>Schlandals supports learning distribution parameters for partially compiled arithmetic circuits, enabling the handling of queries that may be too large for full compilation.
+To use such partial compilation with the learning, the CNF files containing the query description should include an additional line specifying the distributions to be part of the compiled circuit and subject to learning.
+The line is of the form <code>c p learn</code>, followed by the index of the distributions to be learned.</p>
+<p>For instance, if a query involves 5 distributions in its inputs and one wish to use a partially compiled circuit to learn distributions 1, 4, and 5 only, the corresponding line to include in the CNF file would be:</p>
+<pre><code>c p learn 1 4 5
+</code></pre>
+<p>In this partial compilation scenario, the values of the non-learned distributions (e.g., distributions 2 and 3 in our example) will be the values provided in the CNF file. During the learning process, these values of non-learned distributions will be considered as their true values while learning the parameters of the specified distributions.</p>
+<p>The command to perform partial compilation is the following. (Assuming the CSV file referring to CNF files with partial compilation indications is saved as <code>train_partial.csv</code>).</p>
+<pre><code>schlandals learn --trainfile train_partial.csv
+</code></pre>
+<p>By default, this command performs learning on partially compiled queries using an epsilon value of 0. To set epsilon to a non-null value (e.g., 0.3), use the following command:</p>
+<pre><code>schlandals learn --trainfile train_partial.csv --epsilon 0.3
+</code></pre>
+<h2 id="train-test-setting"><a class="header" href="#train-test-setting">Train-Test Setting</a></h2>
+<p>The learning module supports the use of a test set, allowing the assessment of learned distribution parameters on unseen queries related to the same probabilistic problem and sharing the same distributions.</p>
+<p>A test CSV file containing the list of the test queries can be provided to the learning. The structure of the test file is the same to the one used for the train CSV file.</p>
+<p>The test queries will be compiled partially or not, depending on the CNF file. Then, the queries will be evaluated a first time with the initial values of the distributions, and a second time with the learned values of the distributions.</p>
+<p>The command to perform the learning with a test set is the following. (Assuming the CSV file we want to learn from is saved as <code>train.csv</code> and the CSV file with the test queries is saved as <code>test.csv</code>).</p>
+<pre><code>schlandals learn --trainfile train.csv --testfile test.csv
+</code></pre>
+<h2 id="logging-training-epochs-and-test-results"><a class="header" href="#logging-training-epochs-and-test-results">Logging Training Epochs (and Test Results)</a></h2>
+<p>To log losses and predicted outputs of each query at each epoch of learning, use the <code>--do-log</code> option along with the <code>--outputdir</code> option, indicating the folder for log storage. If a test set is provided, a second CSV file is created with losses and predicted outputs of each test query before and after learning.</p>
+<p>The command to perform the learning with logging is the following. (Assuming the folder in which we want the output files to be saved is <code>logs/</code>).</p>
+<pre><code>schlandals learn --trainfile train.csv --testfile test.csv --do-log --outputdir logs/
+</code></pre>
+<h2 id="command-line-options-1"><a class="header" href="#command-line-options-1">Command Line Options</a></h2>
+<pre><code>[schlandals@schlandalspc]$ schlandals learn --help
+Learn distribution parameters from a set of queries
+
+Usage: schlandals learn [OPTIONS] --trainfile &lt;TRAINFILE&gt;
+
+Options:
+      --trainfile &lt;TRAINFILE&gt;
+          The csv file containing the cnf filenames and the associated expected output
+
+      --testfile &lt;TESTFILE&gt;
+          The csv file containing the test cnf filenames and the associated expected output
+
+  -b, --branching &lt;BRANCHING&gt;
+          How to branch
+          
+          [default: min-in-degree]
+
+          Possible values:
+          - min-in-degree:  Minimum In-degree of a clause in the implication-graph
+          - min-out-degree: Minimum Out-degree of a clause in the implication-graph
+          - max-degree:     Maximum degree of a clause in the implication-graph
+          - vsids:          Variable State Independent Decaying Sum
+
+      --outfolder &lt;OUTFOLDER&gt;
+          If present, folder in which to store the output files
+
+  -l, --lr &lt;LR&gt;
+          Learning rate
+          
+          [default: 0.3]
+
+      --nepochs &lt;NEPOCHS&gt;
+          Number of epochs
+          
+          [default: 6000]
+
+  -d, --do-log
+          If present, save a detailled csv of the training and use a codified output filename
+
+      --timeout &lt;TIMEOUT&gt;
+          If present, define the learning timeout
+          
+          [default: 18446744073709551615]
+
+  -e, --epsilon &lt;EPSILON&gt;
+          If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
+          
+          [default: 0]
+
+      --loss &lt;LOSS&gt;
+          Loss to use for the training, default is the MAE Possible values: MAE, MSE
+          
+          [default: mae]
+          [possible values: mae, mse]
+
+  -j, --jobs &lt;JOBS&gt;
+          Number of threads to use for the evaluation of the DACs
+          
+          [default: 1]
+
+  -s, --semiring &lt;SEMIRING&gt;
+          The semiring on which to evaluate the circuits. If `tensor`, use torch to compute the gradients. If `probability`, use custom efficient backpropagations
+          
+          [default: probability]
+          [possible values: probability, tensor]
+
+  -o, --optimizer &lt;OPTIMIZER&gt;
+          The optimizer to use if `tensor` is selected as semiring
+          
+          [default: sgd]
+          [possible values: adam, sgd]
+
+      --lr-drop &lt;LR_DROP&gt;
+          The drop in the learning rate to apply at each step
+          
+          [default: 0.75]
+
+      --epoch-drop &lt;EPOCH_DROP&gt;
+          The number of epochs after which to drop the learning rate (i.e. the learning rate is multiplied by `lr_drop`)
+          
+          [default: 100]
+
+      --stopping-criterion &lt;STOPPING_CRITERION&gt;
+          The stopping criterion for the training (i.e. if the loss is below this value, stop the training)
+          
+          [default: 0.0001]
+
+      --delta-early-stop &lt;DELTA_EARLY_STOP&gt;
+          The minimum of improvement in the loss to consider that the training is still improving (i.e. if the loss is below this value for a number of epochs, stop the training)
+          
+          [default: 0.00001]
+
+      --patience &lt;PATIENCE&gt;
+          The number of epochs to wait before stopping the training if the loss is not improving (i.e. if the loss is below this value for a number of epochs, stop the training)
+          
+          [default: 5]
+
+  -h, --help
+          Print help (see a summary with '-h')
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><p>A Python interface, <code>pyschlandals</code>, is available <a href="https://pypi.org/project/pyschlandals/">from PyPi here</a>.
+The interface is still rudimentary; open a pull request if you need any functionality.
+To install the Python interface, run <code>pip install pyschlandals</code>.</p>
+<h2 id="running-a-simple-problem"><a class="header" href="#running-a-simple-problem">Running a simple problem</a></h2>
+<p>A problem in <code>pyschlandals</code> is a set of distributions and clauses.
+The following code block shows how to create a simple problem instance for a Bayesian Network and solve it using the DPLL-based search.
+Notice that the indexes in the clauses start at 1, and the distributions use the first indexes.</p>
+<pre><code class="language-python">from pyschlandals.pwmc import PyProblem
+
+problem = PyProblem()
+problem.add_distribution([0.2, 0.8])
+problem.add_distribution([0.3, 0.7])
+problem.add_distribution([0.4, 0.6])
+problem.add_distribution([0.1, 0.9])
+problem.add_distribution([0.5, 0.5])
+
+problem.add_clause([11, -1])
+problem.add_clause([12, -2])
+problem.add_clause([13, -11, -3])
+problem.add_clause([13, -12, -5])
+problem.add_clause([14, -11, -4])
+problem.add_clause([14, -12, -6])
+problem.add_clause([15, -13, -7])
+problem.add_clause([15, -14, -9])
+problem.add_clause([16, -13, -8])
+problem.add_clause([16, -14, -10])
+problem.add_clause([-15])
+
+print(problem.solve())
+</code></pre>
+<p>The problem generation can be seen as lazy. The <code>PyProblem</code> is sent to the rust code only when <code>problem.solve()</code> is called.
+At this point, the distributions and clauses are sent to Schlandals as an alternative to the <code>.cnf</code> files.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            MathJax.Hub.Register.StartupHook('End', function() {
+                window.setTimeout(window.print, 100);
+            });
+        });
+        </script>
+
+    </div>
+    </body>
+</html>
