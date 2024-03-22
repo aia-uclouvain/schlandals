@@ -93,7 +93,6 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
     let mut res: Option<Dac<Float>> = compile!(compiler);
     if let Some(ref mut dac) = &mut res {
         dac.evaluate();
-        let proba = dac.circuit_probability().clone();
         if let Some(f) = dotfile {
             let out = dac.as_graphviz();
             let mut outfile = File::create(f).unwrap();
@@ -110,6 +109,7 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
             }
             
         }
+        let proba = 1.0 - dac.circuit_probability().clone();
         ProblemSolution::Ok(proba)
     } else {
         ProblemSolution::Err(Error::Timeout)

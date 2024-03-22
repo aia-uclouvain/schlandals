@@ -141,7 +141,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
                 let proba = (lb*ub).sqrt();
                 self.statistics.print();
-                ProblemSolution::Ok(proba)
+                ProblemSolution::Ok(1.0 - proba)
             },
             None => ProblemSolution::Err(Error::Timeout),
         }
