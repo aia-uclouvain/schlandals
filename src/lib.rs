@@ -43,6 +43,7 @@ mod propagator;
 mod preprocess;
 pub mod learning;
 pub mod diagrams;
+pub use learning::LossFunctions;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -141,17 +142,17 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected, None))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected, None))
             }
         },
         #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected, None))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected, None))
             }
         }
     }

@@ -6,6 +6,9 @@ use schlandals::*;
 mod train;
 use train::*;
 
+mod learner;
+use learner::*;
+
 #[pyclass]
 #[derive(Clone, Copy)]
 pub enum PyBranching {
@@ -135,5 +138,6 @@ fn pyschlandals(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyBranching>()?;
     pwmc_submodule(py, m)?;
     train::learn_submodule(py, m)?;
+    learner::learner_submodule(py, m)?;
     Ok(())
 }

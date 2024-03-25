@@ -66,7 +66,7 @@ impl  PyLearnParameters {
     }
 }
 
-fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
+pub fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
     LearnParameters::new(param.lr,
                          param.nepochs,
                          param.compilation_timeout,
@@ -89,7 +89,7 @@ pub enum PySemiring {
     //Tensor,
 }
 
-fn get_semiring_from_pysemiring(semiring: PySemiring) -> Semiring {
+pub fn get_semiring_from_pysemiring(semiring: PySemiring) -> Semiring {
     match semiring {
         PySemiring::Probability => Semiring::Probability,
         //PySemiring::Tensor => Semiring::Tensor,

@@ -16,7 +16,6 @@
 
 use std::path::PathBuf;
 use chrono;
-//use rug::Float;
 use std::fs::File;
 use std::io::Write;
 
@@ -47,7 +46,9 @@ impl<const B: bool> Logger<B> {
             for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} prediction,", i));
             }
-            writeln!(out_train.as_mut().unwrap(), "{}", output).unwrap();
+            if outfolder.is_some() {
+                writeln!(out_train.as_mut().unwrap(), "{}", output).unwrap();
+            }
             out_train
         } else {
             None
@@ -68,7 +69,9 @@ impl<const B: bool> Logger<B> {
             for i in 0..ndacs_test {
                 output.push_str(&format!("dac{} prediction,", i));
             }
-            writeln!(out_test.as_mut().unwrap(), "{}", output).unwrap();
+            if outfolder.is_some() {
+                writeln!(out_test.as_mut().unwrap(), "{}", output).unwrap();
+            }
             out_test
         } else {
             None
@@ -96,7 +99,9 @@ impl<const B: bool> Logger<B> {
             for p in predictions.iter() {
                 output.push_str(&format!("{:.6},", p));
             }
-            writeln!(self.outfile_train.as_mut().unwrap(), "{}", output).unwrap();
+            if self.outfile_train.is_some() {
+                writeln!(self.outfile_train.as_mut().unwrap(), "{}", output).unwrap();
+            }
         }
     }
     pub fn log_test(&mut self, loss:&Vec<f64>, epsilon:f64, predictions:&Vec<f64>) {
@@ -109,7 +114,9 @@ impl<const B: bool> Logger<B> {
             for p in predictions.iter() {
                 output.push_str(&format!("{:.6},", p));
             }
-            writeln!(self.outfile_test.as_mut().unwrap(), "{}", output).unwrap();
+            if self.outfile_test.is_some() {
+                writeln!(self.outfile_test.as_mut().unwrap(), "{}", output).unwrap();
+            }
         }
     }
 }
