@@ -115,6 +115,11 @@ impl<R> Dataset<R>
     pub fn expected(&self, query_index: usize) -> &R {
         &self.expected[query_index]
     }
+
+    /// Returns the list of expected outputs
+    pub fn get_expecteds(&self) -> &Vec<R> {
+        &self.expected
+    }
 }
 
 impl<R: SemiRing + 'static> std::ops::Index<usize> for Dataset<R> {

@@ -60,15 +60,16 @@ pub struct Learner<const S: bool>
     log: Logger<S>,
     learned_distributions: Vec<bool>,
     epsilon: f64,
+    queries: Vec<(f64,f64)>,
 }
 
 impl <const S: bool> Learner<S>
 {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, 
+               jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>, mut queries: Option<Vec<(f64,f64)>>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
-        
         // Retrieves the distributions values and computes their unsoftmaxed values
         // and initializes the gradients to 0
         let distributions = distributions_from_cnf(&inputs[0]);
@@ -88,14 +89,26 @@ impl <const S: bool> Learner<S>
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
+        let mut train_queries = vec![];
         let mut test_data = vec![];
         let mut test_expected = vec![];
         while !train_dacs.is_empty() {
             let d = train_dacs.pop().unwrap();
             let expected = expected_outputs.pop().unwrap();
+            let mut query = (-1.0, -1.0);
+            if let Some(q) = queries.as_mut() {
+                query = q.pop().unwrap();
+            }
             if let Some(dac) = d {
                 train_data.push(dac);
                 train_expected.push(f128!(expected));
+                if query.0 != -1.0 {
+                    train_queries.push(query);
+                }
+                println!("Compiled");
+            }
+            else {
+                println!("Not compiled");
             }
         }
         while !test_dacs.is_empty() {
@@ -110,7 +123,6 @@ impl <const S: bool> Learner<S>
         let test_dataset = Dataset::new(test_data, test_expected);
         // Initializing the logger
         let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
-        
         Self { 
             train: train_dataset,
             test: test_dataset,
@@ -119,6 +131,7 @@ impl <const S: bool> Learner<S>
             log,
             learned_distributions,
             epsilon,
+            queries: train_queries,
         }
     }
 
@@ -144,6 +157,21 @@ impl <const S: bool> Learner<S>
         softmaxed
     }
 
+    /// Return the gradients of the parameters
+    pub fn get_gradients(&self) -> &Vec<Vec<Float>> {
+        &self.gradients
+    }
+
+    /// Return the train dataset
+    pub fn get_train(&self) -> &Dataset<Float> {
+        &self.train
+    }
+
+    /// Return the training queries, or an empty vector if no queries were provided
+    pub fn get_queries(&self) -> &Vec<(f64,f64)> {
+        &self.queries
+    }
+
     // --- Setters --- //
 
     /// Set the gradients of the parameters to 0
@@ -155,17 +183,31 @@ impl <const S: bool> Learner<S>
         }
     }
 
+    /// Set the distributions to the given values (that are softmaxed or unsoftmaxed)
+    pub fn set_distributions(&mut self, distributions: Vec<Vec<f64>>, is_softmaxed: bool) {
+        //println!("dist 0 {:?}", distributions[0]);
+        if is_softmaxed{
+            self.unsoftmaxed_distributions = distributions.iter().map(|row| row.iter().map(|&x| x.ln()).collect()).collect();
+        } else {
+            self.unsoftmaxed_distributions = distributions;
+        }
+        //println!("unsftmx dist 0 {:?}", self.unsoftmaxed_distributions[0]);
+    }
+
     // --- Evaluation --- //
 
     // Evaluate the different train DACs and return the results
     pub fn evaluate(&mut self) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
+        //println!("softmaxed 0 {:?}", softmaxed[0]);
         for dac in self.train.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.train.get_queries_mut().par_iter_mut().for_each(|d| {
             d.evaluate();
+            //println!("dac 0 \n{}", d.as_graphviz());
         });
+        // println!("dac 0 \n{}", self.train[0].as_graphviz());
         self.train.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
@@ -223,7 +265,8 @@ impl <const S: bool> Learner<S>
                     if let TypeNode::Distribution { d, v } = self.train[query_id][child].get_type() {
                         // Compute the gradient for children that are leaf distributions
                         let mut factor = path_val.clone() * gradient_loss[query_id];
-                        if self.train[query_id][node].is_product() {
+                        // println!("factor {}, value {}, get_prob {}", factor.clone(), value.clone(), self.get_probability(d, v).clone());
+                        if self.train[query_id][node].is_product() && self.get_probability(d, v) != 0.0 {
                             factor *= value;
                             factor /= self.get_probability(d, v);
                         }
@@ -236,6 +279,7 @@ impl <const S: bool> Learner<S>
                             self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
                             sum_other_w += weight.clone();
                         }
+                        // println!("for dac {} value {} factor {} child {} sum_o_w {}", d, v, factor.clone(), child_w.clone(), sum_other_w.clone());
                         self.gradients[d][v] += factor * child_w * sum_other_w;
                     }
                 }
