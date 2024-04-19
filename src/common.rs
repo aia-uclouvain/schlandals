@@ -14,8 +14,6 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use rug::Float;
-
 macro_rules! f128 {
     ($v:expr) => {
         Float::with_val(113, $v)
@@ -23,23 +21,5 @@ macro_rules! f128 {
 }
 
 pub const FLOAT_CMP_THRESHOLD: f64 = 0.0000001;
-
-pub struct Solution {
-    probability: Float,
-    epsilon: f64,
-    sat: bool,
-}
-
-impl Solution {
-    pub fn new(probability: Float, epsilon: f64, sat: bool) -> Self {
-        Self { probability, epsilon, sat}
-    }
-
-    pub fn probability(&self) -> &Float { &self.probability }
-
-    pub fn epsilon(&self) -> f64 { self.epsilon }
-
-    pub fn is_sat(&self) -> bool { self.sat }
-}
 
 pub(crate) use f128;

@@ -144,8 +144,15 @@ fn main() {
     };
     match app.command {
         Command::Search { input, branching, statistics, memory , epsilon, approx} => {
-            let solution = schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout);
-            print!("{}", solution.probability());
+            match schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout) {
+                Err(e) => {
+                    match e {
+                        Error::Unsat => println!("Model UNSAT"),
+                        Error::Timeout => println!("Timeout"),
+                    };
+                },
+                Ok(_p) => (), //println!("{}", p),
+            };
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon} => {
             let e = match epsilon {

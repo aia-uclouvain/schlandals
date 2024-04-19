@@ -24,8 +24,7 @@ On the other hand, the \\( \theta_{v}^{p_1, \ldots, p_n\} \\) variables are used
 
 ## The Clauses
 
-While similar in WMC encodings, the clauses contain one significant difference; the head of the implication is a non-weighted variable.
-This small difference is useful for the additional propagation performed by Schlandals.
+While similar in WMC encodings, the clauses contain one significant difference.
 For each CPT entry of node \\( v \\), associated with value \\( v \\) and parents value \\( p_1, \ldots, p_n \\), we have the clause
 \\[ \lambda_{p_1} \land \ldots \land \lambda_{p_n} \land \theta_{v}^{p_1, \ldots, p_n} \implies \lambda_{v} \\]
 
@@ -37,6 +36,7 @@ Let \\( V \\) have domain \\( v_1, \ldots, v_m \\). Then, to encode the query \\
 
 The encoding (in DIMACS-style format) is show below for the query \\( P(D = d_0) \\).
 Notice that the probailistic variables start at 1 and are in contiguous blocks.
+The 
 
 ```
 p cnf 26 19
@@ -81,7 +81,7 @@ c CPT for D. Variable for d_0 = 25, d_1 = 26
 -17 -22 -24 25 0
 -18 -22 -24 26 0
 c Query
--25
+-26 0
 ```
 
 ## References
