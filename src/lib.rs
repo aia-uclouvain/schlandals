@@ -25,7 +25,6 @@ use solvers::GenericSolver;
 use search_trail::StateManager;
 use clap::ValueEnum;
 use rug::Float;
-use common::Solution;
 
 use crate::core::components::ComponentExtractor;
 use solvers::ProblemSolution;
@@ -97,12 +96,12 @@ impl std::fmt::Display for ApproximateMethod {
     }
 }
 
-pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
+pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> ProblemSolution {
     let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
     search!(solver)
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Solution {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
     let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
     match approx {
         ApproximateMethod::Bounds => search!(solver),
@@ -114,6 +113,7 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
     let mut res: Option<Dac<Float>> = compile!(compiler);
     if let Some(ref mut dac) = &mut res {
         dac.evaluate();
+        let proba = dac.circuit_probability().clone();
         if let Some(f) = dotfile {
             let out = dac.as_graphviz();
             let mut outfile = File::create(f).unwrap();
@@ -130,7 +130,6 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
             }
             
         }
-        let proba: Float = 1.0 - dac.circuit_probability().clone();
         ProblemSolution::Ok((proba.clone(), proba))
     } else {
         ProblemSolution::Err(Error::Timeout)
