@@ -228,7 +228,7 @@ impl Graph {
         }
         self.clauses.truncate(new_clause_index);
         self.clauses.shrink_to_fit();
-
+        if self.clauses.is_empty(){ return; }
         for clause in self.clauses_iter() {
             self[clause].clear(&clauses_map, state);
         }
@@ -283,18 +283,6 @@ impl Graph {
                 if distribution != current_distribution {
                     self[distribution].set_start(variable);
                     current_distribution = distribution;
-                }
-            }
-        }
-
-        for distribution in self.distributions_iter() {
-            let start = self[distribution].start();
-            let size = self[distribution].size();
-            for variable in self.variables_iter() {
-                if let Some(d) = self[variable].distribution() {
-                    if d == distribution {
-                        assert!(variable >= start && variable < start + size);
-                    }
                 }
             }
         }

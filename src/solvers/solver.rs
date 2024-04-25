@@ -339,8 +339,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.graph.clear_after_preprocess(&mut self.state);
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
-
+        self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
         self.branching_heuristic.init(&self.graph, &self.state);
+        self.propagator.set_forced();
         let mut dac = Dac::new();
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
             None => None,
@@ -364,7 +365,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let cache_key = self.component_extractor[component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
-                        if node.0 != 0 {
+                        if node.0 != usize::MAX {
                             if prod_node.is_none() {
                                 prod_node = Some(dac.add_prod_node());
                             }
@@ -375,7 +376,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     },
                     None => {
                         if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
-                        if self.component_extractor[sub_component].has_learned_distribution() {
+                            if self.component_extractor[sub_component].has_learned_distribution() {
                                 if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
                                     if prod_node.is_none() {
                                         prod_node = Some(dac.add_prod_node());
@@ -383,7 +384,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                     dac.add_node_output(child, prod_node.unwrap());
                                     self.compilation_cache.insert(cache_key, child);
                                 } else {
-                                    self.compilation_cache.insert(cache_key, NodeIndex(0));
+                                    self.compilation_cache.insert(cache_key, NodeIndex(usize::MAX));
                                     return None;
                                 }
                             } else {
@@ -427,6 +428,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(backtrack_level) => {
                     if backtrack_level != level {
+                        self.restore();
                         return None;
                     }
                 },
@@ -459,7 +461,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     let distribution = self.graph[variable].distribution().unwrap();
                     // This represent which "probability index" is send to the node
                     let value_index = variable.0 - self.graph[distribution].start().0;
-                    let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
+                    let old_distribution = self.graph[distribution].old_index();
+                    let old_value = self.graph[variable].old_index() - self.graph[distribution].old_first().0;
+                    let distribution_node = dac.distribution_value_node_index(distribution, value_index, old_distribution, old_value, self.graph[variable].weight().unwrap());
                     dac.add_node_output(distribution_node, node);
                 }
             }
@@ -473,7 +477,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_index = variable.0 - self.graph[distribution].start().0;
-                            let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
+                            let old_distribution = self.graph[distribution].old_index();
+                            let old_value = self.graph[variable].old_index() - self.graph[distribution].old_first().0;
+                            let distribution_node = dac.distribution_value_node_index(distribution, value_index, old_distribution, old_value, self.graph[variable].weight().unwrap());
                             dac.add_node_output(distribution_node, sum_node);
                         }
                     }

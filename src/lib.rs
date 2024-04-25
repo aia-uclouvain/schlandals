@@ -102,7 +102,7 @@ pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
+    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics, false);
     match approx {
         ApproximateMethod::Bounds => search!(solver),
         ApproximateMethod::LDS => lds!(solver),
@@ -139,7 +139,7 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
+            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
             _compile(compiler, fdac, dotfile)
         },
         FileType::FDAC => {
@@ -204,6 +204,34 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     }
     let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
     learner.train(&params);
+}
+
+pub fn partial(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
+            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters) {
+    let mut inputs = vec![];
+    let mut expected: Vec<f64> = vec![];
+    let file = File::open(&trainfile).unwrap();
+    let reader = BufReader::new(file);
+    for line in reader.lines().skip(1) {
+        let l = line.unwrap();
+        let mut split = l.split(",");
+        inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
+        expected.push(split.next().unwrap().parse::<f64>().unwrap());
+    }
+    let mut test_inputs = vec![];
+    let mut test_expected: Vec<f64> = vec![];
+    if let Some(testfile) = testfile {
+        let file = File::open(&testfile).unwrap();
+        let reader = BufReader::new(file);
+        for line in reader.lines().skip(1) {
+            let l = line.unwrap();
+            let mut split = l.split(",");
+            test_inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
+            test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
+        }
+    }
+    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
+    learner.partial_approx(&params);
 }
 
 impl std::fmt::Display for Loss {

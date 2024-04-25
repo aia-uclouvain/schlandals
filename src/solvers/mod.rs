@@ -111,11 +111,11 @@ macro_rules! solver_from_problem {
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $t:expr, $s:expr, $l:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, false);
+            let graph = graph_from_ppidimacs($i, &mut state, $l);
             let component_extractor = ComponentExtractor::new(&graph, &mut state);
             let mlimit = if let Some(m) = $m {
                 m

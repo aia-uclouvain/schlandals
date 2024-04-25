@@ -135,11 +135,11 @@ impl<R> Dac<R>
     }
     
     /// Returns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
+    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, old_distribution: DistributionIndex, old_value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
         } else {
-            self.nodes.push(Node::distribution(distribution.0, value, probability));
+            self.nodes.push(Node::distribution(old_distribution.0, old_value, probability));
             self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
         }
@@ -500,7 +500,7 @@ where R: SemiRing
         // Generating the nodes in the network 
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = node.0;
-            let value = format!("{:.4}", self[node].value().to_f64());
+            let value = format!("{:10.3e}", self[node].value().to_f64());
             match self[node].get_type() {
                 TypeNode::Sum => {
                     let attributes = &sum_node_attributes;

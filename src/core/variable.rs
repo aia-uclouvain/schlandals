@@ -52,6 +52,8 @@ pub struct Variable {
     is_implied: ReversibleBool,
     /// Random u64 associated to the variable, used for hash computation
     hash: u64,
+    /// Initial index of the variable in the problem
+    old_index: usize,
 }
 
 impl Variable {
@@ -69,6 +71,7 @@ impl Variable {
             reason: None,
             is_implied: state.manage_bool(false),
             hash: rand::random(),
+            old_index: id,
         }
     }
     
@@ -95,6 +98,11 @@ impl Variable {
     /// Returns the weight of the variable
     pub fn weight(&self) -> Option<f64> {
         self.weight
+    }
+
+    /// Returns the initial index of the variable in the problem
+    pub fn old_index(&self) -> usize {
+        self.old_index
     }
     
     /// Sets the variable to the given value. This operation is reverted when

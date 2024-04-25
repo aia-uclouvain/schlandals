@@ -45,6 +45,9 @@ use crate::common::f128;
 use super::utils::*;
 use super::*;
 use rug::{Assign, Float};
+use rand::Rng;
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -317,6 +320,44 @@ impl<const S: bool> Learning for Learner<S> {
             let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss().loss(prediction, self.test.expected(i).to_f64())).collect::<Vec<f64>>();
             self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
+    }
+
+    fn partial_approx(&mut self, params: &LearnParameters) {
+        // On arrive ici avec les queries compilées en partial avec epsilon qui vaut 0.
+        // On va recuperer les vraies valeurs des approx pour pouvoir les modifier
+        let mut real_approx = vec![vec![0.0]; self.train.len()];
+        let init_dist = self.unsoftmaxed_distributions.clone();
+        for (i, query) in self.train.get_queries().iter().enumerate(){
+            real_approx[i] = vec![0.0; query.len()];
+            for (n, node) in query.iter().enumerate(){
+                if let TypeNode::Approximate = query[node].get_type(){
+                    let value = query[node].value().to_f64();
+                    real_approx[i][n] = value;
+                }
+            }
+        }
+        //println!("Real approx: {:?}", real_approx);
+        //println!("init dist: {:?}", init_dist);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let epsilons = vec![0.0, 0.01, 0.05, 0.1, 0.3, 0.5, 0.8];
+        for epsilon in epsilons{
+            self.unsoftmaxed_distributions = init_dist.clone();
+            let mut i = 0;
+            for query in self.train.get_queries_mut(){
+                for (n, node) in query.iter().enumerate(){
+                    if let TypeNode::Approximate = query[node].get_type(){
+                        let new_value = rng.gen_range(real_approx[i][n]/(1.0+epsilon)..=(real_approx[i][n]*(1.0+epsilon)).min(1.0));
+                        query[node].set_value(f128!(new_value));
+                    }
+                }
+                i += 1;
+            }
+            self.evaluate();
+            self.epsilon = epsilon;
+            self.train(params);
+        }
+
     }
 }
 

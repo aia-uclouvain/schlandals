@@ -47,8 +47,10 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
             FileType::CNF => {
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
-                let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
-                compile!(compiler)
+                let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, true);
+                let d = compile!(compiler);
+                println!("Compiled {}", d.is_some());
+                d
             },
             FileType::FDAC => {
                 println!("Reading {}", input.to_str().unwrap());

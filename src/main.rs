@@ -133,6 +133,69 @@ enum Command {
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=5)]
         patience: usize,
+    },
+    /// Partial approx
+    Partial{
+        /// The csv file containing the cnf filenames and the associated expected output
+        #[clap(long, value_parser, value_delimiter=' ')]
+        trainfile: PathBuf,
+        /// The csv file containing the test cnf filenames and the associated expected output
+        #[clap(long, value_parser, value_delimiter=' ')]
+        testfile: Option<PathBuf>,
+        /// How to branch
+        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
+        branching: schlandals::Branching,
+        /// If present, folder in which to store the output files
+        #[clap(long)]
+        outfolder: Option<PathBuf>,
+        /// Learning rate
+        #[clap(short, long, default_value_t=0.3)]
+        lr: f64,
+        /// Number of epochs
+        #[clap(long, default_value_t=6000)]
+        nepochs: usize,
+        /// If present, save a detailled csv of the training and use a codified output filename
+        #[clap(long, short, action)]
+        do_log: bool,
+        /// If present, define the learning timeout
+        #[clap(long, default_value_t=u64::MAX)]
+        ltimeout: u64,
+        /// If present, the epsilon used for the approximation. Value set by default to 0, thus performing exact search
+        #[clap(short, long, default_value_t=0.0)]
+        epsilon: f64,
+        /// Loss to use for the training, default is the MAE
+        /// Possible values: MAE, MSE
+        #[clap(long, default_value_t=schlandals::Loss::MAE, value_enum)]
+        loss: schlandals::Loss, 
+        /// Number of threads to use for the evaluation of the DACs
+        #[clap(long, default_value_t=1, short)]
+        jobs: usize,
+        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
+        /// to compute the gradients. If `probability`, use custom efficient backpropagations
+        #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
+        semiring: schlandals::Semiring,
+        /// The optimizer to use if `tensor` is selected as semiring
+        #[clap(long, short, default_value_t=schlandals::Optimizer::Adam, value_enum)]
+        optimizer: schlandals::Optimizer,
+        /// The drop in the learning rate to apply at each step
+        #[clap(long, default_value_t=0.75)]
+        lr_drop: f64,
+        /// The number of epochs after which to drop the learning rate
+        /// (i.e. the learning rate is multiplied by `lr_drop`)
+        #[clap(long, default_value_t=100)]
+        epoch_drop: usize,
+        /// The stopping criterion for the training
+        /// (i.e. if the loss is below this value, stop the training)
+        #[clap(long, default_value_t=0.0001)]
+        early_stop_threshold: f64,
+        /// The minimum of improvement in the loss to consider that the training is still improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=0.00001)]
+        early_stop_delta: f64,
+        /// The number of epochs to wait before stopping the training if the loss is not improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=5)]
+        patience: usize,
     }
 }
 
@@ -189,8 +252,29 @@ fn main() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
-            
             schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
+        },
+        Command::Partial { trainfile, testfile, branching, outfolder, lr, nepochs, 
+            do_log, ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
+            epoch_drop, early_stop_threshold, early_stop_delta, patience } => {
+            let params = LearnParameters::new(
+                lr,
+                nepochs,
+                timeout,
+                ltimeout,
+                loss,
+                optimizer,
+                lr_drop,
+                epoch_drop,
+                early_stop_threshold,
+                early_stop_delta,
+                patience,
+            );
+            if do_log && outfolder.is_none() {
+                eprintln!("Error: if do-log is set, then outfolder should be specified");
+                process::exit(1);
+            }
+            schlandals::partial(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
         }
     }
 }
