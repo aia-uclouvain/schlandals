@@ -546,6 +546,7 @@ impl Propagator {
         self.clause_flags.shrink_to_fit();
         self.lit_flags.truncate(number_variables);
         self.lit_flags.shrink_to_fit();
+        self.assignments.clear();
     }
 }
 

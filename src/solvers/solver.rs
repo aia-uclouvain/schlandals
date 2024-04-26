@@ -339,6 +339,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.graph.clear_after_preprocess(&mut self.state);
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
+        self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
 
         self.branching_heuristic.init(&self.graph, &self.state);
         let mut dac = Dac::new();
