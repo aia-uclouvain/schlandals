@@ -118,7 +118,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self) -> ProblemSolution {
+    pub fn search(&mut self, is_lds: bool) -> ProblemSolution {
         self.start = Instant::now();
         self.propagator.init(self.graph.number_clauses());
         // First, let's preprocess the problem
@@ -145,12 +145,31 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Init the various structures
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
-        let lb = p_in * preproc_in.clone();
-        let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-        print!("{} {}", lb, ub);
-        self.statistics.print();
-        ProblemSolution::Ok((lb, ub))
+        if !is_lds {
+            let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
+            let lb = p_in * preproc_in.clone();
+            let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
+            print!("{} {}", lb, ub);
+            self.statistics.print();
+            ProblemSolution::Ok((lb, ub))
+        } else {
+            let mut discrepancy = 1;
+            loop {
+                let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
+                let lb = p_in * preproc_in.clone();
+                let removed = preproc_out + p_out * preproc_in.clone();
+                let ub: Float = 1.0 -  removed;
+                if self.start.elapsed().as_secs() >= self.timeout {
+                    return ProblemSolution::Ok((lb, ub))
+                }
+                let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
+                println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
+                if self.start.elapsed().as_secs() >= self.timeout || ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
+                    return ProblemSolution::Ok((lb, ub));
+                }
+                discrepancy += 1;
+            }
+        }
     }
 
     /// Split the component into multiple sub-components and solve each of them
@@ -320,6 +339,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     fn are_bounds_tight_enough(&self, p_in: &Float, p_out: &Float, bound_factor: f64) -> bool {
         1.0 - p_out.clone() <= p_in.clone() * bound_factor
     }
+
 }
 
 // --- COMPILER --- //
@@ -484,55 +504,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             Some(node)
         } else {
             None
-        }
-    }
-}
-
-// --- LDS ---
-impl<B: BranchingDecision, const S: bool> Solver<B, S> {
-
-    pub fn lds(&mut self) -> ProblemSolution {
-        self.start = Instant::now();
-        self.propagator.init(self.graph.number_clauses());
-        // First, let's preprocess the problem
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut self.propagator, &mut self.component_extractor);
-        let preproc = preprocessor.preprocess();
-        if preproc.is_none() {
-            return ProblemSolution::Err(Error::Unsat);
-        }
-        let preproc_in = preproc.unwrap();
-        let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
-            self.graph[d].remaining(&self.state)
-        }).product::<f64>();
-        if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
-            let lb = preproc_in.clone();
-            let ub = f128!(1.0 - preproc_out);
-            print!("{} {} {} {}", 1, lb, ub, self.start.elapsed().as_secs());
-            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
-        }
-        self.graph.clear_after_preprocess(&mut self.state);
-        let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
-        self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
-        self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
-
-        // Init the various structures
-        self.branching_heuristic.init(&self.graph, &self.state);
-        self.propagator.set_forced();
-        let mut discrepancy = 1;
-        loop {
-            let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
-            let lb = p_in * preproc_in.clone();
-            let removed = preproc_out + p_out * preproc_in.clone();
-            let ub: Float = 1.0 -  removed;
-            if self.start.elapsed().as_secs() >= self.timeout {
-                return ProblemSolution::Ok((lb, ub))
-            }
-            let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
-            println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
-            if ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
-                return ProblemSolution::Ok((lb, ub));
-            }
-            discrepancy += 1;
         }
     }
 }

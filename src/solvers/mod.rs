@@ -130,14 +130,14 @@ macro_rules! make_solver {
 macro_rules! search {
     ($s:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.search(),
-            GenericSolver::SMinOutDegree(mut solver) => solver.search(),
-            GenericSolver::SMaxDegree(mut solver) => solver.search(),
-            GenericSolver::SVSIDS(mut solver) => solver.search(),
-            GenericSolver::QMinInDegree(mut solver) => solver.search(),
-            GenericSolver::QMinOutDegree(mut solver) => solver.search(),
-            GenericSolver::QMaxDegree(mut solver) => solver.search(),
-            GenericSolver::QVSIDS(mut solver) => solver.search(),
+            GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+            GenericSolver::SMinOutDegree(mut solver) => solver.search(false),
+            GenericSolver::SMaxDegree(mut solver) => solver.search(false),
+            GenericSolver::SVSIDS(mut solver) => solver.search(false),
+            GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+            GenericSolver::QMinOutDegree(mut solver) => solver.search(false),
+            GenericSolver::QMaxDegree(mut solver) => solver.search(false),
+            GenericSolver::QVSIDS(mut solver) => solver.search(false),
         }
     }
 }
@@ -145,14 +145,14 @@ macro_rules! search {
 macro_rules! lds {
     ($s:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.lds(),
-            GenericSolver::SMinOutDegree(mut solver) => solver.lds(),
-            GenericSolver::SMaxDegree(mut solver) => solver.lds(),
-            GenericSolver::SVSIDS(mut solver) => solver.lds(),
-            GenericSolver::QMinInDegree(mut solver) => solver.lds(),
-            GenericSolver::QMinOutDegree(mut solver) => solver.lds(),
-            GenericSolver::QMaxDegree(mut solver) => solver.lds(),
-            GenericSolver::QVSIDS(mut solver) => solver.lds(),
+            GenericSolver::SMinInDegree(mut solver) => solver.search(true),
+            GenericSolver::SMinOutDegree(mut solver) => solver.search(true),
+            GenericSolver::SMaxDegree(mut solver) => solver.search(true),
+            GenericSolver::SVSIDS(mut solver) => solver.search(true),
+            GenericSolver::QMinInDegree(mut solver) => solver.search(true),
+            GenericSolver::QMinOutDegree(mut solver) => solver.search(true),
+            GenericSolver::QMaxDegree(mut solver) => solver.search(true),
+            GenericSolver::QVSIDS(mut solver) => solver.search(true),
         }
     }
 }
