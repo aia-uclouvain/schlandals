@@ -356,14 +356,15 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if preprocessor.preprocess().is_none() {
             return None;
         }
+        let mut dac = Dac::new();
+        let prod_node = self.get_prod_node_from_propagations(&mut dac);
         self.graph.clear_after_preprocess(&mut self.state);
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
         self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
 
         self.branching_heuristic.init(&self.graph, &self.state);
-        let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), prod_node) {
             None => None,
             Some(_) => {
                 dac.optimize_structure();
@@ -373,8 +374,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 
     /// Expands a product node of the arithmetic circuit
-    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<NodeIndex> {
-        let mut prod_node = self.get_prod_node_from_propagations(dac);
+    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64, base_node: Option<NodeIndex>) -> Option<NodeIndex> {
+        let mut prod_node = if base_node.is_some() { base_node } else { self.get_prod_node_from_propagations(dac) };
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
@@ -382,16 +383,14 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if self.start.elapsed().as_secs() >= self.timeout {
                     return None;
                 }
-                let cache_key = self.component_extractor[component].get_cache_key();
+                let cache_key = self.component_extractor[sub_component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
-                        if node.0 != 0 {
+                        if node.0 != usize::MAX {
                             if prod_node.is_none() {
                                 prod_node = Some(dac.add_prod_node());
                             }
                             dac.add_node_output(*node, prod_node.unwrap());
-                        } else {
-                            return None;
                         }
                     },
                     None => {
@@ -404,8 +403,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                     dac.add_node_output(child, prod_node.unwrap());
                                     self.compilation_cache.insert(cache_key, child);
                                 } else {
-                                    self.compilation_cache.insert(cache_key, NodeIndex(0));
-                                    return None;
+                                    self.compilation_cache.insert(cache_key, NodeIndex(usize::MAX));
                                 }
                             } else {
                                 // Still some distributions to branch on, but no more to learn.
@@ -452,7 +450,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     }
                 },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor, None) {
                         if sum_node.is_none() {
                             sum_node = Some(dac.add_sum_node());
                         }
@@ -470,7 +468,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     ///     1) All the variables that have been set to true
     ///     2) The distributions that have become unconstrained (merged into a sum node)
     fn get_prod_node_from_propagations<R: SemiRing>(&self, dac: &mut Dac<R>) -> Option<NodeIndex> {
-        if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
+        if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             // First, we look at the assignments
             for literal in self.propagator.assignments_iter(&self.state) {
