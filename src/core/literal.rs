@@ -22,7 +22,7 @@
 //! This is done so that each literal can query on its own the state of its associated variable
 //! (bypassing problems with the borrow checker).
 
-use super::graph::VariableIndex;
+use super::problem::VariableIndex;
 use search_trail::{StateManager, OptionBoolManager, ReversibleOptionBool};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

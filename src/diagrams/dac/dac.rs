@@ -38,7 +38,7 @@ use rustc_hash::FxHashMap;
 use crate::common::*;
 
 use crate::diagrams::*;
-use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::core::problem::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
 
 use super::node::*;
@@ -69,7 +69,7 @@ impl<R> Dac<R>
     where R: SemiRing
 {
 
-    /// Creates a new empty DAC. An input node is created for each distribution in the graph.
+    /// Creates a new empty DAC. An input node is created for each distribution in the problem.
     pub fn new() -> Self {
         Self {
             nodes: vec![],
@@ -479,9 +479,9 @@ where R: SemiRing
     }
 }
 
-// Various methods for dumping the compiled circuits, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
+// Various methods for dumping the compiled circuits, including standardized format and problemviz (inspired from https://github.com/xgillard/ddo )
 
-// Visualization as graphviz DOT file
+// Visualization as problemviz DOT file
 impl<R> Dac<R>
 where R: SemiRing
 {

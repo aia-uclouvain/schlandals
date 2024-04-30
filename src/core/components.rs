@@ -14,21 +14,21 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! This module provides structure used to detect connected components in the implication graph.
+//! This module provides structure used to detect connected components in the implication problem.
 //! Two clauses C1 = (I1, h1) and C2 = (I2, h2) are connected if and only if
-//!     1. Both clauses are still constrained in the implication graph
+//!     1. Both clauses are still constrained in the implication problem
 //!     2. Either h2 is in I1 or h1 is in I2
 //!     3. C1 and C2 have probabilistic variables in their bodies that are from the same distribution
 //!   
-//! The components are extracted using a simple DSF on the implication graph. During this traversal, the
+//! The components are extracted using a simple DSF on the implication problem. During this traversal, the
 //! hash of the components are also computing.
-//! This hash is a simple XOR between random bitstring that are assigned durnig the graph creation.
+//! This hash is a simple XOR between random bitstring that are assigned durnig the problem creation.
 //! For convenience the DFS extractor also sets the f-reachability and t-reachability once the component is extracted.
 //! 
 //! This module also exposes a special component extractor that do not detect any components.
 //! It should only be used for debugging purpose to isolate bugs
 
-use super::graph::{ClauseIndex, Graph, DistributionIndex};
+use super::problem::{ClauseIndex, Problem, DistributionIndex};
 use crate::{propagator::Propagator, solvers::CacheKey};
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 use bitvec::prelude::*;
@@ -123,8 +123,8 @@ impl Component {
 }
 
 impl ComponentExtractor {
-    /// Creates a new component extractor for the implication graph `g`
-    pub fn new(g: &Graph, state: &mut StateManager) -> Self {
+    /// Creates a new component extractor for the implication problem `g`
+    pub fn new(g: &Problem, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_clauses()).map(ClauseIndex).collect();
         let clause_positions = (0..g.number_clauses()).collect();
         let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
@@ -137,7 +137,7 @@ impl ComponentExtractor {
             hash: 0,
             max_probability: 1.0,
             has_learned_distribution: false,
-            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses_probem()),
+            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses_problem()),
         }];
         Self {
             clauses: nodes,
@@ -158,7 +158,7 @@ impl ComponentExtractor {
     ///     3. It has not yet been added to the component
     fn is_node_visitable(
         &self,
-        g: &Graph,
+        g: &Problem,
         clause: ClauseIndex,
         comp_start: usize,
         comp_size: &usize,
@@ -180,7 +180,7 @@ impl ComponentExtractor {
     /// with it. If the clause is unconstrained or has already been visited, it is skipped.
     fn explore_component(
         &mut self,
-        g: &Graph,
+        g: &Problem,
         comp_start: usize,
         comp_size: &mut usize,
         comp_distribution_start: usize,
@@ -275,7 +275,7 @@ impl ComponentExtractor {
     /// Returns true iff at least one component has been detected and it contains one distribution
     pub fn detect_components (
         &mut self,
-        g: &mut Graph,
+        g: &mut Problem,
         state: &mut StateManager,
         component: ComponentIndex,
         propagator: &mut Propagator,
@@ -305,7 +305,7 @@ impl ComponentExtractor {
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
                 let mut has_learned_distribution = false;
-                let mut bit_repr = bits![0].repeat(g.number_clauses_probem() + g.number_variables());
+                let mut bit_repr = bits![0].repeat(g.number_clauses_problem() + g.number_variables());
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -352,10 +352,10 @@ impl ComponentExtractor {
         self.clauses[start..end].iter().copied()
     }
 
-    pub fn find_constrained_distribution(&self, component: ComponentIndex, graph: &Graph, state: &StateManager) -> bool {
+    pub fn find_constrained_distribution(&self, component: ComponentIndex, problem: &Problem, state: &StateManager) -> bool {
         let start = self.components[component.0].start;
         let end = start + self.components[component.0].size;
-        self.clauses[start..end].iter().copied().find(|c| graph[*c].is_constrained(state) && !graph[*c].is_learned() && graph[*c].has_probabilistic(state)).is_some()
+        self.clauses[start..end].iter().copied().find(|c| problem[*c].is_constrained(state) && !problem[*c].is_learned() && problem[*c].has_probabilistic(state)).is_some()
     }
     
     /// Returns the number of components
@@ -455,19 +455,19 @@ impl Iterator for ComponentIterator {
 #[cfg(test)]
 mod test_component_detection {
     
-    use crate::core::graph::{Graph, VariableIndex, ClauseIndex};
+    use crate::core::problem::{Problem, VariableIndex, ClauseIndex};
     use crate::core::components::*;
     use search_trail::{StateManager, SaveAndRestore};
     use crate::propagator::Propagator;
     
-    // Graph used for the tests:
+    // Problem used for the tests:
     //
     //          C0 -> C1 ---> C2
     //                 \       |
     //                  \      v 
     //                   \--> C3 --> C4 --> C5
-    fn get_graph(state: &mut StateManager) -> Graph {
-        let mut g = Graph::new(state, 12, 6);
+    fn get_problem(state: &mut StateManager) -> Problem {
+        let mut g = Problem::new(state, 12, 6);
         let mut ps: Vec<VariableIndex> =(0..6).map(VariableIndex).collect();
         g.add_distributions(&vec![
             vec![1.0],
@@ -503,7 +503,7 @@ mod test_component_detection {
     #[test]
     fn test_initialization_extractor() {
         let mut state = StateManager::default();
-        let g = get_graph(&mut state);
+        let g = get_problem(&mut state);
         let extractor = ComponentExtractor::new(&g, &mut state);
         assert_eq!(vec![0, 1, 2, 3, 4, 5], extractor.clause_positions);
         check_component(&extractor, 0, 6, (0..6).map(ClauseIndex).collect::<Vec<ClauseIndex>>());
@@ -514,7 +514,7 @@ mod test_component_detection {
     #[test]
     fn test_detect_components() {
         let mut state = StateManager::default();
-        let mut g = get_graph(&mut state);
+        let mut g = get_problem(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
         let mut propagator = Propagator::new();
 
@@ -535,7 +535,7 @@ mod test_component_detection {
     #[test]
     fn restore_previous_state() {
         let mut state = StateManager::default();
-        let mut g = get_graph(&mut state);
+        let mut g = get_problem(&mut state);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
         let mut propagator = Propagator::new();
         

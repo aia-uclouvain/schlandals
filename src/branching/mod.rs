@@ -27,11 +27,11 @@
 
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{ DistributionIndex, Graph};
+use crate::core::problem::{ DistributionIndex, Problem};
 
 pub trait BranchingDecision {
-    fn branch_on(&mut self, g: &Graph, state: &mut StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex>;
-    fn init(&mut self, g: &Graph, state: &StateManager);
+    fn branch_on(&mut self, g: &Problem, state: &mut StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex>;
+    fn init(&mut self, g: &Problem, state: &StateManager);
     fn update_distribution_score(&mut self, distribution: DistributionIndex);
     fn decay_scores(&mut self);
 }

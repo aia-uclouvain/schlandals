@@ -42,7 +42,7 @@
 //!        variable appearing in the implicant must be negated.
 //!     2. The head of the implications can not be a probabilistic variable
 
-use crate::core::graph::{Graph, VariableIndex, DistributionIndex};
+use crate::core::problem::{Problem, VariableIndex, DistributionIndex};
 use super::core::literal::Literal;
 use search_trail::StateManager;
 use std::fs::File;
@@ -54,12 +54,12 @@ pub enum FileType {
     FDAC,
 }
 
-pub fn graph_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, state: &mut StateManager) -> Graph {
+pub fn problem_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, state: &mut StateManager) -> Problem {
     let mut number_var = 0;
     for clause in clauses.iter() {
         number_var = number_var.max(clause.iter().map(|l| l.abs() as usize).max().unwrap());
     }
-    let mut g = Graph::new(state, number_var, clauses.len());
+    let mut g = Problem::new(state, number_var, clauses.len());
     g.add_distributions(&distributions, state);
     for clause in clauses.iter() {
         let mut literals: Vec<Literal> = vec![];
@@ -84,11 +84,11 @@ pub fn graph_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize
     g
 }
 
-pub fn graph_from_ppidimacs(
+pub fn problem_from_cnf(
     filepath: &PathBuf,
     state: &mut StateManager,
     learn: bool,
-) -> Graph {
+) -> Problem {
     // First pass to get the distributions
     let distributions = distributions_from_cnf(filepath);
     let file = File::open(filepath).unwrap();
@@ -104,7 +104,7 @@ pub fn graph_from_ppidimacs(
     let number_clauses = split_header.next().unwrap().parse::<usize>().unwrap();
     let mut number_probabilistic = 0;
     
-    let mut g = Graph::new(state, number_var, number_clauses);
+    let mut g = Problem::new(state, number_var, number_clauses);
     
     for d in distributions.iter() {
         number_probabilistic += d.len();
@@ -229,8 +229,8 @@ pub fn type_of_input(filepath: &PathBuf) -> FileType {
 #[cfg(test)]
 mod test_ppidimacs_parsing {
 
-    use super::graph_from_ppidimacs;
-    use crate::core::graph::VariableIndex;
+    use super::problem_from_ppidimacs;
+    use crate::core::problem::VariableIndex;
     use crate::core::trail::StateManager;
     use std::path::PathBuf;
 
@@ -239,7 +239,7 @@ mod test_ppidimacs_parsing {
         let mut file = PathBuf::new();
         let mut state = StateManager::default();
         file.push("tests/instances/bayesian_networks/abc_chain_b0.ppidimacs");
-        let (g, _) = graph_from_ppidimacs(&file, &mut state);
+        let (g, _) = problem_from_ppidimacs(&file, &mut state);
         // Nodes for the distributions, the deterministics + 1 node for the vb0 -> False
         assert_eq!(17, g.number_nodes());
         assert_eq!(5, g.number_distributions());

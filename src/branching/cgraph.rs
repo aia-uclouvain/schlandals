@@ -16,7 +16,7 @@
 
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, Graph};
+use crate::core::problem::{DistributionIndex, Problem};
 use super::BranchingDecision;
 
 /// This heuristic selects the clause with the minimum in degree. In case of tie, it selects the clause
@@ -28,7 +28,7 @@ pub struct MinInDegree {}
 impl BranchingDecision for MinInDegree {
     fn branch_on(
         &mut self,
-        g: &Graph,
+        g: &Problem,
         state: &mut StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
@@ -55,7 +55,7 @@ impl BranchingDecision for MinInDegree {
         selected
     }
     
-    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
 
     fn update_distribution_score(&mut self, _distribution: DistributionIndex) {
     }
@@ -74,7 +74,7 @@ pub struct MinOutDegree;
 impl BranchingDecision for MinOutDegree {
     fn branch_on(
         &mut self,
-        g: &Graph,
+        g: &Problem,
         state: &mut StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
@@ -101,7 +101,7 @@ impl BranchingDecision for MinOutDegree {
         selected
     }
     
-    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
     fn update_distribution_score(&mut self, _distribution: DistributionIndex) {}
     fn decay_scores(&mut self) {}
 }
@@ -114,7 +114,7 @@ pub struct MaxDegree;
 impl BranchingDecision for MaxDegree {
     fn branch_on(
         &mut self,
-        g: &Graph,
+        g: &Problem,
         state: &mut StateManager,
         component_extractor: &ComponentExtractor,
         component: ComponentIndex,
@@ -138,7 +138,7 @@ impl BranchingDecision for MaxDegree {
         selected
     }
     
-    fn init(&mut self, _g: &Graph, _state: &StateManager) {}
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
     
     fn update_distribution_score(&mut self, _distribution: DistributionIndex) {}
     fn decay_scores(&mut self) {}

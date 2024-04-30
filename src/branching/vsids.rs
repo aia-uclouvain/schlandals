@@ -16,7 +16,7 @@
 
 use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{ DistributionIndex, Graph};
+use crate::core::problem::{ DistributionIndex, Problem};
 use super::BranchingDecision;
 
 pub struct VSIDS {
@@ -36,7 +36,7 @@ impl Default for VSIDS {
 }
 
 impl BranchingDecision for VSIDS {
-    fn branch_on(&mut self, _g: &Graph, _state: &mut StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex> {
+    fn branch_on(&mut self, _g: &Problem, _state: &mut StateManager, component_extractor: &ComponentExtractor, component: ComponentIndex) -> Option<DistributionIndex> {
         let mut best: Option<DistributionIndex> = None;
         let mut best_value = 0.0;
         for distribution in component_extractor.component_distribution_iter(component) {
@@ -49,7 +49,7 @@ impl BranchingDecision for VSIDS {
         best
     }
 
-    fn init(&mut self, g: &Graph, _state: &StateManager) {
+    fn init(&mut self, g: &Problem, _state: &StateManager) {
         self.scores.resize(g.variables_iter().filter(|v| g[*v].is_probabilitic()).count(), 0.0);
         for clause in g.clauses_iter() {
             for v in g[clause].iter_probabilistic_variables() {

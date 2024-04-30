@@ -14,31 +14,6 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-//! This module contains the main data structure of the solver: the implication graph of a set of Horn clause.
-//! It is also responsible for storing the distributions of the input problem.
-//! 
-//! If C1, ..., Cn are n Horn clauses of the form Ii => hi, then the implication graph of these clauses is
-//! a graph G = (V, E) such that
-//!     1. There is one node per clause
-//!     2. There is an edge e from Ci to Cj if hi is included in Ij
-//!     
-//! The graph structure contains three main vectors containing, respectively, all the variables, all the clauses and
-//! all the distributions of the input formula.
-//! Each variable, clause and distribution can then be uniquely identified by an index in these vectors.
-//! We provide type-safe abstraction to access these vectors.
-//! 
-//! Once the graph is constructed, no more variables/clause will be inserted. However, some clauses/variables will be
-//! deactivated during the search. And during the component detection/propagation the graph is iterated over multiple times.
-//! Hence, we must provide an efficient way of accessing the parents/children of a clause.
-//! From an implementation point of view, the nodes in the implication graph use three spare-set to store
-//!     1. The references (ClauseIndex) to their parents
-//!     2. The references (ClauseIndex) to their children
-//!     3. The references (VariableIndex) to the varaibles in their body
-//!     
-//! Moreover, a consequent number of elements are stored using reversible data structures. This allows to backtrack safely to
-//! previous states of the search space.
-
 use std::cmp::Ordering;
 
 use search_trail::*;
@@ -50,30 +25,30 @@ use super::watched_vector::WatchedVector;
 
 use rustc_hash::FxHashMap;
 
-/// Abstraction used as a typesafe way of retrieving a `Variable` in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a `Variable` in the `Problem` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct VariableIndex(pub usize);
 
-/// Abstraction used as a typesafe way of retrieving a `Clause` in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a `Clause` in the `Problem` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ClauseIndex(pub usize);
 
-/// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Problem` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct DistributionIndex(pub usize);
 
-/// Abstraction used as a typesafe way of retrieving a watched vector in the `Graph` structure
+/// Abstraction used as a typesafe way of retrieving a watched vector in the `Problem` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct WatchedVectorIndex(pub usize);
 
-/// Data structure representing the Graph.
+/// Data structure representing the Problem.
 #[derive(Debug)]
-pub struct Graph {
-    /// Vector containing the nodes of the graph
+pub struct Problem {
+    /// Vector containing the nodes of the problem
     variables: Vec<Variable>,
-    /// Vector containing the clauses of the graph
+    /// Vector containing the clauses of the problem
     clauses: Vec<Clause>,
-    /// Vector containing the distributions of the graph
+    /// Vector containing the distributions of the problem
     distributions: Vec<Distribution>,
     /// Store for each variables the clauses it watches
     watchers: Vec<Vec<ClauseIndex>>,
@@ -81,11 +56,11 @@ pub struct Graph {
     number_clauses_problem: usize,
 }
 
-impl Graph {
+impl Problem {
     
-    // --- GRAPH CREATION --- //
+    // --- PROBLEM CREATION --- //
 
-    /// Creates a new empty implication graph
+    /// Creates a new empty implication problem
     pub fn new(state: &mut StateManager, n_var: usize, n_clause: usize) -> Self {
         let variables = (0..n_var).map(|i| Variable::new(i, None, None, state)).collect();
         let watchers = (0..n_var).map(|_| vec![]).collect();
@@ -98,7 +73,7 @@ impl Graph {
         }
     }
 
-    /// Add a distribution to the graph. In this case, a distribution is a set of probabilistic
+    /// Add a distribution to the problem. In this case, a distribution is a set of probabilistic
     /// variable such that
     ///     - The sum of their weights sum up to 1.0
     ///     - Exatctly one of these variable is true in a model of the input formula 
@@ -229,6 +204,12 @@ impl Graph {
         self.clauses.truncate(new_clause_index);
         self.clauses.shrink_to_fit();
 
+        if self.clauses.is_empty() {
+            return;
+        }
+
+        self.number_clauses_problem = self.clauses.len();
+
         for clause in self.clauses_iter() {
             self[clause].clear(&clauses_map, state);
         }
@@ -309,7 +290,7 @@ impl Graph {
         }
     }
     
-    // --- GRAPH MODIFICATIONS --- //
+    // --- problem MODIFICATIONS --- //
     
     /// Sets a variable to true or false.
     ///     - If true, Removes the variable from the body of the constrained clauses
@@ -360,7 +341,7 @@ impl Graph {
     
     // --- GETTERS --- //
     
-    /// Returns the number of clause in the graph
+    /// Returns the number of clause in the problem
     pub fn number_clauses(&self) -> usize {
         self.clauses.len()
     }
@@ -370,23 +351,23 @@ impl Graph {
     }
 
     /// Returns the number of unlearned clauses (i.e., the number of clauses in the initial problem
-    pub fn number_clauses_probem(&self) -> usize {
+    pub fn number_clauses_problem(&self) -> usize {
         self.number_clauses_problem
     }
 
-    /// Returns the number of variable in the graph
+    /// Returns the number of variable in the problem
     pub fn number_variables(&self) -> usize {
         self.variables.len()
     }
     
-    /// Returns the number of distribution in the graph
+    /// Returns the number of distribution in the problem
     pub fn number_distributions(&self) -> usize {
         self.distributions.len()
     }
     
     // --- ITERATORS --- //
     
-    /// Returns an iterator on all (constrained and unconstrained) the clauses of the graph
+    /// Returns an iterator on all (constrained and unconstrained) the clauses of the problem
     pub fn clauses_iter(&self) -> impl Iterator<Item = ClauseIndex> {
         (0..self.clauses.len()).map(ClauseIndex)
     }
@@ -401,9 +382,9 @@ impl Graph {
     }
 }
 
-// --- Indexing the graph with the various indexes --- //
+// --- Indexing the problem with the various indexes --- //
 
-impl std::ops::Index<VariableIndex> for Graph {
+impl std::ops::Index<VariableIndex> for Problem {
     type Output = Variable;
 
     fn index(&self, index: VariableIndex) -> &Self::Output {
@@ -411,13 +392,13 @@ impl std::ops::Index<VariableIndex> for Graph {
     }
 }
 
-impl std::ops::IndexMut<VariableIndex> for Graph {
+impl std::ops::IndexMut<VariableIndex> for Problem {
     fn index_mut(&mut self, index: VariableIndex) -> &mut Self::Output {
         &mut self.variables[index.0]
     }
 }
 
-impl std::ops::Index<ClauseIndex> for Graph {
+impl std::ops::Index<ClauseIndex> for Problem {
     type Output = Clause;
 
     fn index(&self, index: ClauseIndex) -> &Self::Output {
@@ -425,14 +406,14 @@ impl std::ops::Index<ClauseIndex> for Graph {
     }
 }
 
-impl std::ops::IndexMut<ClauseIndex> for Graph {
+impl std::ops::IndexMut<ClauseIndex> for Problem {
     fn index_mut(&mut self, index: ClauseIndex) -> &mut Self::Output {
         &mut self.clauses[index.0]
     }
 }
 
 
-impl std::ops::Index<DistributionIndex> for Graph {
+impl std::ops::Index<DistributionIndex> for Problem {
     type Output = Distribution;
 
     fn index(&self, index: DistributionIndex) -> &Self::Output {
@@ -440,7 +421,7 @@ impl std::ops::Index<DistributionIndex> for Graph {
     }
 }
 
-impl std::ops::IndexMut<DistributionIndex> for Graph {
+impl std::ops::IndexMut<DistributionIndex> for Problem {
     fn index_mut(&mut self, index: DistributionIndex) -> &mut Self::Output {
         &mut self.distributions[index.0]
     }
@@ -478,15 +459,15 @@ impl std::ops::SubAssign<usize> for VariableIndex {
 
 /*
 #[cfg(test)]
-mod test_graph_creation {
+mod test_problem_creation {
     
-    use crate::core::graph::*;
+    use crate::core::problem::*;
     use search_trail::StateManager;
 
     #[test]
     pub fn variables_creation() {
         let mut state = StateManager::default();
-        let mut g = Graph::new(&mut state);
+        let mut g = Problem::new(&mut state);
         let x = (0..3).map(|x| g.add_variable(true, Some(1.0 / (x + 1) as f64), Some(DistributionIndex(x)), &mut state)).collect::<Vec<VariableIndex>>();
         for i in 0..3 {
             assert_eq!(VariableIndex(i), x[i]);
@@ -517,7 +498,7 @@ mod test_graph_creation {
     #[test]
     pub fn distribution_creation() {
         let mut state = StateManager::default();
-        let mut g = Graph::new(&mut state);
+        let mut g = Problem::new(&mut state);
         let v = g.add_distribution(&vec![0.3, 0.7], &mut state);
         assert_eq!(2, g.variables.len());
         assert_eq!(2, v.len());
@@ -547,7 +528,7 @@ mod test_graph_creation {
     #[test]
     pub fn clauses_creation() {
         let mut state = StateManager::default();
-        let mut g = Graph::new(&mut state);
+        let mut g = Problem::new(&mut state);
         let _ds = (0..3).map(|_| g.add_distribution(&vec![0.4], &mut state)).collect::<Vec<Vec<VariableIndex>>>();
         let p = (0..3).map(VariableIndex).collect::<Vec<VariableIndex>>();
         let d = (0..3).map(|_| g.add_variable(false, None, None, &mut state)).collect::<Vec<VariableIndex>>();
@@ -572,19 +553,19 @@ mod test_graph_creation {
 }
 
 #[cfg(test)]
-mod graph_update {
+mod problem_update {
     
-    use crate::core::graph::*;
+    use crate::core::problem::*;
     use search_trail::StateManager;
     
-    fn get_graph(state: &mut StateManager) -> Graph {
-        // Structure of the graph:
+    fn get_problem(state: &mut StateManager) -> Problem {
+        // Structure of the problem:
         //
         // c0 --> c2 --> c3
         //        ^       |
         //        |       v
         // c1 ----------> c4
-        let mut g = Graph::new(state);
+        let mut g = Problem::new(state);
         let nodes: Vec<VariableIndex> = (0..10).map(|_| g.add_variable(false, None, None, state)).collect();
         let _c0 = g.add_clause(nodes[2], vec![nodes[0], nodes[1]], state);
         let _c1 = g.add_clause(nodes[5], vec![nodes[3], nodes[4]], state);
@@ -594,15 +575,15 @@ mod graph_update {
         g
     }
     
-    fn check_parents(graph: &Graph, clause: ClauseIndex, mut expected_parents: Vec<usize>, state: &StateManager) {
-        let mut actual = graph.parents_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
+    fn check_parents(problem: &Problem, clause: ClauseIndex, mut expected_parents: Vec<usize>, state: &StateManager) {
+        let mut actual = problem.parents_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
         actual.sort();
         expected_parents.sort();
         assert_eq!(expected_parents, actual);
     }
     
-    fn check_children(graph: &Graph, clause: ClauseIndex, mut expected_children: Vec<usize>, state: &StateManager) {
-        let mut actual = graph.children_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
+    fn check_children(problem: &Problem, clause: ClauseIndex, mut expected_children: Vec<usize>, state: &StateManager) {
+        let mut actual = problem.children_clause_iter(clause, state).map(|c| c.0).collect::<Vec<usize>>();
         actual.sort();
         expected_children.sort();
         assert_eq!(expected_children, actual);
@@ -611,7 +592,7 @@ mod graph_update {
     #[test]
     fn remove_clause() {
         let mut state = StateManager::default();
-        let mut g = get_graph(&mut state);
+        let mut g = get_problem(&mut state);
         check_parents(&g, ClauseIndex(0), vec![], &state);
         check_parents(&g, ClauseIndex(1), vec![], &state);
         check_parents(&g, ClauseIndex(2), vec![0, 1], &state);
@@ -657,7 +638,7 @@ mod graph_update {
 #[cfg(test)]
 mod get_bit_representation {
 
-    use crate::core::graph::*;
+    use crate::core::problem::*;
     use search_trail::StateManager;
     
     fn check_bit_array(expected: &Vec<u64>, actual: &Vec<ReversibleU64>, state: &StateManager) {
@@ -670,24 +651,24 @@ mod get_bit_representation {
     #[test]
     fn initial_representation() {
         let mut state = StateManager::default();
-        let mut graph = Graph::new(&mut state);
-        check_bit_array(&vec![], &graph.variables_bit, &state);
+        let mut problem = Problem::new(&mut state);
+        check_bit_array(&vec![], &problem.variables_bit, &state);
         for i in 0..300 {
-            graph.add_variable(false, None, None, &mut state);
+            problem.add_variable(false, None, None, &mut state);
             if i % 64 == 0 {
-                check_bit_array(&vec![!0; (i / 64)+1], &graph.variables_bit, &state);
+                check_bit_array(&vec![!0; (i / 64)+1], &problem.variables_bit, &state);
             }
         }
-        check_bit_array(&vec![!0; 5], &graph.variables_bit, &state);
+        check_bit_array(&vec![!0; 5], &problem.variables_bit, &state);
 
-        check_bit_array(&vec![], &graph.clauses_bit, &state);
+        check_bit_array(&vec![], &problem.clauses_bit, &state);
         for i in 0..300 {
-            graph.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
+            problem.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
             if i % 64 == 0 {
-                check_bit_array(&vec![!0; (i / 64)+1], &graph.clauses_bit, &state);
+                check_bit_array(&vec![!0; (i / 64)+1], &problem.clauses_bit, &state);
             }
         }
-        check_bit_array(&vec![!0; 5], &graph.clauses_bit, &state);
+        check_bit_array(&vec![!0; 5], &problem.clauses_bit, &state);
     }
     
     fn deactivate_bit(bit_array: &mut Vec<u64>, word_index: usize, bit_index: usize) {
@@ -697,38 +678,38 @@ mod get_bit_representation {
     #[test]
     fn update_representation() {
         let mut state = StateManager::default();
-        let mut graph = Graph::new(&mut state);
+        let mut problem = Problem::new(&mut state);
         for _ in 0..300 {
-            graph.add_variable(false, None, None, &mut state);
+            problem.add_variable(false, None, None, &mut state);
         }
         for i in 0..300 {
-            graph.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
+            problem.add_clause(VariableIndex(i), vec![VariableIndex(i)], &mut state);
         }
         let mut expected = vec![!0; 5];
 
-        graph.set_variable(VariableIndex(0), false, 0, None, &mut state);
-        graph.set_clause_unconstrained(ClauseIndex(0), &mut state);
+        problem.set_variable(VariableIndex(0), false, 0, None, &mut state);
+        problem.set_clause_unconstrained(ClauseIndex(0), &mut state);
         deactivate_bit(&mut expected, 0, 0);
-        check_bit_array(&expected, &graph.variables_bit, &state);
-        check_bit_array(&expected, &graph.clauses_bit, &state);
+        check_bit_array(&expected, &problem.variables_bit, &state);
+        check_bit_array(&expected, &problem.clauses_bit, &state);
 
-        graph.set_variable(VariableIndex(130), false, 0, None, &mut state);
-        graph.set_clause_unconstrained(ClauseIndex(130), &mut state);
+        problem.set_variable(VariableIndex(130), false, 0, None, &mut state);
+        problem.set_clause_unconstrained(ClauseIndex(130), &mut state);
         deactivate_bit(&mut expected, 2, 2);
-        check_bit_array(&expected, &graph.variables_bit, &state);
-        check_bit_array(&expected, &graph.clauses_bit, &state);
+        check_bit_array(&expected, &problem.variables_bit, &state);
+        check_bit_array(&expected, &problem.clauses_bit, &state);
 
-        graph.set_variable(VariableIndex(131), false, 0, None, &mut state);
-        graph.set_clause_unconstrained(ClauseIndex(131), &mut state);
+        problem.set_variable(VariableIndex(131), false, 0, None, &mut state);
+        problem.set_clause_unconstrained(ClauseIndex(131), &mut state);
         deactivate_bit(&mut expected, 2, 3);
-        check_bit_array(&expected, &graph.variables_bit, &state);
-        check_bit_array(&expected, &graph.clauses_bit, &state);
+        check_bit_array(&expected, &problem.variables_bit, &state);
+        check_bit_array(&expected, &problem.clauses_bit, &state);
 
-        graph.set_variable(VariableIndex(299), false, 0, None, &mut state);
-        graph.set_clause_unconstrained(ClauseIndex(299), &mut state);
+        problem.set_variable(VariableIndex(299), false, 0, None, &mut state);
+        problem.set_clause_unconstrained(ClauseIndex(299), &mut state);
         deactivate_bit(&mut expected, 4, 43);
-        check_bit_array(&expected, &graph.variables_bit, &state);
-        check_bit_array(&expected, &graph.clauses_bit, &state);
+        check_bit_array(&expected, &problem.variables_bit, &state);
+        check_bit_array(&expected, &problem.clauses_bit, &state);
     }
 }
 */

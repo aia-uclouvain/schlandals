@@ -20,7 +20,7 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::graph::VariableIndex;
+use super::problem::VariableIndex;
 use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
 
 /// A distribution of the input problem
@@ -90,7 +90,7 @@ impl Distribution {
         state.get_usize(self.number_false)
     }
     
-    /// Returns the start of the distribution in the vector of variables in the graph.
+    /// Returns the start of the distribution in the vector of variables in the problem.
     pub fn start(&self) -> VariableIndex {
         self.first
     }

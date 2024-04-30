@@ -37,19 +37,19 @@
 //! Once this is done, each clause is set as f-reachable or t-reachable. A clause is f-reachable if
 //!     1. Its head is set to F OR
 //!     2. Its head is an unfixed probabilistic variable OR
-//!     3. One of its descendant in the implication graph is f-reachable
+//!     3. One of its descendant in the implication problem is f-reachable
 //! On the other hand, a clause is t-reachable if
 //!     1. Its implicant has no deterministic variable OR
-//!     2. One of its ancestor in the implication graph is t-reachable
+//!     2. One of its ancestor in the implication problem is t-reachable
 //! 
-//! This is done by a simple traversal of the implication graph, starting from the clauses respecting condition
+//! This is done by a simple traversal of the implication problem, starting from the clauses respecting condition
 //! 1,2 for f-reachability or 1 for t-reachability. Finally every unconstrained clause is processed.
 
 use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 
 use crate::common::f128;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
-use crate::core::graph::{ClauseIndex, DistributionIndex, Graph, VariableIndex};
+use crate::core::problem::{ClauseIndex, DistributionIndex, Problem, VariableIndex};
 use rug::{Assign, Float};
 
 use super::core::literal::Literal;
@@ -101,14 +101,14 @@ impl Propagator {
     }
     
     /// Propagates a variable to the given value. The component of the variable is also given to be able to use the {f-t}-reachability.
-    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
         g[variable].set_reason(None, state);
         self.add_to_propagation_stack(variable, value, level, None);
         self.propagate(g, state, component, extractor, level, false)
     }
     
     /// Adds a clause to be processed as unconstrained
-    pub fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Graph, state: &mut StateManager) {
+    pub fn add_unconstrained_clause(&mut self, clause: ClauseIndex, g: &Problem, state: &mut StateManager) {
         if g[clause].is_constrained(state) {
             g.set_clause_unconstrained(clause, state);
             debug_assert!(!self.unconstrained_clauses.contains(&clause));
@@ -145,7 +145,7 @@ impl Propagator {
     
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
-    fn propagate_unconstrained_distribution(&mut self, g: &Graph, distribution: DistributionIndex, state: &mut StateManager) {
+    fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &mut StateManager) {
         g[distribution].set_unconstrained(state);
         if g[distribution].number_false(state) != 0 {
             self.unconstrained_distributions.push(distribution);
@@ -158,9 +158,9 @@ impl Propagator {
     }
     
     /// Propagates all the unconstrained clauses in the unconstrained clauses stack. It actually updates the sparse-sets of
-    /// parents/children in the graph and, if necessary, computes the unconstrained probability of the distributions.
+    /// parents/children in the problem and, if necessary, computes the unconstrained probability of the distributions.
     /// It returns the overall unconstrained probability of the component after the whole propagation.
-    pub fn propagate_unconstrained_clauses(&mut self, g: &mut Graph, state: &mut StateManager) {
+    pub fn propagate_unconstrained_clauses(&mut self, g: &mut Problem, state: &mut StateManager) {
         while let Some(clause) = self.unconstrained_clauses.pop() {
             for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
                 g[parent].remove_child(clause, state);
@@ -200,7 +200,7 @@ impl Propagator {
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, is_preproc: bool) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, is_preproc: bool) -> PropagationResult {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
@@ -303,7 +303,7 @@ impl Propagator {
     /// contains all the constrained clauses reachable from the current clause, it contains all the children of the
     /// clause. Since we juste unit-propagated the components, we only have to check for unconstrained clause to avoid unncessary
     /// computations.
-    fn set_t_reachability(&mut self, g: &Graph, state: &StateManager, clause: ClauseIndex) {
+    fn set_t_reachability(&mut self, g: &Problem, state: &StateManager, clause: ClauseIndex) {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::TrueReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::TrueReachable);
             for child in g[clause].iter_children(state) {
@@ -319,7 +319,7 @@ impl Propagator {
     /// contains all the constrained clauses reachable from the current clause, it contains all the parents of the
     /// clause. Since we juste unit-propagated the components, we only have to check for unconstrained clause to avoid unncessary
     /// computations.
-    fn set_f_reachability(&mut self, g: &Graph, state: &StateManager, clause: ClauseIndex) {
+    fn set_f_reachability(&mut self, g: &Problem, state: &StateManager, clause: ClauseIndex) {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::FalseReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::FalseReachable);
             for parent in g[clause].iter_parents(state) {
@@ -331,8 +331,8 @@ impl Propagator {
     }
     
     /// Sets the t-reachability and f-reachability for all clauses in the component
-    fn set_reachability(&mut self, g: &mut Graph, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
-        // First we update the parents/child in the graph and clear the flags
+    fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
+        // First we update the parents/child in the problem and clear the flags
         for clause in extractor.component_iter(component){
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
@@ -378,7 +378,7 @@ impl Propagator {
         }
     }
     
-    fn is_uip(&self, cursor: usize, g: &Graph, state: &StateManager) -> bool {
+    fn is_uip(&self, cursor: usize, g: &Problem, state: &StateManager) -> bool {
         let variable = self.assignments[cursor].to_variable();
         let assignment_pos = g[variable].get_assignment_position(state);
         if g[variable].reason(state).is_none() {
@@ -399,7 +399,7 @@ impl Propagator {
         return false;
     }
     
-    fn is_implied(&mut self, lit: Literal, g: &Graph, state: &StateManager) -> bool {
+    fn is_implied(&mut self, lit: Literal, g: &Problem, state: &StateManager) -> bool {
         let pos = g[lit.to_variable()].get_assignment_position(state);
         if self.lit_flags[pos].is_set(LitFlag::IsImplied){
             return true;
@@ -451,7 +451,7 @@ impl Propagator {
         }
     }
     
-    fn learn_clause_from_conflict(&mut self, g: &mut Graph, state: &mut StateManager, conflict_clause: Reason) -> (Vec<Literal>, isize) {
+    fn learn_clause_from_conflict(&mut self, g: &mut Problem, state: &mut StateManager, conflict_clause: Reason) -> (Vec<Literal>, isize) {
         match conflict_clause {
             Reason::Clause(c) => {
                 for variable in g[c].iter_variables() {
@@ -555,11 +555,11 @@ impl Propagator {
 mod test_clause_learning {
     
     use search_trail::StateManager;
-    use crate::core::graph::*;
+    use crate::core::problem::*;
     use crate::core::components::*;
     use crate::propagator::*;
 
-    fn lit(v: usize, g: &Graph, is_head: bool) -> Literal {
+    fn lit(v: usize, g: &Problem, is_head: bool) -> Literal {
         let variable = VariableIndex(v);
         Literal::from_variable(variable, is_head, g[variable].get_value_index())
     }
@@ -567,7 +567,7 @@ mod test_clause_learning {
    #[test]
    pub fn test_learned_clause() {
         let mut state = StateManager::default();
-        let mut g = Graph::new(&mut state, 18, 7);
+        let mut g = Problem::new(&mut state, 18, 7);
         let mut propagator = Propagator::new(&mut state);
         propagator.init(7);
         let mut extractor = ComponentExtractor::new(&g, &mut state);

@@ -14,7 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::graph::{DistributionIndex, Graph};
+use crate::core::problem::{DistributionIndex, Problem};
 use crate::branching::*;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
@@ -51,42 +51,42 @@ pub enum GenericSolver {
     QVSIDS(Solver<VSIDS, false>),
 }
 
-pub fn generic_solver(graph: Graph, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
     if stat {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMinInDegree(solver)
             },
             Branching::MinOutDegree => {
-                let solver = Solver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinOutDegree, true>::new(problem, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMinOutDegree(solver)
             },
             Branching::MaxDegree => {
-                let solver = Solver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MaxDegree, true>::new(problem, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMaxDegree(solver)
             },
             Branching::VSIDS => {
-                let solver = Solver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<VSIDS, true>::new(problem, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SVSIDS(solver)
             },
         }
     } else {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMinInDegree(solver)
             },
             Branching::MinOutDegree => {
-                let solver = Solver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinOutDegree, false>::new(problem, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMinOutDegree(solver)
             },
             Branching::MaxDegree => {
-                let solver = Solver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MaxDegree, false>::new(problem, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMaxDegree(solver)
             },
             Branching::VSIDS => {
-                let solver = Solver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<VSIDS, false>::new(problem, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QVSIDS(solver)
             },
         }
@@ -97,15 +97,15 @@ macro_rules! solver_from_problem {
     ($d:expr, $c:expr, $b:expr, $e:expr, $m:expr, $t:expr, $s:expr) => {
         {
             let mut state = StateManager::default();
-            let graph = graph_from_problem($d, $c, &mut state);
+            let problem = problem_from_problem($d, $c, &mut state);
             let propagator = Propagator::new(&mut state);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
             } else {
                 u64::MAX
             };
-            generic_solver(graph, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
         }
     };
 }
@@ -115,14 +115,14 @@ macro_rules! make_solver {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, false);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let problem = problem_from_cnf($i, &mut state, false);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
             } else {
                 u64::MAX
             };
-            generic_solver(graph, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
         }
     };
 }

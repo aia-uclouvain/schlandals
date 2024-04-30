@@ -26,7 +26,7 @@
 
 use search_trail::{StateManager, BoolManager, ReversibleBool};
 use super::literal::Literal;
-use super::graph::VariableIndex;
+use super::problem::VariableIndex;
 use rustc_hash::FxHashMap;
 
 #[derive(Debug)]

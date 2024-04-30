@@ -18,7 +18,7 @@
 //! for reasoning in schlandals as they define the distributions.
 
 use search_trail::*;
-use crate::core::graph::{ClauseIndex, DistributionIndex};
+use crate::core::problem::{ClauseIndex, DistributionIndex};
 use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]

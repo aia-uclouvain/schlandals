@@ -25,13 +25,13 @@
 //! variables in the clause.
 
 use search_trail::StateManager;
-use super::graph::ClauseIndex;
+use super::problem::ClauseIndex;
 use super::sparse_set::SparseSet;
 use super::watched_vector::WatchedVector;
 use super::literal::Literal;
 use rustc_hash::FxHashMap;
 
-use super::graph::{DistributionIndex, VariableIndex, Graph};
+use super::problem::{DistributionIndex, VariableIndex, Problem};
 
 #[derive(Debug)]
 pub struct Clause {
@@ -41,9 +41,9 @@ pub struct Clause {
     head: Option<Literal>,
     /// The literals of the clause. Implemented using a vector with watched literals
     literals: WatchedVector,
-    /// Vector that stores the children of the clause in the implication graph
+    /// Vector that stores the children of the clause in the implication problem
     pub children: SparseSet<ClauseIndex>,
-    /// Vector that stores the parents of the clause in the implication graph
+    /// Vector that stores the parents of the clause in the implication problem
     pub parents: SparseSet<ClauseIndex>,
     /// Random bitstring used for hash computation
     hash: u64,
@@ -119,7 +119,7 @@ impl Clause {
     
     /// If the clause still has unfixed probabilisitc variables, return the distribution of the first watcher.
     /// Else, return None.
-    pub fn get_constrained_distribution(&self, state: &StateManager, g: &Graph) -> Option<DistributionIndex> {
+    pub fn get_constrained_distribution(&self, state: &StateManager, g: &Problem) -> Option<DistributionIndex> {
         match self.literals.get_alive_end_watcher(state) {
             None => None,
             Some(l) => g[l.to_variable()].distribution(),
