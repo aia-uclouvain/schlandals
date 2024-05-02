@@ -84,11 +84,67 @@ pub fn problem_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isi
     g
 }
 
+fn parse_unweighted_problem(filepath: &PathBuf, state: &mut StateManager) -> Problem {
+    let file = File::open(filepath).unwrap();
+    let reader = BufReader::new(&file);
+    let mut number_var = 0;
+    let mut number_clauses = 0;
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Error while reading line from input: {}", e),
+            Ok(line) => {
+                if line.starts_with("p cnf") {
+                    let mut split_header = line.split_whitespace();
+                    number_var = split_header.nth(2).unwrap().parse::<usize>().unwrap();
+                    number_clauses = split_header.next().unwrap().parse::<usize>().unwrap();
+                    break;
+                }
+            }
+        }
+    }
+
+    let distributions: Vec<Vec<f64>> = (0..number_var).map(|_| vec![0.5, 0.5]).collect();
+    let mut problem = Problem::new(state, number_var*2, number_clauses);
+    let variable_mapping = problem.add_distributions(&distributions, state);
+    let file = File::open(filepath).unwrap();
+    let reader = BufReader::new(file);
+    for l in reader.lines() {
+        match l {
+            Err(e) => panic!("Problem while reading file: {}", e),
+            Ok(line) => {
+                if !line.starts_with('c') && !line.starts_with('p') {
+                    // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
+                    for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                        let mut literals: Vec<Literal> = vec![];
+                        for lit in clause.split_whitespace() {
+                            let parsed_lit = lit.parse::<isize>().unwrap();
+                            let is_positive = parsed_lit > 0;
+                            let mut variable = (parsed_lit.abs() * 2 - if is_positive { 0 } else { 1 }) as usize;
+                            if let Some(new_var) = variable_mapping.get(&variable) {
+                                variable = *new_var;
+                            }
+                            let trail_value_index = problem[VariableIndex(variable - 1)].get_value_index();
+                            let literal = Literal::from_variable(VariableIndex(variable - 1), false, trail_value_index);
+                            literals.push(literal);
+                        }
+                        problem.add_clause(literals, None, state, false);
+                    }
+                }
+            }
+        }
+    }
+    problem
+}
+
 pub fn problem_from_cnf(
     filepath: &PathBuf,
     state: &mut StateManager,
     learn: bool,
+    unweighted: bool,
 ) -> Problem {
+    if unweighted {
+        return parse_unweighted_problem(filepath, state);
+    }
     // First pass to get the distributions
     let distributions = distributions_from_cnf(filepath);
     let file = File::open(filepath).unwrap();

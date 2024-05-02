@@ -19,7 +19,6 @@ use schlandals::ApproximateMethod;
 use std::path::PathBuf;
 use std::process;
 use schlandals::learning::LearnParameters;
-use schlandals::solvers::Error;
 
 #[derive(Debug, Parser)]
 #[clap(name="Schlandals", version, author, about)]
@@ -52,6 +51,8 @@ enum Command {
         /// If epsilon present, use the appropriate approximate method
         #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
         approx: ApproximateMethod,
+        #[clap(short, long, action)]
+        unweighted: bool,
     },
     /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
@@ -143,31 +144,15 @@ fn main() {
         None => u64::MAX,
     };
     match app.command {
-        Command::Search { input, branching, statistics, memory , epsilon, approx} => {
-            match schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout) {
-                Err(e) => {
-                    match e {
-                        Error::Unsat => println!("Model UNSAT"),
-                        Error::Timeout => println!("Timeout"),
-                    };
-                },
-                Ok(_p) => (), //println!("{}", p),
-            };
+        Command::Search { input, branching, statistics, memory , epsilon, approx, unweighted} => {
+           schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, unweighted);
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon} => {
             let e = match epsilon {
                 Some(v) => v,
                 None => 0.0,
             };
-            match schlandals::compile(input, branching, fdac, dotfile, e, timeout) {
-                Err(e) => {
-                    match e {
-                        Error::Unsat => println!("Model UNSAT"),
-                        Error::Timeout => println!("Timeout"),
-                    };
-                },
-                Ok(_p) => {},//println!("{}", p),
-            };
+            schlandals::compile(input, branching, fdac, dotfile, e, timeout);
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log , ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 

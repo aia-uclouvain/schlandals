@@ -25,15 +25,9 @@ use rug::Float;
 use std::hash::Hash;
 use bitvec::prelude::*;
 
-#[derive(Debug)]
-pub enum Error {
-    Unsat,
-    Timeout,
-}
-
 pub type Bounds = (Float, Float);
 /// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Result<Bounds, Error>;
+pub type ProblemSolution = Bounds;
 
 pub mod solver;
 mod statistics;
@@ -111,11 +105,11 @@ macro_rules! solver_from_problem {
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr, $u: expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let problem = problem_from_cnf($i, &mut state, false);
+            let problem = problem_from_cnf($i, &mut state, false, $u);
             let component_extractor = ComponentExtractor::new(&problem, &mut state);
             let mlimit = if let Some(m) = $m {
                 m

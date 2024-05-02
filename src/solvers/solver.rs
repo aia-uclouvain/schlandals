@@ -125,19 +125,18 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
         let preproc = preprocessor.preprocess();
         if preproc.is_none() {
-            return ProblemSolution::Err(Error::Unsat);
+            return (f128!(0.0), f128!(0.0))
         }
         let preproc_in = preproc.unwrap();
         let preproc_out = 1.0 - self.problem.distributions_iter().map(|d| {
             self.problem[d].remaining(&self.state)
         }).product::<f64>();
-        if self.problem.clauses_iter().find(|c| self.problem[*c].is_constrained(&self.state)).is_none() {
+        self.problem.clear_after_preprocess(&mut self.state);
+        if self.problem.number_clauses() == 0 {
             let lb = preproc_in.clone();
             let ub = f128!(1.0 - preproc_out);
-            print!("{} {} {}", lb, ub, self.start.elapsed().as_secs());
-            return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
+            return (lb, ub);
         }
-        self.problem.clear_after_preprocess(&mut self.state);
         let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.problem.number_clauses(), self.problem.number_variables(), self.problem.number_distributions(), max_probability);
         self.propagator.reduce(self.problem.number_clauses(), self.problem.number_variables());
@@ -149,9 +148,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
             let lb = p_in * preproc_in.clone();
             let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-            print!("{} {}", lb, ub);
             self.statistics.print();
-            ProblemSolution::Ok((lb, ub))
+            (lb, ub)
         } else {
             let mut discrepancy = 1;
             loop {
@@ -160,12 +158,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let removed = preproc_out + p_out * preproc_in.clone();
                 let ub: Float = 1.0 -  removed;
                 if self.start.elapsed().as_secs() >= self.timeout {
-                    return ProblemSolution::Ok((lb, ub))
+                    return (lb, ub)
                 }
                 let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
                 println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
                 if self.start.elapsed().as_secs() >= self.timeout || ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
-                    return ProblemSolution::Ok((lb, ub));
+                    return (lb, ub);
                 }
                 discrepancy += 1;
             }

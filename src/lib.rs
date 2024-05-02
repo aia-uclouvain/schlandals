@@ -16,6 +16,7 @@
 
 use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
+use crate::common::*;
 use learning::{learner::Learner, LearnParameters};
 use learning::Learning;
 #[cfg(feature = "tensor")]
@@ -101,11 +102,24 @@ pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize
     search!(solver)
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) {
+    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics, unweighted);
     match approx {
-        ApproximateMethod::Bounds => search!(solver),
-        ApproximateMethod::LDS => lds!(solver),
+        ApproximateMethod::Bounds => {
+            let (lb, ub) = search!(solver);
+            if unweighted {
+                println!("{} {}", lb, ub);
+            } else {
+                println!("{} {}", lb, ub);
+            }
+        }
+        ApproximateMethod::LDS => {
+            let (lb, ub) = lds!(solver);
+            if unweighted {
+            } else {
+                println!("{} {}", lb, ub);
+            }
+        }
     }
 }
 
@@ -130,23 +144,23 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
             }
             
         }
-        ProblemSolution::Ok((proba.clone(), proba))
+        (proba.clone(), proba)
     } else {
-        ProblemSolution::Err(Error::Timeout)
+        (f128!(0.0), f128!(0.0))
     }
 }
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
+            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
             _compile(compiler, fdac, dotfile)
         },
         FileType::FDAC => {
             let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
             dac.evaluate();
             let proba = dac.circuit_probability().clone();
-            ProblemSolution::Ok((proba.clone(), proba.clone()))
+            (proba.clone(), proba.clone())
         },
     }
 }
