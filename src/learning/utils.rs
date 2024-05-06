@@ -38,8 +38,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Option<Dac<R>>>
-{
+pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Dac<R>> {
     inputs.par_iter().map(|input| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -53,7 +52,7 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
             FileType::FDAC => {
                 println!("Reading {}", input.to_str().unwrap());
                 // The query has already been compiled, we just read from the file.
-                Some(Dac::from_file(input))
+                Dac::from_file(input)
             }
         }
     }).collect::<Vec<_>>()

@@ -19,6 +19,7 @@ use crate::branching::*;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::Branching;
+use crate::common::FLOAT_CMP_THRESHOLD;
 
 use search_trail::StateManager;
 use rug::Float;
@@ -26,8 +27,44 @@ use std::hash::Hash;
 use bitvec::prelude::*;
 
 pub type Bounds = (Float, Float);
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Bounds;
+
+/// This structure represent a (possibly partial) solution found by the solver.
+/// It is represented by a lower- and upper-bound on the true probability at the time at which the
+/// solution was found.
+#[derive(Clone)]
+pub struct Solution {
+    /// Lower bound on the true probability
+    lower_bound: Float,
+    /// Upper bound on the true probability
+    upper_bound: Float,
+    /// Number of seconds, since the start of the search, at which the solution was found
+    time_found: u64,
+}
+
+impl Solution {
+
+    pub fn new(lower_bound: Float, upper_bound: Float, time_found: u64) -> Self {
+        Self {
+            lower_bound,
+            upper_bound,
+            time_found,
+        }
+    }
+
+    pub fn has_converged(&self, epsilon: f64) -> bool {
+        self.upper_bound <= self.lower_bound.clone()*(1.0 + epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD
+    }
+
+    pub fn print(&self) {
+        println!("{}", self);
+    }
+}
+
+impl std::fmt::Display for Solution {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Bounds on the probability [{:.8}, {:.8}] found in {} seconds", self.lower_bound, self.upper_bound, self.time_found)
+    }
+}
 
 pub mod solver;
 mod statistics;

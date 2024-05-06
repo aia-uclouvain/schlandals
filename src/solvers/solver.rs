@@ -76,6 +76,10 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     timeout: u64,
     /// Start time of the solver
     start: Instant,
+    /// Product of the weight of the variables set to true during propagation
+    preproc_in: Option<Float>,
+    /// Probability of removed interpretation during propagation
+    preproc_out: Option<f64>,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -103,6 +107,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             statistics: Statistics::default(),
             timeout,
             start: Instant::now(),
+            preproc_in: None,
+            preproc_out: None,
         }
     }
 
@@ -117,53 +123,54 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self, is_lds: bool) -> ProblemSolution {
-        self.start = Instant::now();
-        self.propagator.init(self.problem.number_clauses());
-        // First, let's preprocess the problem
-        let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
-        let preproc = preprocessor.preprocess();
-        if preproc.is_none() {
-            return (f128!(0.0), f128!(0.0))
-        }
-        let preproc_in = preproc.unwrap();
-        let preproc_out = 1.0 - self.problem.distributions_iter().map(|d| {
-            self.problem[d].remaining(&self.state)
-        }).product::<f64>();
-        self.problem.clear_after_preprocess(&mut self.state);
-        if self.problem.number_clauses() == 0 {
-            let lb = preproc_in.clone();
-            let ub = f128!(1.0 - preproc_out);
-            return (lb, ub);
-        }
-        let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
-        self.component_extractor.shrink(self.problem.number_clauses(), self.problem.number_variables(), self.problem.number_distributions(), max_probability);
-        self.propagator.reduce(self.problem.number_clauses(), self.problem.number_variables());
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
+        if self.preproc_in.is_none() {
+            self.start = Instant::now();
+            self.propagator.init(self.problem.number_clauses());
+            // First, let's preprocess the problem
+            let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+            let preproc = preprocessor.preprocess();
+            if preproc.is_none() {
+                return Solution::new(f128!(0.0), f128!(0.0), self.start.elapsed().as_secs());
+            }
+            self.preproc_in = Some(preproc.unwrap());
+            self.preproc_out = Some(1.0 - self.problem.distributions_iter().map(|d| {
+                self.problem[d].remaining(&self.state)
+            }).product::<f64>());
+            self.problem.clear_after_preprocess(&mut self.state);
+            if self.problem.number_clauses() == 0 {
+                let lb = self.preproc_in.clone().unwrap();
+                let ub = f128!(1.0 - self.preproc_out.unwrap());
+                return Solution::new(lb, ub, self.start.elapsed().as_secs());
+            }
+            let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
+            self.component_extractor.shrink(self.problem.number_clauses(), self.problem.number_variables(), self.problem.number_distributions(), max_probability);
+            self.propagator.reduce(self.problem.number_clauses(), self.problem.number_variables());
 
-        // Init the various structures
-        self.branching_heuristic.init(&self.problem, &self.state);
-        self.propagator.set_forced();
+            // Init the various structures
+            self.branching_heuristic.init(&self.problem, &self.state);
+            self.propagator.set_forced();
+        }
+        let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), discrepancy);
+        let lb = p_in * self.preproc_in.clone().unwrap();
+        let ub: Float = 1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
+        Solution::new(lb, ub, self.start.elapsed().as_secs())
+    }
+
+    /// Solves the problem represented by this solver using a DPLL-search based method.
+    pub fn search(&mut self, is_lds: bool) -> Solution {
         if !is_lds {
-            let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), usize::MAX);
-            let lb = p_in * preproc_in.clone();
-            let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
+            let sol = self.do_discrepancy_iteration(usize::MAX);
             self.statistics.print();
-            (lb, ub)
+            sol
         } else {
             let mut discrepancy = 1;
             loop {
-                let ((p_in, p_out),_) = self.solve_components(ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), discrepancy);
-                let lb = p_in * preproc_in.clone();
-                let removed = preproc_out + p_out * preproc_in.clone();
-                let ub: Float = 1.0 -  removed;
-                if self.start.elapsed().as_secs() >= self.timeout {
-                    return (lb, ub)
-                }
-                let epsilon_iter = (ub.clone() / lb.clone()).sqrt() - 1;
-                println!("{} {} {} {} {} ", discrepancy, lb, ub, epsilon_iter, self.start.elapsed().as_secs());
-                if self.start.elapsed().as_secs() >= self.timeout || ub.clone() <= lb.clone()*(1.0 + self.epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD {
-                    return (lb, ub);
+                let solution = self.do_discrepancy_iteration(discrepancy);
+                solution.print();
+                if self.start.elapsed().as_secs() >= self.timeout || solution.has_converged(self.epsilon) {
+                    self.statistics.print();
+                    return solution;
                 }
                 discrepancy += 1;
             }
@@ -346,15 +353,18 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Compiles the problem represented by this solver into a (potentially partial) arithmetic
     /// circuit. Return None if the problem is UNSAT.
-    pub fn compile<R: SemiRing>(&mut self) -> Option<Dac<R>> {
+    pub fn compile<R: SemiRing>(&mut self) -> Dac<R> {
         self.start = Instant::now();
+        let mut dac = Dac::new();
         // Same as for the search, first we preprocess
         self.propagator.init(self.problem.number_clauses());
         let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
         if preprocessor.preprocess().is_none() {
-            return None;
+            let root = dac.add_sum_node();
+            dac.set_root(root);
+            dac.set_compile_time(self.start.elapsed().as_secs());
+            return dac;
         }
-        let mut dac = Dac::new();
         let prod_node = self.get_prod_node_from_propagations(&mut dac);
         self.problem.clear_after_preprocess(&mut self.state);
         let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
@@ -363,12 +373,17 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         self.branching_heuristic.init(&self.problem, &self.state);
         match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), prod_node) {
-            None => None,
+            None => {
+                let root = dac.add_sum_node();
+                dac.set_root(root);
+                dac.set_compile_time(self.start.elapsed().as_secs());
+            },
             Some(_) => {
                 dac.optimize_structure();
-                Some(dac)
+                dac.set_compile_time(self.start.elapsed().as_secs());
             }
-        }
+        };
+        dac
     }
 
     /// Expands a product node of the arithmetic circuit
