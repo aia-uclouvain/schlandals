@@ -23,7 +23,7 @@ use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::parser::*;
 use crate::solvers::*;
-use crate::{common::f128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
+use crate::{common::F128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
 /// logistic function to multiple dimensions.
@@ -34,7 +34,7 @@ use crate::{common::f128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
 /// From https://docs.rs/compute/latest/src/compute/functions/statistical.rs.html#43-46
 pub fn softmax(x: &[f64]) -> Vec<Float> {
     let sum_exp: f64 = x.iter().map(|i| i.exp()).sum();
-    x.iter().map(|i| f128!(i.exp() / sum_exp)).collect()
+    x.iter().map(|i| F128!(i.exp() / sum_exp)).collect()
 }
 
 /// Generates a vector of optional Dacs from a list of input files

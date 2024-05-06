@@ -20,7 +20,7 @@ use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
 use rug::Float;
-use crate::common::f128;
+use crate::common::F128;
 
 pub struct Preprocessor<'b>
 {
@@ -48,7 +48,7 @@ where
     }
     
     pub fn preprocess(&mut self) -> Option<Float> {
-        let mut p = f128!(1.0);
+        let mut p = F128!(1.0);
 
         for variable in self.problem.variables_iter() {
             if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 1.0 {

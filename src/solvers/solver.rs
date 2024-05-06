@@ -132,7 +132,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
             let preproc = preprocessor.preprocess();
             if preproc.is_none() {
-                return Solution::new(f128!(0.0), f128!(0.0), self.start.elapsed().as_secs());
+                return Solution::new(F128!(0.0), F128!(0.0), self.start.elapsed().as_secs());
             }
             self.preproc_in = Some(preproc.unwrap());
             self.preproc_out = Some(1.0 - self.problem.distributions_iter().map(|d| {
@@ -142,7 +142,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.state.restore_state();
             if self.problem.number_clauses() == 0 {
                 let lb = self.preproc_in.clone().unwrap();
-                let ub = f128!(1.0 - self.preproc_out.unwrap());
+                let ub = F128!(1.0 - self.preproc_out.unwrap());
                 return Solution::new(lb, ub, self.start.elapsed().as_secs());
             }
             let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
@@ -185,9 +185,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.search_cache.clear();
         }
         self.state.save_state();
-        let mut p_in = f128!(1.0);
-        let mut p_out = f128!(1.0);
-        let mut maximum_probability = f128!(1.0);
+        let mut p_in = F128!(1.0);
+        let mut p_out = F128!(1.0);
+        let mut maximum_probability = F128!(1.0);
         for distribution in self.component_extractor.component_distribution_iter(component) {
             if self.problem[distribution].is_constrained(&self.state) {
                 maximum_probability *= self.problem[distribution].remaining(&self.state);
@@ -206,14 +206,14 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 // remaining of the components. This way we always produce a valid lower/upper
                 // bound.
                 if self.start.elapsed().as_secs() >= self.timeout {
-                    return ((f128!(0.0), f128!(0.0)), level - 1);
+                    return ((F128!(0.0), F128!(0.0)), level - 1);
                 }
                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
                 let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level, discrepancy);
                 if backtrack_level != level {
                     self.restore();
-                    return ((f128!(0.0), maximum_probability), backtrack_level);
+                    return ((F128!(0.0), maximum_probability), backtrack_level);
                 }
                 // If any of the component is not fully explored, then so is the node
                 let (sub_p_in, sub_p_out) = sub_problem.bounds();
@@ -265,9 +265,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.statistics.or_node();
             let maximum_probability = self.component_extractor[component].max_probability();
             // Stores the accumulated probability of the found models in the sub-problem
-            let mut p_in = f128!(0.0);
+            let mut p_in = F128!(0.0);
             // Stores the accumulated probability of the found non-models in the sub-problem
-            let mut p_out = f128!(0.0);
+            let mut p_out = F128!(0.0);
             // When a sub-problem is UNSAT, this is the factor that must be used for the
             // computation of p_out
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
@@ -296,7 +296,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
+                            return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -320,7 +320,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             let ((child_p_in, child_p_out), backtrack_level) = self.solve_components(component, level + 1, bound_factor, new_discrepancy);
                             if backtrack_level != level {
                                 self.restore();
-                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
+                                return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
                             }
                             p_in += child_p_in * &p;
                             p_out += child_p_out * &p;
@@ -337,7 +337,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution));
             (cache_entry, level)
         } else {
-            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), usize::MAX, None), level)
+            (SearchCacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None), level)
         }
     }
 

@@ -47,7 +47,7 @@
 
 use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 
-use crate::common::f128;
+use crate::common::F128;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::problem::{ClauseIndex, DistributionIndex, Problem, VariableIndex};
 use rug::{Assign, Float};
@@ -81,7 +81,7 @@ impl Propagator {
             assignments: vec![],
             base_assignments: state.manage_usize(0),
             unconstrained_distributions: vec![],
-            propagation_prob: f128!(0.0),
+            propagation_prob: F128!(0.0),
             forced: 0,
         }
     }
@@ -149,7 +149,7 @@ impl Propagator {
         g[distribution].set_unconstrained(state);
         if g[distribution].number_false(state) != 0 {
             self.unconstrained_distributions.push(distribution);
-            let mut p = f128!(0.0);
+            let mut p = F128!(0.0);
             for weight in g[distribution].iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()) {
                 p += weight;
             }

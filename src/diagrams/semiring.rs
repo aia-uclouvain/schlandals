@@ -24,7 +24,7 @@
 use rug::Float;
 #[cfg(feature = "tensor")]
 use tch::Tensor;
-use crate::common::f128;
+use crate::common::F128;
 use std::ops::{AddAssign, MulAssign};
 use rug::Assign;
 
@@ -58,7 +58,7 @@ pub trait SemiRing: AddAssign + MulAssign + Send + Sized + std::fmt::Display {
 impl SemiRing for Float {
 
     fn from_f64(value: f64) -> Self {
-        f128!(value)
+        F128!(value)
     }
 
     fn to_f64(&self) -> f64 {

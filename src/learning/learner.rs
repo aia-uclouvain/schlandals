@@ -41,7 +41,7 @@ use crate::parser::*;
 use crate::Branching;
 use rayon::prelude::*;
 use super::Learning;
-use crate::common::f128;
+use crate::common::F128;
 use super::utils::*;
 use super::*;
 use rug::{Assign, Float};
@@ -75,7 +75,7 @@ impl <const S: bool> Learner<S> {
         for distribution in distributions.iter() {
             let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
-            grads.push(vec![f128!(0.0); distribution.len()]);
+            grads.push(vec![F128!(0.0); distribution.len()]);
         }
         // Retrieves which distributions are learned
         let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
@@ -92,13 +92,13 @@ impl <const S: bool> Learner<S> {
             let d = train_dacs.pop().unwrap();
             let expected = expected_outputs.pop().unwrap();
             train_data.push(d);
-            train_expected.push(f128!(expected));
+            train_expected.push(F128!(expected));
         }
         while !test_dacs.is_empty() {
             let d = test_dacs.pop().unwrap();
             let expected = expected_test.pop().unwrap();
             test_data.push(d);
-            test_expected.push(f128!(expected));
+            test_expected.push(F128!(expected));
         }
         let train_dataset = Dataset::new(train_data, train_expected);
         let test_dataset = Dataset::new(test_data, test_expected);
@@ -201,7 +201,7 @@ impl <const S: bool> Learner<S> {
                             // If it is a product node, we need to divide the path value by the value of the child
                             // This is equivalent to multiplying the values of the other children
                             // If the value of the child is 0, then the path value is simply 0
-                            let mut val = f128!(0.0);
+                            let mut val = F128!(0.0);
                             if self.train[query_id][child].value().to_f64() != 0.0 {
                                 val = path_val.clone() * &value / self.train[query_id][child].value().to_f64();
                             }
@@ -223,7 +223,7 @@ impl <const S: bool> Learner<S> {
                         }
                         // Compute the gradient contribution for the value used in the node 
                         // and all the other possible values of the distribution (derivative of the softmax)
-                        let mut sum_other_w = f128!(0.0);
+                        let mut sum_other_w = F128!(0.0);
                         let child_w = self.get_probability(d, v);
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
                             let weight = self.get_probability(d, params);

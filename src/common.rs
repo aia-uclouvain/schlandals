@@ -13,7 +13,7 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-macro_rules! f128 {
+macro_rules! F128 {
     ($v:expr) => {
         Float::with_val(113, $v)
     };
@@ -21,4 +21,4 @@ macro_rules! f128 {
 
 pub const FLOAT_CMP_THRESHOLD: f64 = 0.0000001;
 
-pub(crate) use f128;
+pub(crate) use F128;

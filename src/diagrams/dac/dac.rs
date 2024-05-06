@@ -170,7 +170,7 @@ impl<R> Dac<R>
 
     pub fn solution(&self) -> Solution {
         let p = self.circuit_probability().to_f64();
-        Solution::new(f128!(p), f128!(p), self.compile_time)
+        Solution::new(F128!(p), F128!(p), self.compile_time)
     }
 
     /// Updates the values of the distributions to the given values
@@ -190,9 +190,9 @@ impl<R> Dac<R>
     /// Resets the path value of each node
     pub fn zero_paths(&mut self) {
         for node in (0..self.nodes.len()-1).map(NodeIndex) {
-            self[node].set_path_value(f128!(0.0));
+            self[node].set_path_value(F128!(0.0));
         }
-        self.nodes.last_mut().unwrap().set_path_value(f128!(1.0));
+        self.nodes.last_mut().unwrap().set_path_value(F128!(1.0));
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
