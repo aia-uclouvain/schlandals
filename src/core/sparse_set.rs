@@ -87,6 +87,10 @@ impl<T> SparseSet<T>
     
     /// Adds element `eleme` to the sparse-set
     pub fn add(&mut self, elem: T, state: &mut StateManager) {
+        // Note: this is a strange way to insert into a sparse-set. But with clause learning, it
+        // happens that a clause is added during the search, hence while the sparse-set is not
+        // full. This ensure that the element is added in the "alive" part of the set, and that the
+        // indexes are update
         let index = self.plain.len() - state.get_usize(self.removed);
         self.indexes.insert(elem, index);
         self.plain.insert(index, elem);
@@ -119,6 +123,22 @@ impl<T> SparseSet<T>
     /// the set, including the removed ones)
     pub fn capacity(&self) -> usize {
         self.plain.len()
+    }
+
+    pub fn clear(&mut self, map: &FxHashMap<T, T>, state: &mut StateManager) {
+        state.set_usize(self.removed, 0);
+        for i in (0..self.plain.len()).rev() {
+            let elem = self.plain[i];
+            match map.get(&elem).copied() {
+                Some(new_elem) => { self.plain[i] = new_elem; },
+                None => { self.plain.swap_remove(i); },
+            };
+        }
+        self.indexes.clear();
+        for (i, elem) in self.plain.iter().copied().enumerate() {
+            self.indexes.insert(elem, i);
+        }
+        self.plain.shrink_to_fit();
     }
 }
 

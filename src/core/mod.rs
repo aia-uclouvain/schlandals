@@ -15,7 +15,7 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 pub mod components;
-pub mod graph;
+pub mod problem;
 pub mod sparse_set;
 pub mod literal;
 pub mod variable;

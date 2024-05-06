@@ -27,7 +27,7 @@ use clap::ValueEnum;
 use rug::Float;
 
 use crate::core::components::ComponentExtractor;
-use solvers::ProblemSolution;
+use solvers::Solution;
 use crate::solvers::*;
 use crate::parser::*;
 
@@ -79,59 +79,77 @@ pub enum Optimizer {
     SGD,
 }
 
-pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> ProblemSolution {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum ApproximateMethod {
+    /// Bound-based pruning
+    Bounds,
+    /// Limited Discrepancy Search
+    LDS,
+}
+
+impl std::fmt::Display for ApproximateMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApproximateMethod::Bounds => write!(f, "bounds"),
+            ApproximateMethod::LDS => write!(f, "lds"),
+        }
+    }
+}
+
+pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
     let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
     search!(solver)
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, timeout: u64) -> ProblemSolution {
-    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics);
-    search!(solver)
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) -> f64 {
+    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics, unweighted);
+    let solution = match approx {
+        ApproximateMethod::Bounds => search!(solver),
+        ApproximateMethod::LDS => lds!(solver),
+    };
+    solution.print();
+    solution.to_f64()
 }
 
-fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> ProblemSolution {
-    let mut res: Option<Dac<Float>> = compile!(compiler);
-    if let Some(ref mut dac) = &mut res {
-        dac.evaluate();
-        let proba = dac.circuit_probability().clone();
-        if let Some(f) = dotfile {
-            let out = dac.as_graphviz();
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(out.as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
-            }
+fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
+    let mut dac: Dac<Float> = compile!(compiler);
+    dac.evaluate();
+    if let Some(f) = dotfile {
+        let out = dac.as_graphviz();
+        let mut outfile = File::create(f).unwrap();
+        match outfile.write(out.as_bytes()) {
+            Ok(_) => (),
+            Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
         }
-        if let Some(f) = fdac {
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write(format!("{}", dac).as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
-            }
-            
-        }
-        ProblemSolution::Ok(proba)
-    } else {
-        ProblemSolution::Err(Error::Timeout)
     }
+    if let Some(f) = fdac {
+        let mut outfile = File::create(f).unwrap();
+        match outfile.write(format!("{}", dac).as_bytes()) {
+            Ok(_) => (),
+            Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+        }
+        
+    }
+    dac.solution()
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
-    match type_of_input(&input) {
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> f64 {
+    let solution = match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false);
+            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
             _compile(compiler, fdac, dotfile)
         },
         FileType::FDAC => {
             let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
             dac.evaluate();
-            let proba = dac.circuit_probability().clone();
-            ProblemSolution::Ok(proba)
+            dac.solution()
         },
-    }
+    };
+    solution.print();
+    solution.to_f64()
 }
 
-pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> ProblemSolution {
+pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
     let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
     _compile(solver, fdac, dotfile)
 }

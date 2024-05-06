@@ -14,28 +14,61 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-use crate::core::graph::Graph;
+use crate::core::problem::{DistributionIndex, Problem};
 use crate::branching::*;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::Branching;
+use crate::common::FLOAT_CMP_THRESHOLD;
 
 use search_trail::StateManager;
 use rug::Float;
 use std::hash::Hash;
 use bitvec::prelude::*;
 
-#[derive(Debug)]
-pub enum Error {
-    Unsat,
-    Timeout,
+pub type Bounds = (Float, Float);
+
+/// This structure represent a (possibly partial) solution found by the solver.
+/// It is represented by a lower- and upper-bound on the true probability at the time at which the
+/// solution was found.
+#[derive(Clone)]
+pub struct Solution {
+    /// Lower bound on the true probability
+    lower_bound: Float,
+    /// Upper bound on the true probability
+    upper_bound: Float,
+    /// Number of seconds, since the start of the search, at which the solution was found
+    time_found: u64,
 }
 
-/// Type alias used for the solution of the problem, which is either a Float or UNSAT
-pub type ProblemSolution = Result<Float, Error>;
+impl Solution {
 
-pub type Bounds = (Float, Float);
+    pub fn new(lower_bound: Float, upper_bound: Float, time_found: u64) -> Self {
+        Self {
+            lower_bound,
+            upper_bound,
+            time_found,
+        }
+    }
+
+    pub fn has_converged(&self, epsilon: f64) -> bool {
+        self.upper_bound <= self.lower_bound.clone()*(1.0 + epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD
+    }
+
+    pub fn print(&self) {
+        println!("{}", self);
+    }
+
+    pub fn to_f64(&self) -> f64 {
+        (self.lower_bound.clone() * self.upper_bound.clone()).sqrt().to_f64()
+    }
+}
+
+impl std::fmt::Display for Solution {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Bounds on the probability [{:.8}, {:.8}] found in {} seconds", self.lower_bound, self.upper_bound, self.time_found)
+    }
+}
 
 pub mod solver;
 mod statistics;
@@ -53,42 +86,42 @@ pub enum GenericSolver {
     QVSIDS(Solver<VSIDS, false>),
 }
 
-pub fn generic_solver(graph: Graph, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
     if stat {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, true>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMinInDegree(solver)
             },
             Branching::MinOutDegree => {
-                let solver = Solver::<MinOutDegree, true>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinOutDegree, true>::new(problem, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMinOutDegree(solver)
             },
             Branching::MaxDegree => {
-                let solver = Solver::<MaxDegree, true>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MaxDegree, true>::new(problem, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SMaxDegree(solver)
             },
             Branching::VSIDS => {
-                let solver = Solver::<VSIDS, true>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<VSIDS, true>::new(problem, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::SVSIDS(solver)
             },
         }
     } else {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, false>::new(graph, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMinInDegree(solver)
             },
             Branching::MinOutDegree => {
-                let solver = Solver::<MinOutDegree, false>::new(graph, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinOutDegree, false>::new(problem, state, component_extractor, Box::<MinOutDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMinOutDegree(solver)
             },
             Branching::MaxDegree => {
-                let solver = Solver::<MaxDegree, false>::new(graph, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MaxDegree, false>::new(problem, state, component_extractor, Box::<MaxDegree>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QMaxDegree(solver)
             },
             Branching::VSIDS => {
-                let solver = Solver::<VSIDS, false>::new(graph, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<VSIDS, false>::new(problem, state, component_extractor, Box::<VSIDS>::default(), propagator, mlimit, epsilon, timeout);
                 GenericSolver::QVSIDS(solver)
             },
         }
@@ -99,32 +132,32 @@ macro_rules! solver_from_problem {
     ($d:expr, $c:expr, $b:expr, $e:expr, $m:expr, $t:expr, $s:expr) => {
         {
             let mut state = StateManager::default();
-            let graph = graph_from_problem($d, $c, &mut state);
+            let problem = problem_from_problem($d, $c, &mut state);
             let propagator = Propagator::new(&mut state);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
             } else {
                 u64::MAX
             };
-            generic_solver(graph, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
         }
     };
 }
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr) => {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr, $u: expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let graph = graph_from_ppidimacs($i, &mut state, false);
-            let component_extractor = ComponentExtractor::new(&graph, &mut state);
+            let problem = problem_from_cnf($i, &mut state, false, $u);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
             let mlimit = if let Some(m) = $m {
                 m
             } else {
                 u64::MAX
             };
-            generic_solver(graph, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
         }
     };
 }
@@ -132,14 +165,29 @@ macro_rules! make_solver {
 macro_rules! search {
     ($s:expr) => {
         match $s {
-            GenericSolver::SMinInDegree(mut solver) => solver.search(),
-            GenericSolver::SMinOutDegree(mut solver) => solver.search(),
-            GenericSolver::SMaxDegree(mut solver) => solver.search(),
-            GenericSolver::SVSIDS(mut solver) => solver.search(),
-            GenericSolver::QMinInDegree(mut solver) => solver.search(),
-            GenericSolver::QMinOutDegree(mut solver) => solver.search(),
-            GenericSolver::QMaxDegree(mut solver) => solver.search(),
-            GenericSolver::QVSIDS(mut solver) => solver.search(),
+            GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+            GenericSolver::SMinOutDegree(mut solver) => solver.search(false),
+            GenericSolver::SMaxDegree(mut solver) => solver.search(false),
+            GenericSolver::SVSIDS(mut solver) => solver.search(false),
+            GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+            GenericSolver::QMinOutDegree(mut solver) => solver.search(false),
+            GenericSolver::QMaxDegree(mut solver) => solver.search(false),
+            GenericSolver::QVSIDS(mut solver) => solver.search(false),
+        }
+    }
+}
+
+macro_rules! lds {
+    ($s:expr) => {
+        match $s {
+            GenericSolver::SMinInDegree(mut solver) => solver.search(true),
+            GenericSolver::SMinOutDegree(mut solver) => solver.search(true),
+            GenericSolver::SMaxDegree(mut solver) => solver.search(true),
+            GenericSolver::SVSIDS(mut solver) => solver.search(true),
+            GenericSolver::QMinInDegree(mut solver) => solver.search(true),
+            GenericSolver::QMinOutDegree(mut solver) => solver.search(true),
+            GenericSolver::QMaxDegree(mut solver) => solver.search(true),
+            GenericSolver::QVSIDS(mut solver) => solver.search(true),
         }
     }
 }
@@ -163,6 +211,7 @@ pub(crate) use solver_from_problem;
 pub(crate) use make_solver;
 pub(crate) use compile;
 pub(crate) use search;
+pub(crate) use lds;
 
 /// A key of the cache. It is composed of
 ///     1. A hash representing the sub-problem being solved
@@ -213,14 +262,20 @@ impl Eq for CacheKey {}
 pub struct SearchCacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
+    /// Maximum discrepancy used for that node
+    discrepancy: usize,
+    /// The distribution on which to branch in this problem
+    distribution: Option<DistributionIndex>,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>) -> Self {
         Self {
             bounds,
+            discrepancy,
+            distribution,
         }
     }
 
@@ -229,4 +284,12 @@ impl SearchCacheEntry {
         &self.bounds
     }
 
+    /// Returns the discrepancy of the node
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    pub fn distribution(&self) -> Option<DistributionIndex> {
+        self.distribution
+    }
 }

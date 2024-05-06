@@ -37,17 +37,14 @@ use std::io::{BufRead, BufReader, Write};
 use rustc_hash::FxHashMap;
 use crate::common::*;
 
-use crate::core::graph::{DistributionIndex, VariableIndex};
+use crate::diagrams::*;
+use crate::core::problem::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
+use crate::solvers::Solution;
 
 use super::node::*;
 use rug::Float;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeIndex(pub usize);
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct LayerIndex(usize);
 
 /// Structure representing the arithmetic circuit.
 pub struct Dac<R>
@@ -67,13 +64,15 @@ pub struct Dac<R>
     root: Option<NodeIndex>,
     /// Index of the first node that is not an input
     start_computational_nodes: usize,
+    /// How much seconds was needed to compile this diagram
+    compile_time: u64,
 }
 
 impl<R> Dac<R>
     where R: SemiRing
 {
 
-    /// Creates a new empty DAC. An input node is created for each distribution in the graph.
+    /// Creates a new empty DAC. An input node is created for each distribution in the problem.
     pub fn new() -> Self {
         Self {
             nodes: vec![],
@@ -82,7 +81,12 @@ impl<R> Dac<R>
             distribution_mapping: FxHashMap::default(),
             root: None,
             start_computational_nodes: 0,
+            compile_time: u64::MAX,
         }
+    }
+
+    pub fn set_compile_time(&mut self, compile_time: u64) {
+        self.compile_time = compile_time;
     }
 
     /// Returns the number of nodes in the circuit
@@ -163,7 +167,12 @@ impl<R> Dac<R>
     pub fn circuit_probability(&self) -> &R {
         self.nodes.last().unwrap().value()
     }
-    
+
+    pub fn solution(&self) -> Solution {
+        let p = self.circuit_probability().to_f64();
+        Solution::new(f128!(p), f128!(p), self.compile_time)
+    }
+
     /// Updates the values of the distributions to the given values
     pub fn reset_distributions(&mut self, distributions: &Vec<Vec<R>>) {
         for node in (0..self.nodes.len()).map(NodeIndex) {
@@ -483,9 +492,9 @@ where R: SemiRing
     }
 }
 
-// Various methods for dumping the compiled circuits, including standardized format and graphviz (inspired from https://github.com/xgillard/ddo )
+// Various methods for dumping the compiled circuits, including standardized format and problemviz (inspired from https://github.com/xgillard/ddo )
 
-// Visualization as graphviz DOT file
+// Visualization as problemviz DOT file
 impl<R> Dac<R>
 where R: SemiRing
 {
@@ -602,6 +611,7 @@ where R: SemiRing
             distribution_mapping: FxHashMap::default(),
             root: None,
             start_computational_nodes: 0,
+            compile_time: 0,
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);

@@ -25,12 +25,13 @@
 //! variables in the clause.
 
 use search_trail::StateManager;
-use super::graph::ClauseIndex;
+use super::problem::ClauseIndex;
 use super::sparse_set::SparseSet;
 use super::watched_vector::WatchedVector;
 use super::literal::Literal;
+use rustc_hash::FxHashMap;
 
-use super::graph::{DistributionIndex, VariableIndex, Graph};
+use super::problem::{DistributionIndex, VariableIndex, Problem};
 
 #[derive(Debug)]
 pub struct Clause {
@@ -40,14 +41,15 @@ pub struct Clause {
     head: Option<Literal>,
     /// The literals of the clause. Implemented using a vector with watched literals
     literals: WatchedVector,
-    /// Vector that stores the children of the clause in the implication graph
+    /// Vector that stores the children of the clause in the implication problem
     pub children: SparseSet<ClauseIndex>,
-    /// Vector that stores the parents of the clause in the implication graph
+    /// Vector that stores the parents of the clause in the implication problem
     pub parents: SparseSet<ClauseIndex>,
     /// Random bitstring used for hash computation
     hash: u64,
     /// Has the clause been learned during the search
     is_learned: bool,
+    in_degree: usize,
 }
 
 impl Clause {
@@ -60,7 +62,8 @@ impl Clause {
             children: SparseSet::new(state),
             parents: SparseSet::new(state),
             hash: rand::random(),
-            is_learned
+            is_learned,
+            in_degree: 0,
         }
     }
     
@@ -116,7 +119,7 @@ impl Clause {
     
     /// If the clause still has unfixed probabilisitc variables, return the distribution of the first watcher.
     /// Else, return None.
-    pub fn get_constrained_distribution(&self, state: &StateManager, g: &Graph) -> Option<DistributionIndex> {
+    pub fn get_constrained_distribution(&self, state: &StateManager, g: &Problem) -> Option<DistributionIndex> {
         match self.literals.get_alive_end_watcher(state) {
             None => None,
             Some(l) => g[l.to_variable()].distribution(),
@@ -226,6 +229,41 @@ impl Clause {
     /// Returns an iterator on the probabilistic varaibles in the clause
     pub fn iter_probabilistic_variables(&self) -> impl Iterator<Item = VariableIndex> + '_ {
         self.literals.iter_end().map(|l| l.to_variable())
+    }
+
+    pub fn clear(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
+        self.children.clear(map, state);
+        self.parents.clear(map, state);
+    }
+
+    pub fn clear_literals(&mut self, map: &FxHashMap<VariableIndex, VariableIndex>) {
+        if let Some(lit) = self.head() {
+            let variable = lit.to_variable();
+            if let Some(new_variable) = map.get(&variable).copied() {
+                let pos = lit.is_positive();
+                let idx = lit.trail_index();
+                self.head = Some(Literal::from_variable(new_variable, pos, idx));
+            } else {
+                self.head = None;
+            }
+        }
+        self.literals.reduce(map);
+    }
+
+    pub fn remove_literals(&mut self, variable: VariableIndex) {
+        self.literals.remove(variable);
+    }
+
+    pub fn get_watchers(&self) -> Vec<Option<VariableIndex>> {
+        self.literals.get_watchers()
+    }
+
+    pub fn increment_in_degree(&mut self) {
+        self.in_degree += 1;
+    }
+
+    pub fn in_degree(&self) -> usize {
+        self.in_degree
     }
     
 }

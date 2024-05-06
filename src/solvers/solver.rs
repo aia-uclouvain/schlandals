@@ -17,13 +17,14 @@ use rustc_hash::FxHashMap;
 use search_trail::{StateManager, SaveAndRestore};
 
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::graph::{DistributionIndex, Graph};
+use crate::core::problem::{DistributionIndex, Problem};
 use crate::branching::BranchingDecision;
 use crate::diagrams::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::common::*;
-use crate::diagrams::dac::dac::{NodeIndex, Dac};
+use crate::diagrams::NodeIndex;
+use crate::diagrams::dac::dac::Dac;
 use crate::PEAK_ALLOC;
 use super::statistics::Statistics;
 use rug::Float;
@@ -50,11 +51,11 @@ type SearchResult = (SearchCacheEntry, isize);
 /// implemented are the probability semi-ring (the default) and tensor semi-ring, which uses torch
 /// tensors (useful for automatic differentiation in learning).
 pub struct Solver<B: BranchingDecision, const S: bool> {
-    /// Implication graph of the (Horn) clauses in the input
-    graph: Graph,
+    /// Implication problem of the (Horn) clauses in the input
+    problem: Problem,
     /// Manages (save/restore) the states (e.g., reversible primitive types)
     state: StateManager,
-    /// Extracts the connected components in the graph
+    /// Extracts the connected components in the problem
     component_extractor: ComponentExtractor,
     /// Heuristics that decide on which distribution to branch next
     branching_heuristic: Box<B>,
@@ -66,7 +67,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     /// Memory limit, in megabytes, when running a search over a sub-problem
     mlimit: u64,
     /// Cache used in the compilation to store the nodes associated with each sub-problem
-    compilation_cache: FxHashMap<CacheKey, Option<NodeIndex>>,
+    compilation_cache: FxHashMap<CacheKey, NodeIndex>,
     /// Cache used during the search to store bounds associated with sub-problems
     search_cache: FxHashMap<CacheKey, SearchCacheEntry>,
     /// Statistics gathered during the solving
@@ -75,12 +76,16 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     timeout: u64,
     /// Start time of the solver
     start: Instant,
+    /// Product of the weight of the variables set to true during propagation
+    preproc_in: Option<Float>,
+    /// Probability of removed interpretation during propagation
+    preproc_out: Option<f64>,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     pub fn new(
-        graph: Graph,
+        problem: Problem,
         state: StateManager,
         component_extractor: ComponentExtractor,
         branching_heuristic: Box<B>,
@@ -88,9 +93,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         mlimit: u64,
         epsilon: f64,
         timeout: u64,
-        ) -> Self {
+    ) -> Self {
         Self {
-            graph,
+            problem,
             state,
             component_extractor,
             branching_heuristic,
@@ -102,6 +107,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             statistics: Statistics::default(),
             timeout,
             start: Instant::now(),
+            preproc_in: None,
+            preproc_out: None,
         }
     }
 
@@ -116,39 +123,64 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self) -> ProblemSolution {
-        self.start = Instant::now();
-        self.propagator.init(self.graph.number_clauses());
-        // First, let's preprocess the problem
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-        let preproc = preprocessor.preprocess(false);
-        if preproc.is_none() {
-            return ProblemSolution::Err(Error::Unsat);
-        }
-        let preproc_in = preproc.unwrap();
-        let preproc_out = 1.0 - self.graph.distributions_iter().map(|d| {
-            self.graph[d].remaining(&self.state)
-        }).product::<f64>();
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
+        if self.preproc_in.is_none() {
+            self.start = Instant::now();
+            self.propagator.init(self.problem.number_clauses());
+            // First, let's preprocess the problem
+            self.state.save_state();
+            let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+            let preproc = preprocessor.preprocess();
+            if preproc.is_none() {
+                return Solution::new(f128!(0.0), f128!(0.0), self.start.elapsed().as_secs());
+            }
+            self.preproc_in = Some(preproc.unwrap());
+            self.preproc_out = Some(1.0 - self.problem.distributions_iter().map(|d| {
+                self.problem[d].remaining(&self.state)
+            }).product::<f64>());
+            self.problem.clear_after_preprocess(&mut self.state);
+            self.state.restore_state();
+            if self.problem.number_clauses() == 0 {
+                let lb = self.preproc_in.clone().unwrap();
+                let ub = f128!(1.0 - self.preproc_out.unwrap());
+                return Solution::new(lb, ub, self.start.elapsed().as_secs());
+            }
+            let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
+            self.component_extractor.shrink(self.problem.number_clauses(), self.problem.number_variables(), self.problem.number_distributions(), max_probability);
+            self.propagator.reduce(self.problem.number_clauses(), self.problem.number_variables());
 
-        // Init the various structures
-        self.branching_heuristic.init(&self.graph, &self.state);
-        self.propagator.set_forced();
-        match self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0)) {
-            Some((solution, _)) => {
-                let (p_in, p_out) = solution.bounds();
-                let lb = p_in * preproc_in.clone();
-                let ub: Float = 1.0 - (preproc_out + p_out * preproc_in);
-                let proba = (lb*ub).sqrt();
-                self.statistics.print();
-                ProblemSolution::Ok(proba)
-            },
-            None => ProblemSolution::Err(Error::Timeout),
+            // Init the various structures
+            self.branching_heuristic.init(&self.problem, &self.state);
+            self.propagator.set_forced();
+        }
+        let ((p_in, p_out), _) = self.solve_components(ComponentIndex(0),1, (1.0 + self.epsilon).powf(2.0), discrepancy);
+        let lb = p_in * self.preproc_in.clone().unwrap();
+        let ub: Float = 1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
+        Solution::new(lb, ub, self.start.elapsed().as_secs())
+    }
+
+    /// Solves the problem represented by this solver using a DPLL-search based method.
+    pub fn search(&mut self, is_lds: bool) -> Solution {
+        if !is_lds {
+            let sol = self.do_discrepancy_iteration(usize::MAX);
+            self.statistics.print();
+            sol
+        } else {
+            let mut discrepancy = 1;
+            loop {
+                let solution = self.do_discrepancy_iteration(discrepancy);
+                solution.print();
+                if self.start.elapsed().as_secs() >= self.timeout || solution.has_converged(self.epsilon) {
+                    self.statistics.print();
+                    return solution;
+                }
+                discrepancy += 1;
+            }
         }
     }
 
     /// Split the component into multiple sub-components and solve each of them
-    fn solve_components(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<SearchResult> {
+    fn solve_components(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize) -> (Bounds, isize) {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
             self.search_cache.clear();
         }
@@ -157,72 +189,63 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut p_out = f128!(1.0);
         let mut maximum_probability = f128!(1.0);
         for distribution in self.component_extractor.component_distribution_iter(component) {
-            if self.graph[distribution].is_constrained(&self.state) {
-                maximum_probability *= self.graph[distribution].remaining(&self.state);
+            if self.problem[distribution].is_constrained(&self.state) {
+                maximum_probability *= self.problem[distribution].remaining(&self.state);
             }
         }
-        assert!(0.0 <= maximum_probability && maximum_probability <= 1.0);
 
         // If there are no more component to explore (i.e. the sub-problem only contains
         // deterministic variables), then detect_components return false.
-        if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
+        if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component, &mut self.propagator) {
             self.statistics.and_node();
             let number_components = self.component_extractor.number_components(&self.state);
             self.statistics.decomposition(number_components);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
+                // If the solver has no more time, assume that there are no solutions in the
+                // remaining of the components. This way we always produce a valid lower/upper
+                // bound.
                 if self.start.elapsed().as_secs() >= self.timeout {
-                    return None;
+                    return ((f128!(0.0), f128!(0.0)), level - 1);
                 }
                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
-                if let Some((sub_problem, backtrack_level)) = self.get_bounds_from_cache(sub_component, new_bound_factor, level) {
-                    if backtrack_level != level {
-                        let entry = SearchCacheEntry::new((p_in, maximum_probability));
-                        self.restore();
-                        return Some((entry, backtrack_level));
-                    }
-                    // If any of the component is not fully explored, then so is the node
-                    let (sub_p_in, sub_p_out) = sub_problem.bounds();
-                    p_in *= sub_p_in;
-                    p_out *= sub_maximum_probability - sub_p_out.clone();
-                } else {
-                    return None;
+                let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level, discrepancy);
+                if backtrack_level != level {
+                    self.restore();
+                    return ((f128!(0.0), maximum_probability), backtrack_level);
                 }
+                // If any of the component is not fully explored, then so is the node
+                let (sub_p_in, sub_p_out) = sub_problem.bounds();
+                p_in *= sub_p_in;
+                p_out *= sub_maximum_probability - sub_p_out.clone();
             }
         }
         self.restore();
-        let entry = SearchCacheEntry::new((p_in, maximum_probability - p_out));
-        Some((entry, level - 1))
+        ((p_in, maximum_probability - p_out), level - 1)
     }
 
     /// Retrieves the bounds of a sub-problem from the cache. If the sub-problem has never been
     /// explored or that the bounds, given the bounding factor, are not good enough, the
     /// sub-problem is solved and the result is inserted in the cache.
-    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, level: isize) -> Option<SearchResult> {
+    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, level: isize, discrepancy: usize) -> SearchResult {
         self.statistics.cache_access();
         let cache_key = self.component_extractor[component].get_cache_key();
         match self.search_cache.get(&cache_key) {
             None => {
                 self.statistics.cache_miss();
-                if let Some((solution, backtrack_level)) = self.branch(component, level, bound_factor) {
-                    self.search_cache.insert(cache_key, solution.clone());
-                    Some((solution, backtrack_level))
-                } else {
-                    None
-                }
+                let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, None);
+                self.search_cache.insert(cache_key, solution.clone());
+                (solution, backtrack_level)
             },
             Some(cache_entry) => {
                 let (p_in, p_out) = cache_entry.bounds();
-                if self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
-                    Some((cache_entry.clone(), level))
+                if cache_entry.discrepancy() >= discrepancy || self.are_bounds_tight_enough(p_in, p_out, bound_factor) {
+                    (cache_entry.clone(), level)
                 } else {
-                    if let Some((new_solution, backtrack_level)) = self.branch(component, level, bound_factor) {
-                        self.search_cache.insert(cache_key, new_solution.clone());
-                        Some((new_solution, backtrack_level))
-                    } else {
-                        None
-                    }
+                    let (new_solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, cache_entry.distribution());
+                    self.search_cache.insert(cache_key, new_solution.clone());
+                    (new_solution, backtrack_level)
                 }
             },
         }
@@ -232,8 +255,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// resulting from the branching, recursively.
     /// Returns the bounds of the sub-problem as well as the level to which the solver must
     /// backtrack.
-    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<SearchResult> {
-        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, component) {
+    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize, choice: Option<DistributionIndex>) -> SearchResult {
+        let decision = if choice.is_some() {
+            choice
+        } else {
+            self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component)
+        };
+        if let Some(distribution) = decision {
             self.statistics.or_node();
             let maximum_probability = self.component_extractor[component].max_probability();
             // Stores the accumulated probability of the found models in the sub-problem
@@ -242,17 +270,23 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut p_out = f128!(0.0);
             // When a sub-problem is UNSAT, this is the factor that must be used for the
             // computation of p_out
-            let unsat_factor = maximum_probability / self.graph[distribution].remaining(&self.state);
-            for variable in self.graph[distribution].iter_variables() {
-                if self.graph[variable].is_fixed(&self.state) {
+            let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
+            let mut child_id = 0;
+            for variable in self.problem[distribution].iter_variables() {
+                if self.problem[variable].is_fixed(&self.state) {
                     continue;
                 }
-                if self.start.elapsed().as_secs() >= self.timeout {
-                    return None;
+                if child_id == discrepancy {
+                    break;
                 }
-                let v_weight = self.graph[variable].weight().unwrap();
+                let v_weight = self.problem[variable].weight().unwrap();
+                if self.start.elapsed().as_secs() >= self.timeout {
+                    // Same as above, no more time so we assume that there are no solution in this
+                    // branch.
+                    break;
+                }
                 self.state.save_state();
-                match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
+                match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(backtrack_level) => {
                         self.statistics.unsat();
                         // The assignment triggered an UNSAT, so the whole sub-problem is part of
@@ -262,7 +296,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return Some((SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability))), backtrack_level));
+                            return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -272,40 +306,38 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // propagation).
                         let p = self.propagator.get_propagation_prob().clone();
                         let removed = unsat_factor - self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution).map(|d| {
-                            self.graph[d].remaining(&self.state)
+                            self.problem[d].remaining(&self.state)
                         }).product::<f64>();
                         p_out += removed * v_weight;
                         // It is possible that the propagation removes enough variable so that the
                         // bounds are close enough
                         if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
                             self.restore();
-                            return Some((SearchCacheEntry::new((p_in, p_out)), level));
+                            return (SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution)), level);
                         }
                         if p != 0.0 {
-                            if let Some((child_sol, backtrack_level)) = self.solve_components(component, level + 1, bound_factor) {
-                                if backtrack_level != level {
-                                    self.restore();
-                                    return Some((SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability))), backtrack_level));
-                                }
-                                let (child_p_in, child_p_out) = child_sol.bounds();
-                                p_in += child_p_in * &p;
-                                p_out += child_p_out * &p;
-                                if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
-                                    self.restore();
-                                    return Some((SearchCacheEntry::new((p_in, p_out)), level));
-                                }
-                            } else {
-                                return None;
+                            let new_discrepancy = discrepancy - child_id;
+                            let ((child_p_in, child_p_out), backtrack_level) = self.solve_components(component, level + 1, bound_factor, new_discrepancy);
+                            if backtrack_level != level {
+                                self.restore();
+                                return (SearchCacheEntry::new((f128!(0.0), f128!(maximum_probability)), usize::MAX, Some(distribution)), backtrack_level);
+                            }
+                            p_in += child_p_in * &p;
+                            p_out += child_p_out * &p;
+                            if self.are_bounds_tight_enough(&p_in, &p_out, bound_factor) {
+                                self.restore();
+                                return (SearchCacheEntry::new((p_in, p_out), usize::MAX, Some(distribution)), level);
                             }
                         }
                     }
                 }
                 self.restore();
+                child_id += 1;
             }
-            let cache_entry = SearchCacheEntry::new((p_in, p_out));
-            Some((cache_entry, level))
+            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution));
+            (cache_entry, level)
         } else {
-            Some((SearchCacheEntry::new((f128!(1.0), f128!(0.0))), level))
+            (SearchCacheEntry::new((f128!(1.0), f128!(0.0)), usize::MAX, None), level)
         }
     }
 
@@ -314,6 +346,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     fn are_bounds_tight_enough(&self, p_in: &Float, p_out: &Float, bound_factor: f64) -> bool {
         1.0 - p_out.clone() <= p_in.clone() * bound_factor
     }
+
 }
 
 // --- COMPILER --- //
@@ -322,29 +355,45 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Compiles the problem represented by this solver into a (potentially partial) arithmetic
     /// circuit. Return None if the problem is UNSAT.
-    pub fn compile<R: SemiRing>(&mut self) -> Option<Dac<R>> {
-        // Same as for the search, first we preprocess
-        self.propagator.init(self.graph.number_clauses());
-        let mut preprocessor = Preprocessor::new(&mut self.graph, &mut self.state, &mut *self.branching_heuristic, &mut self.propagator, &mut self.component_extractor);
-        if preprocessor.preprocess(false).is_none() {
-            return None;
-        }
-
-        self.branching_heuristic.init(&self.graph, &self.state);
+    pub fn compile<R: SemiRing>(&mut self) -> Dac<R> {
+        self.start = Instant::now();
         let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
-            None => None,
+        // Same as for the search, first we preprocess
+        self.propagator.init(self.problem.number_clauses());
+        self.state.save_state();
+        let mut preprocessor = Preprocessor::new(&mut self.problem, &mut self.state, &mut self.propagator, &mut self.component_extractor);
+        if preprocessor.preprocess().is_none() {
+            let root = dac.add_sum_node();
+            dac.set_root(root);
+            dac.set_compile_time(self.start.elapsed().as_secs());
+            return dac;
+        }
+        let prod_node = self.get_prod_node_from_propagations(&mut dac);
+        self.problem.clear_after_preprocess(&mut self.state);
+        self.state.restore_state();
+        let max_probability = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
+        self.component_extractor.shrink(self.problem.number_clauses(), self.problem.number_variables(), self.problem.number_distributions(), max_probability);
+        self.propagator.reduce(self.problem.number_clauses(), self.problem.number_variables());
+
+        self.branching_heuristic.init(&self.problem, &self.state);
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), prod_node) {
+            None => {
+                let root = dac.add_sum_node();
+                dac.set_root(root);
+                dac.set_compile_time(self.start.elapsed().as_secs());
+            },
             Some(_) => {
                 dac.optimize_structure();
-                Some(dac)
+                dac.set_compile_time(self.start.elapsed().as_secs());
             }
-        }
+        };
+        dac
     }
 
     /// Expands a product node of the arithmetic circuit
-    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<NodeIndex> {
-        let mut prod_node = self.get_prod_node_from_propagations(dac);
-        if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
+    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64, base_node: Option<NodeIndex>) -> Option<NodeIndex> {
+        let mut prod_node = if base_node.is_some() { base_node } else { self.get_prod_node_from_propagations(dac) };
+        if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component, &mut self.propagator) {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
             for sub_component in self.component_extractor.components_iter(&self.state) {
@@ -354,43 +403,39 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let cache_key = self.component_extractor[sub_component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
-                        if let Some(n) = node {
+                        if node.0 != usize::MAX {
                             if prod_node.is_none() {
                                 prod_node = Some(dac.add_prod_node());
                             }
-                            dac.add_node_output(*n, prod_node.unwrap());
-                        } else {
-                            return None;
+                            dac.add_node_output(*node, prod_node.unwrap());
                         }
                     },
                     None => {
-                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.graph, &mut self.state, &self.component_extractor, sub_component) {
+                        if let Some(distribution) = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, sub_component) {
                         if self.component_extractor[sub_component].has_learned_distribution() {
                                 if let Some(child) = self.expand_sum_node(dac, sub_component, distribution, level, new_bound_factor) {
                                     if prod_node.is_none() {
                                         prod_node = Some(dac.add_prod_node());
                                     }
                                     dac.add_node_output(child, prod_node.unwrap());
-                                    self.compilation_cache.insert(cache_key, Some(child));
+                                    self.compilation_cache.insert(cache_key, child);
                                 } else {
-                                    self.compilation_cache.insert(cache_key, None);
-                                    return None;
+                                    self.compilation_cache.insert(cache_key, NodeIndex(usize::MAX));
                                 }
                             } else {
                                 // Still some distributions to branch on, but no more to learn.
                                 // This is a partial compilation so we switch to the search solver
                                 let maximum_probability = self.component_extractor[sub_component].max_probability();
-                                if let Some((child_sol, _)) = self.get_bounds_from_cache(sub_component, new_bound_factor, level) {
-                                    let (child_p_in, child_p_out) = child_sol.bounds();
-                                    let child_value = (child_p_in * (maximum_probability - child_p_out.clone())).sqrt();
-                                    let child = dac.add_approximate_node(child_value.to_f64());
-                                    if prod_node.is_none() {
-                                        prod_node = Some(dac.add_prod_node());
-                                    }
-                                    dac.add_node_output(child, prod_node.unwrap());
-                                } else {
-                                    return None;
+                                // TODO: Check when the solver did not solve exactly the
+                                // sub-problem ?
+                                let (child_sol, _) = self.get_bounds_from_cache(sub_component, new_bound_factor, level, usize::MAX);
+                                let (child_p_in, child_p_out) = child_sol.bounds();
+                                let child_value = (child_p_in * (maximum_probability - child_p_out.clone())).sqrt();
+                                let child = dac.add_approximate_node(child_value.to_f64());
+                                if prod_node.is_none() {
+                                    prod_node = Some(dac.add_prod_node());
                                 }
+                                dac.add_node_output(child, prod_node.unwrap());
                             }
                         }
                     },
@@ -407,22 +452,22 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     /// sub-circuits.
     fn expand_sum_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, distribution: DistributionIndex, level: isize, bounding_factor: f64) -> Option<NodeIndex> {
         let mut sum_node: Option<NodeIndex> = None;
-        for variable in self.graph[distribution].iter_variables() {
-            if self.graph[variable].is_fixed(&self.state) {
+        for variable in self.problem[distribution].iter_variables() {
+            if self.problem[variable].is_fixed(&self.state) {
                 continue;
             }
             if self.start.elapsed().as_secs() >= self.timeout {
                 return None;
             }
             self.state.save_state();
-            match self.propagator.propagate_variable(variable, true, &mut self.graph, &mut self.state, component, &mut self.component_extractor, level) {
+            match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
                 Err(backtrack_level) => {
                     if backtrack_level != level {
                         return None;
                     }
                 },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor, None) {
                         if sum_node.is_none() {
                             sum_node = Some(dac.add_sum_node());
                         }
@@ -440,17 +485,17 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     ///     1) All the variables that have been set to true
     ///     2) The distributions that have become unconstrained (merged into a sum node)
     fn get_prod_node_from_propagations<R: SemiRing>(&self, dac: &mut Dac<R>) -> Option<NodeIndex> {
-        if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
+        if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             // First, we look at the assignments
             for literal in self.propagator.assignments_iter(&self.state) {
                 let variable = literal.to_variable();
                 // Only take probabilistic variables set to true
-                if self.graph[variable].is_probabilitic() && literal.is_positive() {
-                    let distribution = self.graph[variable].distribution().unwrap();
+                if self.problem[variable].is_probabilitic() && literal.is_positive() {
+                    let distribution = self.problem[variable].distribution().unwrap();
                     // This represent which "probability index" is send to the node
-                    let value_index = variable.0 - self.graph[distribution].start().0;
-                    let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
+                    let value_index = variable.0 - self.problem[distribution].start().0;
+                    let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.problem[variable].weight().unwrap());
                     dac.add_node_output(distribution_node, node);
                 }
             }
@@ -459,12 +504,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // distribution has at least one value set to false.
             // Otherwise it would always send 1.0 to the product node.
             for distribution in self.propagator.unconstrained_distributions_iter() {
-                if self.graph[distribution].number_false(&self.state) != 0 {
+                if self.problem[distribution].number_false(&self.state) != 0 {
                     let sum_node = dac.add_sum_node();
-                    for variable in self.graph[distribution].iter_variables() {
-                        if !self.graph[variable].is_fixed(&self.state) {
-                            let value_index = variable.0 - self.graph[distribution].start().0;
-                            let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
+                    for variable in self.problem[distribution].iter_variables() {
+                        if !self.problem[variable].is_fixed(&self.state) {
+                            let value_index = variable.0 - self.problem[distribution].start().0;
+                            let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.problem[variable].weight().unwrap());
                             dac.add_node_output(distribution_node, sum_node);
                         }
                     }

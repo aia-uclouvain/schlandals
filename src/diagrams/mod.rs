@@ -16,3 +16,39 @@
 
 pub mod dac;
 pub mod semiring;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Types of node in an AC
+pub enum TypeNode {
+    /// Product nodes
+    Product,
+    /// Sum nodes
+    Sum,
+    /// Approximate node. Only present when the circuit is partially compiled. Send a constant
+    /// value as output and act as input of the circuit
+    Approximate,
+    /// Distribution node. Send the value P[d = v] as output and act as input of the circuit
+    Distribution {d: usize, v: usize},
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NodeStatus {
+    Sat,
+    Unsat,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeIndex(pub usize);
+
+macro_rules! is_node_type {
+    ($val:expr, $var:path) => {
+        match $val {
+            $var{..} => true,
+            _ => false,
+        }
+    }
+}
+
+use is_node_type;

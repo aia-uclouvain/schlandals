@@ -5,6 +5,6 @@ pyschlandals/target
 .vscode/
 pyschlandals/pipytoken
 .vimspector.json
-*.cnf
+./*.cnf
 doc/book
 doc/figures/

@@ -20,24 +20,24 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::graph::VariableIndex;
+use super::problem::VariableIndex;
 use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
 
 /// A distribution of the input problem
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Distribution {
     /// Id of the distribution in the problem
     id: usize,
     /// First variable in the distribution
-    pub first: VariableIndex,
+    first: VariableIndex,
     /// Number of variable in the distribution
-    pub size: usize,
+    size: usize,
     /// Number of constrained clauses in which the distribution appears
-    pub number_clause_unconstrained: ReversibleUsize,
+    number_clause_unconstrained: ReversibleUsize,
     /// Number of clauses in which the distribution appears
     number_clause: usize,
     /// Number of variables assigned to F in the distribution
-    pub number_false: ReversibleUsize,
+    number_false: ReversibleUsize,
     /// Is the distribution still constrained ?
     constrained: ReversibleBool,
     /// Sum of the weight of the unfixed variables in the distribution
@@ -82,6 +82,10 @@ impl Distribution {
     /// Returns the number of unfixed variables in the distribution. This assume that the distribution
     /// has no variable set to true (otherwise there is no need to consider it).
     pub fn number_unfixed(&self, state: &StateManager) -> usize {
+        let n = state.get_usize(self.number_false);
+        if  n > self.size {
+            panic!("Size is {} but number false is {}", self.size, n);
+        }
         self.size - state.get_usize(self.number_false)
     }
     
@@ -90,9 +94,17 @@ impl Distribution {
         state.get_usize(self.number_false)
     }
     
-    /// Returns the start of the distribution in the vector of variables in the graph.
+    /// Returns the start of the distribution in the vector of variables in the problem.
     pub fn start(&self) -> VariableIndex {
         self.first
+    }
+
+    pub fn set_start(&mut self, start: VariableIndex) {
+        self.first = start;
+    }
+
+    pub fn set_size(&mut self, size: usize) {
+        self.size = size;
     }
     
     pub fn is_constrained(&self, state: &StateManager) -> bool {
@@ -120,6 +132,12 @@ impl Distribution {
     pub fn is_branching_candidate(&self) -> bool {
         self.branching_candidate
     }
+
+    pub fn number_clause_unconstrained(&self) -> ReversibleUsize {
+        self.number_clause_unconstrained
+    }
+
+    pub fn size(&self) -> usize { self.size }
 
     // --- ITERATOR --- //
 

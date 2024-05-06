@@ -1,0 +1,57 @@
+p cnf 52 39
+c Querying variable T with value car
+c p distribution 0.3 0.5 0.2
+c p distribution 0.6 0.4
+c p distribution 0.75 0.25
+c p distribution 0.72 0.28
+c p distribution 0.88 0.12
+c p distribution 0.64 0.36
+c p distribution 0.7 0.3
+c p distribution 0.9 0.1
+c p distribution 0.96 0.04
+c p distribution 0.92 0.08
+c p distribution 0.25 0.75
+c p distribution 0.2 0.8
+c p distribution 0.48 0.42 0.1
+c p distribution 0.56 0.36 0.08
+c p distribution 0.58 0.24 0.18
+c p distribution 0.7 0.21 0.09
+ -1 38 0
+ -2 39 0
+ -3 40 0
+ -4 41 0
+ -5 42 0
+-38 -41 -6 43 0
+-38 -41 -7 44 0
+-39 -41 -8 43 0
+-39 -41 -9 44 0
+-40 -41 -10 43 0
+-40 -41 -11 44 0
+-38 -42 -12 43 0
+-38 -42 -13 44 0
+-39 -42 -14 43 0
+-39 -42 -15 44 0
+-40 -42 -16 43 0
+-40 -42 -17 44 0
+-43 -18 45 0
+-43 -19 46 0
+-44 -20 45 0
+-44 -21 46 0
+-43 -22 47 0
+-43 -23 48 0
+-44 -24 47 0
+-44 -25 48 0
+-45 -47 -26 49 0
+-45 -47 -27 50 0
+-45 -47 -28 51 0
+-46 -47 -29 49 0
+-46 -47 -30 50 0
+-46 -47 -31 51 0
+-45 -48 -32 49 0
+-45 -48 -33 50 0
+-45 -48 -34 51 0
+-46 -48 -35 49 0
+-46 -48 -36 50 0
+-46 -48 -37 51 0
+-50 0
+-51 0

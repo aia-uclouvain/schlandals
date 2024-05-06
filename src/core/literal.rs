@@ -22,7 +22,7 @@
 //! This is done so that each literal can query on its own the state of its associated variable
 //! (bypassing problems with the borrow checker).
 
-use super::graph::VariableIndex;
+use super::problem::VariableIndex;
 use search_trail::{StateManager, OptionBoolManager, ReversibleOptionBool};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -63,6 +63,10 @@ impl Literal {
     /// Returns true iff the associated variable is fixed
     pub fn is_variable_fixed(&self, state: &StateManager) -> bool {
         state.get_option_bool(self.1).is_some()
+    }
+
+    pub fn trail_index(&self) -> ReversibleOptionBool {
+        self.1
     }
 }
 

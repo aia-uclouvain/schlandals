@@ -18,7 +18,8 @@
 //! for reasoning in schlandals as they define the distributions.
 
 use search_trail::*;
-use crate::core::graph::{ClauseIndex, DistributionIndex};
+use crate::core::problem::{ClauseIndex, DistributionIndex};
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Reason {
@@ -185,6 +186,33 @@ impl Variable {
     /// Returns an iterator on the clauses in which the variable appears with a negative polarity
     pub fn iter_clauses_negative_occurence(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.clauses_negative.iter().copied()
+    }
+
+    pub fn clear_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>) -> usize {
+        for i in (0..self.clauses_positive.len()).rev() {
+            let clause = self.clauses_positive[i];
+            match map.get(&clause) {
+                Some(c) => {
+                    self.clauses_positive[i] = *c;
+                },
+                None => {
+                    self.clauses_positive.swap_remove(i);
+                },
+            };
+        }
+
+        for i in (0..self.clauses_negative.len()).rev() {
+            let clause = self.clauses_negative[i];
+            match map.get(&clause) {
+                Some(c) => {
+                    self.clauses_negative[i] = *c;
+                },
+                None => {
+                    self.clauses_negative.swap_remove(i);
+                },
+            };
+        }
+        self.clauses_positive.len() + self.clauses_negative.len()
     }
 }
 

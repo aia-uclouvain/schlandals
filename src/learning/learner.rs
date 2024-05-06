@@ -35,7 +35,7 @@
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
 use crate::diagrams::dac::dac::*;
-use crate::diagrams::dac::node::TypeNode;
+use crate::diagrams::TypeNode;
 use super::logger::Logger;
 use crate::parser::*;
 use crate::Branching;
@@ -51,8 +51,7 @@ use rug::{Assign, Float};
 pub struct DacIndex(pub usize);
 
 /// Structure used to learn the distribution parameters from a set of queries
-pub struct Learner<const S: bool>
-{
+pub struct Learner<const S: bool> {
     train: Dataset<Float>,
     test: Dataset<Float>,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
@@ -62,8 +61,7 @@ pub struct Learner<const S: bool>
     epsilon: f64,
 }
 
-impl <const S: bool> Learner<S>
-{
+impl <const S: bool> Learner<S> {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
     pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
@@ -93,18 +91,14 @@ impl <const S: bool> Learner<S>
         while !train_dacs.is_empty() {
             let d = train_dacs.pop().unwrap();
             let expected = expected_outputs.pop().unwrap();
-            if let Some(dac) = d {
-                train_data.push(dac);
-                train_expected.push(f128!(expected));
-            }
+            train_data.push(d);
+            train_expected.push(f128!(expected));
         }
         while !test_dacs.is_empty() {
             let d = test_dacs.pop().unwrap();
             let expected = expected_test.pop().unwrap();
-            if let Some(dac) = d {
-                test_data.push(dac);
-                test_expected.push(f128!(expected));
-            }
+            test_data.push(d);
+            test_expected.push(f128!(expected));
         }
         let train_dataset = Dataset::new(train_data, train_expected);
         let test_dataset = Dataset::new(test_data, test_expected);
