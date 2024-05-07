@@ -66,7 +66,7 @@ impl Solution {
 
 impl std::fmt::Display for Solution {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "Bounds on the probability [{:.8}, {:.8}] found in {} seconds", self.lower_bound, self.upper_bound, self.time_found)
+        write!(f, "Bounds on the probability [{:.8}, {:.8}] found in {} seconds", self.lower_bound, self.upper_bound, self.time_found)
     }
 }
 
