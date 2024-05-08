@@ -50,6 +50,8 @@ pub struct Clause {
     /// Has the clause been learned during the search
     is_learned: bool,
     in_degree: usize,
+    bitmask: u128,
+    bitword_index: usize,
 }
 
 impl Clause {
@@ -64,6 +66,8 @@ impl Clause {
             hash: rand::random(),
             is_learned,
             in_degree: 0,
+            bitmask: 0,
+            bitword_index: 0,
         }
     }
     
@@ -264,6 +268,24 @@ impl Clause {
 
     pub fn in_degree(&self) -> usize {
         self.in_degree
+    }
+
+    pub fn set_bitmask(&mut self, mask: u128) {
+        self.bitmask = mask;
+    }
+
+    pub fn set_bitword_index(&mut self, index: usize) {
+        self.bitword_index = index;
+    }
+
+    #[inline(always)]
+    pub fn bitmask(&self) -> u128 {
+        self.bitmask
+    }
+
+    #[inline(always)]
+    pub fn bitword_index(&self) -> usize {
+        self.bitword_index
     }
     
 }

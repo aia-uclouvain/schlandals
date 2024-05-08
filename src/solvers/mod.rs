@@ -20,11 +20,12 @@ use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::Branching;
 use crate::common::FLOAT_CMP_THRESHOLD;
+use crate::core::bitvec::Bitvec;
 
 use search_trail::StateManager;
 use rug::Float;
 use std::hash::Hash;
-use bitvec::prelude::*;
+
 
 pub type Bounds = (Float, Float);
 
@@ -224,11 +225,11 @@ pub(crate) use lds;
 #[derive(Default)]
 pub struct CacheKey {
     hash: u64,
-    repr: BitVec,
+    repr: Bitvec,
 }
 
 impl CacheKey {
-    pub fn new(hash: u64, repr: BitVec) -> Self {
+    pub fn new(hash: u64, repr: Bitvec) -> Self {
         Self {
             hash,
             repr

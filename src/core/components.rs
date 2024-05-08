@@ -31,7 +31,7 @@
 use super::problem::{ClauseIndex, Problem, DistributionIndex};
 use crate::{propagator::Propagator, solvers::CacheKey};
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
-use bitvec::prelude::*;
+use crate::core::bitvec::Bitvec;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -96,7 +96,7 @@ pub struct Component {
     /// are trainable distributions in the component.
     has_learned_distribution: bool,
     /// Bitwise representation of the problem
-    bit_repr: BitVec,
+    bit_repr: Bitvec,
 }
 
 impl Component {
@@ -129,6 +129,7 @@ impl ComponentExtractor {
         let clause_positions = (0..g.number_clauses()).collect();
         let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
         let distribution_positions = (0..g.number_distributions()).collect();
+        let bit_repr = Bitvec::ones(g.number_clauses_problem() + g.number_variables());
         let components = vec![Component {
             start: 0,
             size: g.number_clauses(),
@@ -137,7 +138,7 @@ impl ComponentExtractor {
             hash: 0,
             max_probability: 1.0,
             has_learned_distribution: false,
-            bit_repr: bits![1].repeat(g.number_variables() + g.number_clauses_problem()),
+            bit_repr,
         }];
         Self {
             clauses: nodes,
@@ -188,14 +189,14 @@ impl ComponentExtractor {
         hash: &mut u64,
         max_probability: &mut f64,
         has_learned_distribution: &mut bool,
-        bit_repr: &mut BitVec,
+        bit_repr: &mut Bitvec,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
             if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
                 if !g[clause].is_learned() {
                     *hash ^= g[clause].hash();
-                    *bit_repr.get_mut(g.number_variables() + clause.0).unwrap() = true;
+                    bit_repr.set_bit(g[clause].bitword_index(), g[clause].bitmask());
                 }
                 // The clause is swap with the clause at position comp_sart + comp_size
                 let current_pos = self.clause_positions[clause.0];
@@ -215,7 +216,7 @@ impl ComponentExtractor {
                     if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
                         self.seen_var[variable.0] = true;
                         *hash ^= g[variable].hash();
-                        *bit_repr.get_mut(variable.0).unwrap() = true;
+                        bit_repr.set_bit(g[variable].bitword_index(), g[variable].bitmask());
                     }
                 }
 
@@ -305,7 +306,7 @@ impl ComponentExtractor {
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
                 let mut has_learned_distribution = false;
-                let mut bit_repr = bits![0].repeat(g.number_clauses_problem() + g.number_variables());
+                let mut bit_repr = Bitvec::new(g.number_clauses_problem() + g.number_variables());
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -414,7 +415,7 @@ impl ComponentExtractor {
             hash: 0,
             max_probability,
             has_learned_distribution: false,
-            bit_repr: bits![1].repeat(number_variables + number_clause),
+            bit_repr: Bitvec::ones(number_clause + number_variables),
         };
     }
 }

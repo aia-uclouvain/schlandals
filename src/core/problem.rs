@@ -22,6 +22,7 @@ use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use super::watched_vector::WatchedVector;
+use super::bitvec::WORD_SIZE;
 
 use rustc_hash::FxHashMap;
 
@@ -280,6 +281,13 @@ impl Problem {
             }
         }
 
+        for variable in self.variables_iter() {
+            let word_index = variable.0 / WORD_SIZE;
+            let mask: u128 = 1 << (variable.0 % WORD_SIZE);
+            self[variable].set_bitmask(mask);
+            self[variable].set_bitword_index(word_index);
+        }
+
         for clause in self.clauses_iter() {
             self[clause].clear_literals(&variables_map);
             for option_v in self[clause].get_watchers() {
@@ -287,7 +295,13 @@ impl Problem {
                     self.watchers[v.0].push(clause);
                 }
             }
+            let i = clause.0 + self.variables.len();
+            let word_index = i / WORD_SIZE;
+            let mask: u128 = 1 << (i % WORD_SIZE);
+            self[clause].set_bitmask(mask);
+            self[clause].set_bitword_index(word_index);
         }
+
     }
     
     // --- problem MODIFICATIONS --- //
