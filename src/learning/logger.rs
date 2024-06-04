@@ -26,6 +26,7 @@ pub struct Logger<const B: bool> {
     global_timestamp: chrono::DateTime<chrono::Local>,
     outfile_train: Option<File>,
     outfile_test: Option<File>,
+    iter: usize,
 }
 
 impl<const B: bool> Logger<B> {
@@ -40,7 +41,7 @@ impl<const B: bool> Logger<B> {
                 None => None,
             };
             let mut output= "".to_string();
-            output.push_str("epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
+            output.push_str("iter,epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
             for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
@@ -61,7 +62,7 @@ impl<const B: bool> Logger<B> {
                 None => None,
             };
             let mut output= "".to_string();
-            output.push_str("epsilon,avg_errror,"); //avg_distance,
+            output.push_str("iter,epsilon,avg_errror,"); //avg_distance,
             for i in 0..ndacs_test {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
@@ -78,8 +79,14 @@ impl<const B: bool> Logger<B> {
             global_timestamp,
             outfile_train,
             outfile_test,
+            iter: 0,
         }
     }
+
+    pub fn set_iter(&mut self, iter:usize) {
+        self.iter = iter;
+    }
+    
     pub fn start(&mut self) {
         if B {
             self.global_timestamp = chrono::Local::now();
@@ -89,7 +96,7 @@ impl<const B: bool> Logger<B> {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
+            output.push_str(&format!("{},{:.6},{},{},{:.8},", self.iter, lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
@@ -102,7 +109,7 @@ impl<const B: bool> Logger<B> {
     pub fn log_test(&mut self, loss:&Vec<f64>, epsilon:f64, predictions:&Vec<f64>) {
         if B {
             let mut output = String::new();
-            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<f64>() / loss.len() as f64));
+            output.push_str(&format!("{},{},{:.8},", self.iter, epsilon, loss.iter().sum::<f64>() / loss.len() as f64));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }

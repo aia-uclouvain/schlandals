@@ -133,6 +133,9 @@ enum Command {
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=5)]
         patience: usize,
+        /// If present, where to save the compiled circuits as fdac files
+        #[clap(long, short)]
+        save_fdac: Option<PathBuf>,
     },
     /// Partial approx
     Partial{
@@ -196,6 +199,15 @@ enum Command {
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=5)]
         patience: usize,
+        /// If present, where to save the compiled circuits as fdac files
+        #[clap(long)]
+        save_fdac: Option<PathBuf>,
+        /// If not zero, the delta value to perform epsilon-delta approximation
+        #[clap(long, default_value_t=0.0)]
+        delta: f64,
+        /// If true use sampling approximation
+        #[clap(long, action)]
+        sampling: bool,
     }
 }
 
@@ -234,7 +246,7 @@ fn main() {
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log , ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
-            epoch_drop, early_stop_threshold, early_stop_delta, patience} => {
+            epoch_drop, early_stop_threshold, early_stop_delta, patience, save_fdac} => {
             let params = LearnParameters::new(
                 lr,
                 nepochs,
@@ -252,11 +264,11 @@ fn main() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
-            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
+            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params, save_fdac);
         },
         Command::Partial { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log, ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
-            epoch_drop, early_stop_threshold, early_stop_delta, patience } => {
+            epoch_drop, early_stop_threshold, early_stop_delta, patience , save_fdac, delta, sampling} => {
             let params = LearnParameters::new(
                 lr,
                 nepochs,
@@ -274,7 +286,7 @@ fn main() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
-            schlandals::partial(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
+            schlandals::partial(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params, save_fdac, delta, sampling);
         }
     }
 }

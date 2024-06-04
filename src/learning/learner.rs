@@ -40,12 +40,12 @@ use super::logger::Logger;
 use crate::parser::*;
 use crate::Branching;
 use rayon::prelude::*;
+use rug::ops::Pow;
 use super::Learning;
 use crate::common::f128;
 use super::utils::*;
 use super::*;
 use rug::{Assign, Float};
-use rand::Rng;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -69,12 +69,17 @@ impl <const S: bool> Learner<S>
 {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
+    pub fn new(mut inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, mut test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>, save_fdac:Option<PathBuf>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
         // Retrieves the distributions values and computes their unsoftmaxed values
         // and initializes the gradients to 0
-        let distributions = distributions_from_cnf(&inputs[0]);
+        let mut distributions = distributions_from_cnf(&inputs[0]);
+        for d in distributions.iter_mut() {
+            d.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        }
+        // Retrieves which distributions are learned
+        let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
         for distribution in distributions.iter() {
@@ -82,12 +87,19 @@ impl <const S: bool> Learner<S>
             unsoftmaxed_distributions.push(unsoftmaxed_vector);
             grads.push(vec![f128!(0.0); distribution.len()]);
         }
-        // Retrieves which distributions are learned
-        let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
+        // Removing the first input (.cnf) if the others are fdacs 
+        if inputs.last().unwrap().extension().unwrap() == "fdac" {
+            println!("removed {:?}", inputs.remove(0));
+            expected_outputs.remove(0);
+        }
+        if test_inputs.last().unwrap().extension().unwrap() == "fdac" {
+            println!("removed {:?}", test_inputs.remove(0));
+            expected_test.remove(0);
+        }
 
         // Compiling the train and test queries into arithmetic circuits
-        let mut train_dacs = generate_dacs(inputs, branching, epsilon, compile_timeout);
-        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, compile_timeout);
+        let mut train_dacs: Vec<Option<Dac<Float>>> = generate_dacs(inputs, branching, epsilon, compile_timeout, &save_fdac);
+        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, compile_timeout, &save_fdac);
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
@@ -96,7 +108,8 @@ impl <const S: bool> Learner<S>
         while !train_dacs.is_empty() {
             let d = train_dacs.pop().unwrap();
             let expected = expected_outputs.pop().unwrap();
-            if let Some(dac) = d {
+            if let Some(mut dac) = d {
+                dac.evaluate();
                 train_data.push(dac);
                 train_expected.push(f128!(expected));
             }
@@ -193,9 +206,9 @@ impl <const S: bool> Learner<S>
         self.zero_grads();
         for query_id in 0..self.train.len() {
             self.train[query_id].zero_paths();
+
             // Iterate on all nodes from the DAC, top-down way
             for node in self.train[query_id].iter_rev() {
-
                 let start = self.train[query_id][node].input_start();
                 let end = start + self.train[query_id][node].number_inputs();
                 let value = self.train[query_id][node].value().to_f64();
@@ -259,6 +272,11 @@ impl <const S: bool> Learner<S>
 }
 
 impl<const S: bool> Learning for Learner<S> {
+    /// Set the epsilon value for the learner
+    fn set_epsilon(&mut self, epsilon: f64) {
+        self.epsilon = epsilon;
+    }
+
     /// Training loop for the train dacs, using the given training parameters
     fn train(&mut self, params: &LearnParameters) {
         let mut prev_loss = 1.0;
@@ -293,6 +311,14 @@ impl<const S: bool> Learning for Learner<S> {
             }
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
             self.compute_gradients(&train_grad);
+            let mut train_grad = vec![];
+            let mut train_dist = vec![];
+            for i in 0..self.learned_distributions.len(){
+                if self.learned_distributions[i]{
+                    train_grad.push(self.gradients[i].iter().map(|v| v.to_f64()).collect::<Vec<f64>>());
+                    train_dist.push(self.get_softmaxed(i).iter().map(|v| v.to_f64()).collect::<Vec<f64>>());
+                }
+            }
             // Update the parameters
             self.update_distributions(learning_rate);
             // Log the epoch
@@ -322,10 +348,11 @@ impl<const S: bool> Learning for Learner<S> {
         }
     }
 
-    fn partial_approx(&mut self, params: &LearnParameters) {
+    fn partial_approx(&mut self, params: &LearnParameters, delta: f64, sampling: bool) {
         // On arrive ici avec les queries compilées en partial avec epsilon qui vaut 0.
         // On va recuperer les vraies valeurs des approx pour pouvoir les modifier
         let mut real_approx = vec![vec![0.0]; self.train.len()];
+        let mut real_approx_test = vec![vec![0.0]; self.test.len()];
         let init_dist = self.unsoftmaxed_distributions.clone();
         for (i, query) in self.train.get_queries().iter().enumerate(){
             real_approx[i] = vec![0.0; query.len()];
@@ -336,28 +363,93 @@ impl<const S: bool> Learning for Learner<S> {
                 }
             }
         }
-        //println!("Real approx: {:?}", real_approx);
-        //println!("init dist: {:?}", init_dist);
+        for (i, query) in self.test.get_queries().iter().enumerate(){
+            real_approx_test[i] = vec![0.0; query.len()];
+            for (n, node) in query.iter().enumerate(){
+                if let TypeNode::Approximate = query[node].get_type(){
+                    let value = query[node].value().to_f64();
+                    real_approx_test[i][n] = value;
+                }
+            }
+        }
 
         let mut rng = ChaCha8Rng::seed_from_u64(42);
-        let epsilons = vec![0.0, 0.01, 0.05, 0.1, 0.3, 0.5, 0.8];
-        for epsilon in epsilons{
+        let mut epsilon = self.epsilon;
+        for repeat in 0..10 {
             self.unsoftmaxed_distributions = init_dist.clone();
             let mut i = 0;
             for query in self.train.get_queries_mut(){
                 for (n, node) in query.iter().enumerate(){
                     if let TypeNode::Approximate = query[node].get_type(){
-                        let new_value = rng.gen_range(real_approx[i][n]/(1.0+epsilon)..=(real_approx[i][n]*(1.0+epsilon)).min(1.0));
+                        let mut new_value;
+                        let bf = query[node].bounding_factor();
+                        let rv = real_approx[i][n];
+                        // Sampling approximation
+                        if sampling {
+                            new_value = rng.gen_range(0.0..=1.0);
+                        }
+                        // Epsilon (delta 0) approximation
+                        else if delta == 0.0 {
+                            new_value = rng.gen_range(rv/(1.0+epsilon).pow(1.0/bf)..=((rv*(1.0+epsilon).pow(1.0/bf)).min(1.0)));
+                        } 
+                        // Epsilon delta approximation
+                        else {
+                            let chance = rng.gen_range(0.0..=1.0);
+                            if chance > delta {
+                                new_value = rng.gen_range(rv/(1.0+epsilon).pow(1.0/bf)..=((rv*(1.0+epsilon).pow(1.0/bf)).min(1.0)));
+                            }
+                            else {
+                                let gap = (rv*(1.0+epsilon).pow(1.0/bf)).min(1.0) - rv/(1.0+epsilon).pow(1.0/bf);
+                                new_value = rng.gen_range(0.0..=1.0-gap);
+                                if new_value >= rv/(1.0+epsilon).pow(1.0/bf) {
+                                    new_value += gap;
+                                }
+                            }
+                        }
                         query[node].set_value(f128!(new_value));
                     }
                 }
                 i += 1;
             }
-            self.evaluate();
+            let mut i = 0;
+            epsilon = 0.0;
+            for query in self.test.get_queries_mut(){
+                for (n, node) in query.iter().enumerate(){
+                    if let TypeNode::Approximate = query[node].get_type(){
+                        let mut new_value;
+                        let bf = query[node].bounding_factor();
+                        let rv = real_approx_test[i][n];
+                        // Sampling approximation
+                        if sampling {
+                            new_value = rng.gen_range(0.0..=1.0);
+                        }
+                        // Epsilon (delta 0) approximation
+                        else if delta == 0.0 {
+                            new_value = rng.gen_range(rv/(1.0+epsilon).pow(1.0/bf)..=((rv*(1.0+epsilon).pow(1.0/bf)).min(1.0)));
+                        } 
+                        // Epsilon delta approximation
+                        else {
+                            let chance = rng.gen_range(0.0..=1.0);
+                            if chance > delta {
+                                new_value = rng.gen_range(rv/(1.0+epsilon).pow(1.0/bf)..=((rv*(1.0+epsilon).pow(1.0/bf)).min(1.0)));
+                            }
+                            else {
+                                let gap = (rv*(1.0+epsilon).pow(1.0/bf)).min(1.0) - rv/(1.0+epsilon).pow(1.0/bf);
+                                new_value = rng.gen_range(0.0..=1.0-gap);
+                                if new_value >= rv/(1.0+epsilon).pow(1.0/bf) {
+                                    new_value += gap;
+                                }
+                            }
+                        }
+                        query[node].set_value(f128!(new_value));
+                    }
+                }
+                i += 1;
+            }
             self.epsilon = epsilon;
+            self.log.set_iter(repeat);
             self.train(params);
         }
-
     }
 }
 

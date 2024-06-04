@@ -101,9 +101,9 @@ impl<R> Dac<R>
     }
 
     /// Adds a partial node, with the given value, to the circuit. Returns its index.
-    pub fn add_approximate_node(&mut self, value: f64) -> NodeIndex {
+    pub fn add_approximate_node(&mut self, value: f64, bounding_factor:f64) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
-        self.nodes.push(Node::approximate(value));
+        self.nodes.push(Node::approximate(value, bounding_factor));
         id
     }
 
@@ -144,6 +144,16 @@ impl<R> Dac<R>
             NodeIndex(self.nodes.len()-1)
         }
     }
+    /* /// Returns, for a given distribution index and its value, the corresponding node index in the dac
+    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            *x
+        } else {
+            self.nodes.push(Node::distribution(distribution.0, value, probability));
+            self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
+            NodeIndex(self.nodes.len()-1)
+        }
+    }*/
 }
 
 // --- CIRCUIT EVALUATION ---
@@ -203,6 +213,30 @@ impl<R> Dac<R>
         }
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value()
+    }
+
+    /// Set the bounding factors for the whole circuit
+    pub fn set_bounding_factors(&mut self) {
+        self.nodes.last_mut().unwrap().set_bounding_factor(1.0);
+        for node in (self.start_computational_nodes..self.nodes.len()).rev().map(NodeIndex) {
+            if self[node].is_sum() {
+                let factor = self[node].bounding_factor();
+                let start_i = self[node].input_start();
+                for i in 0.. self[node].number_inputs() {
+                    let child = self.inputs[start_i+i];
+                    self[child].set_bounding_factor(factor);
+                }
+            }
+            else if self[node].is_product() {
+                let branching = self[node].number_inputs();
+                let factor = self[node].bounding_factor();
+                let start_i = self[node].input_start();
+                for i in 0..self[node].number_inputs() {
+                    let child = self.inputs[start_i+i];
+                    self[child].set_bounding_factor(factor * (branching as f64));
+                }
+            }
+        }
     }
 
 }
@@ -512,9 +546,9 @@ where R: SemiRing
                     let label = format!("x {}", value);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
-                TypeNode::Distribution{d:_ ,v:_ } => {
+                TypeNode::Distribution{d ,v } => {
                     let attributes = &dist_node_attributes;
-                    let label = format!("D {}", value);
+                    let label = format!("D {} (d{} v{})", value, d, v);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
                 TypeNode::Approximate => {
@@ -571,8 +605,8 @@ where R: SemiRing
             match node.get_type() {
                 TypeNode::Product => write!(f, "x")?,
                 TypeNode::Sum => write!(f, "+")?,
-                TypeNode::Approximate => write!(f, "a {}", node.value().to_f64())?,
-                TypeNode::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
+                TypeNode::Approximate => write!(f, "a {} {}", node.value().to_f64(), node.bounding_factor())?,
+                TypeNode::Distribution {d, v} => write!(f, "d {} {} {}", d, v, node.value())?,
             }
             writeln!(f, " {} {} {} {}", node.output_start(), node.number_outputs(), node.input_start(), node.number_inputs())?;
         }
@@ -589,7 +623,7 @@ where R: SemiRing
         write!(output, "{}", self).unwrap();
     }
 
-    /// Reads the structure of the dac from the given file
+    /// Read the structure of the dac from the given file
     pub fn from_file(filepath: &PathBuf) -> Self {
         let mut dac = Self {
             nodes: vec![],
@@ -609,6 +643,9 @@ where R: SemiRing
             } else if l.starts_with("outputs") {
                 dac.outputs = split.iter().skip(1).map(|i| NodeIndex(i.parse::<usize>().unwrap())).collect();
             } else if l.starts_with('x') || l.starts_with('+') {
+                if dac.start_computational_nodes == 0 {
+                    dac.start_computational_nodes = dac.nodes.len();
+                }
                 let values = split.iter().skip(1).take(4).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
                 let mut propagation = vec![];
                 let mut i = 5;
@@ -625,18 +662,26 @@ where R: SemiRing
                 node.set_number_inputs(values[3]);
                 dac.nodes.push(node);
             } else if l.starts_with('d') {
-                let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
-                let d = values[0];
-                let v = values[1];
-                let mut node: Node<Float> = Node::distribution(d, v, 0.5);
-                node.set_output_start(values[2]);
-                node.set_number_outputs(values[3]);
-                node.set_input_start(values[4]);
-                node.set_number_inputs(values[5]);
+                let values = split.iter().skip(1).map(|i| i.parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                let d = values[0] as usize;
+                let v = values[1] as usize;
+                let value = values[2];
+                let mut node = Node::distribution(d, v, value);
+                node.set_output_start(values[3] as usize);
+                node.set_number_outputs(values[4] as usize);
+                node.set_input_start(values[5] as usize);
+                node.set_number_inputs(values[6] as usize);
                 dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
-            } else if l.starts_with('p') {
-                let value = split.iter().skip(1).next().unwrap().parse::<f64>().unwrap();
-                let node = Node::approximate(value);
+                dac.nodes.push(node);
+            } else if l.starts_with('a') {
+                let values = split.iter().skip(1).map(|i| i.parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                let value = values[0];
+                let factor = values[1];
+                let mut node = Node::approximate(value, factor);
+                node.set_output_start(values[2] as usize);
+                node.set_number_outputs(values[3] as usize);
+                node.set_input_start(values[4] as usize);
+                node.set_number_inputs(values[5] as usize);
                 dac.nodes.push(node);
             }
             else if !l.is_empty() {

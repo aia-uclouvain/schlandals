@@ -136,10 +136,10 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
     }
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> ProblemSolution {
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64, ) -> ProblemSolution {
     match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
+            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, true);
             _compile(compiler, fdac, dotfile)
         },
         FileType::FDAC => {
@@ -157,28 +157,28 @@ pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isi
 }
 
 
-pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
+pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>, save_fdac: Option<PathBuf>) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected, save_fdac))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected, save_fdac))
             }
         },
         #[cfg(feature = "tensor")]
         Semiring::Tensor => {
             if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected, save_fdac))
             } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
+                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected, save_fdac))
             }
         }
     }
 }
 
 pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
-            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters) {    
+            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters, save_fdac: Option<PathBuf>) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -202,12 +202,12 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
             test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
         }
     }
-    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
+    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected, save_fdac);
     learner.train(&params);
 }
 
 pub fn partial(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
-            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters) {
+            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters, save_fdac: Option<PathBuf>, delta: f64, sampling: bool) {
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
     let file = File::open(&trainfile).unwrap();
@@ -230,8 +230,9 @@ pub fn partial(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branchin
             test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
         }
     }
-    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
-    learner.partial_approx(&params);
+    let mut learner = make_learner(inputs, expected, 0.0, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected, save_fdac);
+    learner.set_epsilon(epsilon);
+    learner.partial_approx(&params, delta, sampling);
 }
 
 impl std::fmt::Display for Loss {

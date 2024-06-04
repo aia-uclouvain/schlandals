@@ -51,6 +51,8 @@ pub struct Node<R>
     /// The multiplicative factor accumulated on the paths to the root whil computing the gradient
     /// (only used when evaluating on the Float semiring)
     path_value: Float,
+    /// The bounding factor of the node
+    bounding_factor: f64,
 }
 
 impl<R> Node<R>
@@ -70,6 +72,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            bounding_factor: 0.0,
         }
     }
 
@@ -87,11 +90,12 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            bounding_factor: 0.0,
         }
     }
 
     /// Returns a new approximate node with the given value
-    pub fn approximate(value: f64) -> Self {
+    pub fn approximate(value: f64, bounding_factor: f64) -> Self {
         Node {
             value: R::from_f64(value),
             outputs: vec![],
@@ -104,6 +108,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            bounding_factor,
         }
     }
 
@@ -121,6 +126,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: f128!(1.0),
+            bounding_factor: 0.0,
         }
     }
 
@@ -158,6 +164,11 @@ impl<R> Node<R>
     // the value of the nodes from the root of the circuit to the node.
     pub fn path_value(&self) -> Float {
         self.path_value.clone()
+    }
+
+    /// Returns the bounding factor of the node
+    pub fn bounding_factor(&self) -> f64 {
+        self.bounding_factor
     }
 
     /// Returns the type of the node.
@@ -225,6 +236,11 @@ impl<R> Node<R>
     /// Sets the path value of the node to the given float
     pub fn set_path_value(&mut self, value: Float){
         self.path_value = value;
+    }
+
+    /// Sets the bounding factor of the node
+    pub fn set_bounding_factor(&mut self, value: f64){
+        self.bounding_factor = value;
     }
 
     /// Adds the given float to the path value of the node

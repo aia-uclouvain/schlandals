@@ -38,7 +38,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Option<Dac<R>>>
+pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64, save_fdac:&Option<PathBuf>) -> Vec<Option<Dac<R>>>
 {
     inputs.par_iter().map(|input| {
         // We compile the input. This can either be a .cnf file or a fdac file.
@@ -50,6 +50,12 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                 let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, true);
                 let d = compile!(compiler);
                 println!("Compiled {}", d.is_some());
+                if let Some(dac) = &d {
+                    if let Some(save_fdac) = save_fdac {
+                        println!("Saving compiled DAC to {}", save_fdac.join(input.file_name().unwrap().to_str().unwrap().to_string().replace(".cnf", ".fdac")).to_str().unwrap());
+                        dac.to_file(&save_fdac.join(input.file_name().unwrap().to_str().unwrap().to_string().replace(".cnf", ".fdac")));
+                    }
+                }
                 d
             },
             FileType::FDAC => {

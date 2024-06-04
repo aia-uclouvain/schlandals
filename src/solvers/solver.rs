@@ -134,7 +134,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if self.graph.clauses_iter().find(|c| self.graph[*c].is_constrained(&self.state)).is_none() {
             let lb = preproc_in.clone();
             let ub = f128!(1.0 - preproc_out);
-            print!("{} {} {}", lb, ub, self.start.elapsed().as_secs());
+            self.statistics.print();
             return ProblemSolution::Ok((preproc_in, f128!(1.0 - preproc_out)));
         }
         self.graph.clear_after_preprocess(&mut self.state);
@@ -336,25 +336,29 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if preprocessor.preprocess().is_none() {
             return None;
         }
+        let mut dac: Dac<R> = Dac::new();
+        let prod_node = self.get_prod_node_from_propagations(&mut dac);
         self.graph.clear_after_preprocess(&mut self.state);
         let max_probability = self.graph.distributions_iter().map(|d| self.graph[d].remaining(&self.state)).product::<f64>();
         self.component_extractor.shrink(self.graph.number_clauses(), self.graph.number_variables(), self.graph.number_distributions(), max_probability);
         self.propagator.reduce(self.graph.number_clauses(), self.graph.number_variables());
         self.branching_heuristic.init(&self.graph, &self.state);
         self.propagator.set_forced();
-        let mut dac = Dac::new();
-        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0)) {
+        
+        match self.expand_prod_node(&mut dac, ComponentIndex(0), 1, (1.0 + self.epsilon).powf(2.0), prod_node) {
             None => None,
             Some(_) => {
                 dac.optimize_structure();
+                dac.set_bounding_factors();
                 Some(dac)
             }
         }
     }
 
     /// Expands a product node of the arithmetic circuit
-    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64) -> Option<NodeIndex> {
-        let mut prod_node = self.get_prod_node_from_propagations(dac);
+    fn expand_prod_node<R: SemiRing>(&mut self, dac: &mut Dac<R>, component: ComponentIndex, level: isize, bound_factor: f64, base_node: Option<NodeIndex>) -> Option<NodeIndex> {
+        let mut prod_node = if base_node.is_some() { base_node } else { self.get_prod_node_from_propagations(dac) };
+        self.state.save_state();
         if self.component_extractor.detect_components(&mut self.graph, &mut self.state, component, &mut self.propagator) {
             let number_components = self.component_extractor.number_components(&self.state);
             let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
@@ -362,7 +366,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if self.start.elapsed().as_secs() >= self.timeout {
                     return None;
                 }
-                let cache_key = self.component_extractor[component].get_cache_key();
+                let cache_key = self.component_extractor[sub_component].get_cache_key();
                 match self.compilation_cache.get(&cache_key) {
                     Some(node) => {
                         if node.0 != usize::MAX {
@@ -370,8 +374,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 prod_node = Some(dac.add_prod_node());
                             }
                             dac.add_node_output(*node, prod_node.unwrap());
-                        } else {
-                            return None;
                         }
                     },
                     None => {
@@ -385,7 +387,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                     self.compilation_cache.insert(cache_key, child);
                                 } else {
                                     self.compilation_cache.insert(cache_key, NodeIndex(usize::MAX));
-                                    return None;
                                 }
                             } else {
                                 // Still some distributions to branch on, but no more to learn.
@@ -396,7 +397,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 let (child_sol, _) = self.get_bounds_from_cache(sub_component, new_bound_factor, level, usize::MAX);
                                 let (child_p_in, child_p_out) = child_sol.bounds();
                                 let child_value = (child_p_in * (maximum_probability - child_p_out.clone())).sqrt();
-                                let child = dac.add_approximate_node(child_value.to_f64());
+                                let child = dac.add_approximate_node(child_value.to_f64(), new_bound_factor);
                                 if prod_node.is_none() {
                                     prod_node = Some(dac.add_prod_node());
                                 }
@@ -407,6 +408,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 };
             }
         }
+        self.restore();
         if level == 1 && prod_node.is_some() {
             dac.set_root(prod_node.unwrap());
         }
@@ -433,7 +435,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     }
                 },
                 Ok(_) => {
-                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor) {
+                    if let Some(child) = self.expand_prod_node(dac, component, level + 1, bounding_factor, None) {
                         if sum_node.is_none() {
                             sum_node = Some(dac.add_sum_node());
                         }
@@ -451,7 +453,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     ///     1) All the variables that have been set to true
     ///     2) The distributions that have become unconstrained (merged into a sum node)
     fn get_prod_node_from_propagations<R: SemiRing>(&self, dac: &mut Dac<R>) -> Option<NodeIndex> {
-        if self.propagator.has_assignments() || self.propagator.has_unconstrained_distribution() {
+        if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
             let node = dac.add_prod_node();
             // First, we look at the assignments
             for literal in self.propagator.assignments_iter(&self.state) {
@@ -461,6 +463,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     let distribution = self.graph[variable].distribution().unwrap();
                     // This represent which "probability index" is send to the node
                     let value_index = variable.0 - self.graph[distribution].start().0;
+                    //let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
                     let old_distribution = self.graph[distribution].old_index();
                     let old_value = self.graph[variable].old_index() - self.graph[distribution].old_first().0;
                     let distribution_node = dac.distribution_value_node_index(distribution, value_index, old_distribution, old_value, self.graph[variable].weight().unwrap());
@@ -477,6 +480,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     for variable in self.graph[distribution].iter_variables() {
                         if !self.graph[variable].is_fixed(&self.state) {
                             let value_index = variable.0 - self.graph[distribution].start().0;
+                            //let distribution_node = dac.distribution_value_node_index(distribution, value_index, self.graph[variable].weight().unwrap());
                             let old_distribution = self.graph[distribution].old_index();
                             let old_value = self.graph[variable].old_index() - self.graph[distribution].old_first().0;
                             let distribution_node = dac.distribution_value_node_index(distribution, value_index, old_distribution, old_value, self.graph[variable].weight().unwrap());

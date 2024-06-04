@@ -24,7 +24,8 @@ mod logger;
 
 pub trait Learning {
     fn train(& mut self, params:&LearnParameters);
-    fn partial_approx(&mut self, params:&LearnParameters);
+    fn partial_approx(&mut self, params:&LearnParameters, delta: f64, sampling: bool);
+    fn set_epsilon(&mut self, epsilon: f64);
 }
 
 pub struct LearnParameters {

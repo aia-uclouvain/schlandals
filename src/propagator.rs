@@ -128,8 +128,9 @@ impl Propagator {
     }
 
     /// Returns true if there are any assignments in the assignments queue
-    pub fn has_assignments(&self) -> bool {
-        !self.assignments.is_empty()
+    pub fn has_assignments(&self, state: &StateManager) -> bool {
+        let start = state.get_usize(self.base_assignments);
+        start < self.assignments.len()
     }
     
     /// Returns true if there are any unconstrained distributions in the queue
@@ -546,7 +547,7 @@ impl Propagator {
         self.clause_flags.shrink_to_fit();
         self.lit_flags.truncate(number_variables);
         self.lit_flags.shrink_to_fit();
-        self.assignments.clear();
+        //self.assignments.clear();
     }
 }
 
