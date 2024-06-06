@@ -21,7 +21,6 @@ use crate::propagator::Propagator;
 use crate::Branching;
 use crate::common::FLOAT_CMP_THRESHOLD;
 use crate::core::bitvec::Bitvec;
-use crate::diagrams::NodeIndex;
 
 use search_trail::StateManager;
 use rug::Float;
