@@ -211,12 +211,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                 assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
                 let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level, discrepancy);
-                if backtrack_level != level {
-                    self.restore();
-                    return ((F128!(0.0), maximum_probability), backtrack_level);
-                }
-                // If any of the component is not fully explored, then so is the node
                 let (sub_p_in, sub_p_out) = sub_problem.bounds();
+                if backtrack_level != level || sub_p_in.to_f64() == 0.0 {
+                    self.restore();
+                    return ((F128!(0.0), maximum_probability), if backtrack_level != level { backtrack_level } else { level - 1 });
+                }
                 p_in *= sub_p_in;
                 p_out *= sub_maximum_probability - sub_p_out.clone();
             }
