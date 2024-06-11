@@ -41,6 +41,7 @@ use crate::diagrams::*;
 use crate::core::problem::{DistributionIndex, VariableIndex};
 use crate::diagrams::semiring::*;
 use crate::solvers::Solution;
+use crate::solvers::Bounds;
 
 use super::node::*;
 use rug::Float;
@@ -109,9 +110,9 @@ impl<R> Dac<R>
     }
 
     /// Adds a partial node, with the given value, to the circuit. Returns its index.
-    pub fn add_approximate_node(&mut self, value: f64) -> NodeIndex {
+    pub fn add_approximate_node(&mut self, value: f64, bounds: Bounds) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
-        self.nodes.push(Node::approximate(value));
+        self.nodes.push(Node::approximate(value, bounds));
         id
     }
 
@@ -525,9 +526,9 @@ where R: SemiRing
                     let label = format!("x {}", value);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
-                TypeNode::Distribution{d:_ ,v:_ } => {
+                TypeNode::Distribution{d ,v } => {
                     let attributes = &dist_node_attributes;
-                    let label = format!("D {}", value);
+                    let label = format!("D {} (d{} v{})", value, d, v);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
                 TypeNode::Approximate => {
@@ -552,6 +553,57 @@ where R: SemiRing
         out.push_str("}\n");
         out
     }
+
+    /* pub fn as_graphviz(&self) -> String {
+
+        let dist_node_attributes = String::from("shape=doublecircle,style=filled");
+        let prod_node_attributes = String::from("shape=square,style=filled");
+        let sum_node_attributes = String::from("shape=circle,style=filled");
+        let approx_node_attributes = String::from("shape=house,style=filled");
+
+        let mut out = String::new();
+        out.push_str("digraph {\ntranksep = 3;\n\n");
+
+        // Generating the nodes in the network 
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            let id = node.0;
+            let value = format!("{:.4}", self[node].value().to_f64());
+            match self[node].get_type() {
+                TypeNode::Sum => {
+                    let attributes = &sum_node_attributes;
+                    let label = format!("+ {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Product => {
+                    let attributes = &prod_node_attributes;
+                    let label = format!("x {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Distribution{d:_ ,v:_ } => {
+                    let attributes = &dist_node_attributes;
+                    let label = format!("D {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                TypeNode::Approximate => {
+                    let attributes = &approx_node_attributes;
+                    let label = format!("A {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                }
+            }
+        }
+
+        // Generating the edges
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            for child in self[node].inputs() {
+                let from = child.0;
+                let to = node.0;
+                out.push_str(&format!("\t{from} -> {to} [penwidth=1];\n"));
+            }
+        }
+        out.push_str("}\n");
+        out
+    } */
+
 }
 
 // Custom text format for the network
@@ -649,8 +701,11 @@ where R: SemiRing
                 node.set_number_inputs(values[5]);
                 dac.distribution_mapping.insert((DistributionIndex(d), v), NodeIndex(dac.nodes.len()-1));
             } else if l.starts_with('p') {
-                let value = split.iter().skip(1).next().unwrap().parse::<f64>().unwrap();
-                let node = Node::approximate(value);
+                let values = split.iter().skip(1).map(|i| i.parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                let value = values[0];
+                let p_in = values[1];
+                let p_out = values[2];
+                let node = Node::approximate(value, (F128!(p_in), F128!(p_out)));
                 dac.nodes.push(node);
             }
             else if !l.is_empty() {

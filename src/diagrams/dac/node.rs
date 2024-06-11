@@ -22,6 +22,7 @@ use crate::diagrams::semiring::*;
 use crate::diagrams::NodeIndex;
 use crate::common::*;
 use crate::diagrams::*;
+use crate::solvers::Bounds;
 
 /// A node structur that represents both internal and distribution nodes.
 pub struct Node<R>
@@ -51,6 +52,8 @@ pub struct Node<R>
     /// The multiplicative factor accumulated on the paths to the root whil computing the gradient
     /// (only used when evaluating on the Float semiring)
     path_value: Float,
+    /// The p_in and p_out bounds of the node
+    bounds: Bounds,
 }
 
 impl<R> Node<R>
@@ -70,6 +73,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: F128!(1.0),
+            bounds: (F128!(0.0), F128!(0.0)),
         }
     }
 
@@ -87,11 +91,12 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: F128!(1.0),
+            bounds: (F128!(0.0), F128!(0.0)),
         }
     }
 
     /// Returns a new approximate node with the given value
-    pub fn approximate(value: f64) -> Self {
+    pub fn approximate(value: f64, bounds: Bounds) -> Self {
         Node {
             value: R::from_f64(value),
             outputs: vec![],
@@ -104,6 +109,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: F128!(1.0),
+            bounds,
         }
     }
 
@@ -121,6 +127,7 @@ impl<R> Node<R>
             layer: 0,
             to_remove: true,
             path_value: F128!(1.0),
+            bounds: (F128!(0.0), F128!(0.0)),
         }
     }
 
@@ -158,6 +165,11 @@ impl<R> Node<R>
     // the value of the nodes from the root of the circuit to the node.
     pub fn path_value(&self) -> Float {
         self.path_value.clone()
+    }
+
+    /// Returns the bounding factor of the node
+    pub fn bounds(&self) -> Bounds {
+        self.bounds.clone()
     }
 
     /// Returns the type of the node.
@@ -201,6 +213,10 @@ impl<R> Node<R>
         self.number_outputs > 0
     }
 
+    pub fn inputs(&self) -> &Vec<NodeIndex> {
+        &self.inputs
+    }
+
     // --- Setters --- /
 
     /// Adds the given node to the outputs
@@ -225,6 +241,11 @@ impl<R> Node<R>
     /// Sets the path value of the node to the given float
     pub fn set_path_value(&mut self, value: Float){
         self.path_value = value;
+    }
+
+    /// Sets the bounding factor of the node
+    pub fn set_bounds(&mut self, bounds: Bounds){
+        self.bounds = bounds;
     }
 
     /// Adds the given float to the path value of the node

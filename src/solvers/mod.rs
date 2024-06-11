@@ -21,11 +21,11 @@ use crate::propagator::Propagator;
 use crate::Branching;
 use crate::common::FLOAT_CMP_THRESHOLD;
 use crate::core::bitvec::Bitvec;
+use crate::diagrams::NodeIndex;
 
 use search_trail::StateManager;
 use rug::Float;
 use std::hash::Hash;
-
 
 pub type Bounds = (Float, Float);
 
@@ -222,7 +222,7 @@ pub(crate) use lds;
 /// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
 /// two different sub-problems have different hash.
 /// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CacheKey {
     hash: u64,
     repr: Bitvec,
@@ -267,22 +267,35 @@ pub struct SearchCacheEntry {
     discrepancy: usize,
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
+    /// The cache keys of the subcomponents related to the variable of the distribution
+    variable_component_keys: Vec<(usize, Vec<CacheKey>)>,
+    /// The distribution variables that were fixed by the propagation for each variable of the distribution
+    forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, usize)>)>,
+    /// The distribution variables that were uncontrained by the propagation and not summing to 1
+    unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)>,
+    /// The node index of the cache entry in the diagram if is has already been created
+    node_index: Option<NodeIndex>,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, variable_component_keys: Vec<(usize, Vec<CacheKey>)>, 
+               forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, usize)>)>, unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)>) -> Self {
         Self {
             bounds,
             discrepancy,
             distribution,
+            variable_component_keys,
+            forced_distribution_variables,
+            unconstrained_distribution_variables,
+            node_index: None,
         }
     }
 
     /// Returns a reference to the bounds of this entry
-    pub fn bounds(&self) -> &Bounds {
-        &self.bounds
+    pub fn bounds(&self) -> Bounds {
+        self.bounds.clone()
     }
 
     /// Returns the discrepancy of the node
@@ -292,5 +305,43 @@ impl SearchCacheEntry {
 
     pub fn distribution(&self) -> Option<DistributionIndex> {
         self.distribution
+    }
+
+    pub fn variable_component_keys(&self) -> Vec<(usize, Vec<CacheKey>)> {
+        self.variable_component_keys.clone()
+    }
+
+    pub fn forced_distribution_variables(&self) -> Vec<(usize, Vec<(DistributionIndex, usize)>)> {
+        self.forced_distribution_variables.clone()
+    }
+
+    pub fn forced_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, usize)>> {
+        if let Some(forced) = self.forced_distribution_variables.iter().find(|(v, _)| *v == variable) {
+            Some(forced.1.clone())
+        }
+        else {
+            None
+        }
+    }
+
+    pub fn unconstrained_distribution_variables(&self) -> Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)> {
+        self.unconstrained_distribution_variables.clone()
+    }
+
+    pub fn unconstrained_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, Vec<usize>)>> {
+        if let Some(unconstr) = self.unconstrained_distribution_variables.iter().find(|(v, _)| *v == variable) {
+            Some(unconstr.1.clone())
+        }
+        else {
+            None
+        }
+    }
+
+    pub fn node_index(&self) -> Option<NodeIndex> {
+        self.node_index
+    }
+
+    pub fn set_node_index(&mut self, node_index: NodeIndex) {
+        self.node_index = Some(node_index);
     }
 }
