@@ -20,7 +20,7 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::problem::VariableIndex;
+use super::problem::{DistributionIndex, VariableIndex};
 use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
 
 /// A distribution of the input problem
@@ -42,7 +42,12 @@ pub struct Distribution {
     constrained: ReversibleBool,
     /// Sum of the weight of the unfixed variables in the distribution
     remaining: ReversibleF64,
+    /// Is the distribution a candidate for branching ?
     branching_candidate: bool,
+    /// Initial index of the distribution in the problem
+    old_index: usize,
+    /// Initial first variable of the distribution in the problem
+    old_first: VariableIndex,
 }
 
 impl Distribution {
@@ -58,6 +63,8 @@ impl Distribution {
             constrained: state.manage_bool(true),
             remaining: state.manage_f64(1.0),
             branching_candidate: true,
+            old_index: id,
+            old_first: first,
         }
     }
     
@@ -92,6 +99,16 @@ impl Distribution {
     /// Returns the number of variable set to false in the distribution.
     pub fn number_false(&self, state: &StateManager) -> usize {
         state.get_usize(self.number_false)
+    }
+
+    /// Returns the initial index of the distribution in the problem
+    pub fn old_index(&self) -> DistributionIndex {
+        DistributionIndex(self.old_index)
+    }
+
+    /// Returns the initial first variable of the distribution in the problem
+    pub fn old_first(&self) -> VariableIndex {
+        self.old_first
     }
     
     /// Returns the start of the distribution in the vector of variables in the problem.

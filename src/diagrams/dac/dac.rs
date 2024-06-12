@@ -153,6 +153,15 @@ impl<R> Dac<R>
             NodeIndex(self.nodes.len()-1)
         }
     }
+    /* pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, old_distribution: DistributionIndex, old_value: usize, probability: f64) -> NodeIndex {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
+            *x
+        } else {
+            self.nodes.push(Node::distribution(old_distribution.0, old_value, probability));
+            self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
+            NodeIndex(self.nodes.len()-1)
+        }
+    } */
 }
 
 // --- CIRCUIT EVALUATION ---
@@ -172,6 +181,11 @@ impl<R> Dac<R>
     pub fn solution(&self) -> Solution {
         let p = self.circuit_probability().to_f64();
         Solution::new(F128!(p), F128!(p), self.compile_time)
+    }
+
+    /// Returns the bounds of the circuit.
+    pub fn bounds(&self) -> Bounds {
+        self[NodeIndex(self.nodes.len()-1)].bounds()
     }
 
     /// Updates the values of the distributions to the given values

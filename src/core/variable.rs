@@ -54,6 +54,8 @@ pub struct Variable {
     hash: u64,
     bitmask: u128,
     bitword_index: usize,
+    /// Initial index of the variable in the problem
+    old_index: usize,
 }
 
 impl Variable {
@@ -73,6 +75,7 @@ impl Variable {
             hash: rand::random(),
             bitmask: 0,
             bitword_index: 0,
+            old_index: id,
         }
     }
     
@@ -99,6 +102,11 @@ impl Variable {
     /// Returns the weight of the variable
     pub fn weight(&self) -> Option<f64> {
         self.weight
+    }
+
+    /// Returns the initial index of the variable in the problem
+    pub fn old_index(&self) -> usize {
+        self.old_index
     }
     
     /// Sets the variable to the given value. This operation is reverted when

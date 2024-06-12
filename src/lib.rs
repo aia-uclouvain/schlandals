@@ -114,7 +114,6 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
 fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
     let mut dac: Dac<Float> = compile!(compiler);
     dac.evaluate();
-    println!("dac\n{}", dac.as_graphviz());
     if let Some(f) = dotfile {
         let out = dac.as_graphviz();
         let mut outfile = File::create(f).unwrap();
