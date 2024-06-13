@@ -54,6 +54,9 @@ where
             if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 1.0 {
                 self.propagator.add_to_propagation_stack(variable, true, 0, None);
             }
+            if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 0.0 {
+                self.propagator.add_to_propagation_stack(variable, false, 0, None);
+            }
         }
         
         // Find unit clauses

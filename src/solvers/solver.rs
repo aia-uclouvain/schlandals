@@ -76,6 +76,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     preproc_in: Option<Float>,
     /// Probability of removed interpretation during propagation
     preproc_out: Option<f64>,
+    preproc_max: f64,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -103,6 +104,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             start: Instant::now(),
             preproc_in: None,
             preproc_out: None,
+            preproc_max: 1.0,
         }
     }
 
@@ -126,7 +128,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     fn pwmc(&mut self, is_lds: bool) -> Solution {
         if self.problem.number_clauses() == 0 {
-            let lb = self.preproc_in.clone().unwrap();
+            let lb = self.preproc_max*self.preproc_in.clone().unwrap();
             let ub = F128!(1.0 - self.preproc_out.unwrap());
             return Solution::new(lb, ub, self.start.elapsed().as_secs());
         }
@@ -167,13 +169,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             ));
         }
         self.preproc_in = Some(preproc.unwrap());
-        self.preproc_out = Some(
-            1.0 - self
-                .problem
-                .distributions_iter()
-                .map(|d| self.problem[d].remaining(&self.state))
-                .product::<f64>(),
-        );
+        self.preproc_max = self.problem.distributions_iter().map(|d| self.problem[d].remaining(&self.state)).product::<f64>();
+        self.preproc_out = Some(1.0 - self.preproc_max);
         None
     }
 
