@@ -144,7 +144,7 @@ impl<R> Dac<R>
     }
     
     /// Returns, for a given distribution index and its value, the corresponding node index in the dac
-    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
+    /* pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
         } else {
@@ -152,8 +152,8 @@ impl<R> Dac<R>
             self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
         }
-    }
-    /* pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, old_distribution: DistributionIndex, old_value: usize, probability: f64) -> NodeIndex {
+    } */
+    pub fn distribution_value_node_index(&mut self, distribution: DistributionIndex, value: usize, old_distribution: DistributionIndex, old_value: usize, probability: f64) -> NodeIndex {
         if let Some(x) = self.distribution_mapping.get(&(distribution, value)) {
             *x
         } else {
@@ -161,7 +161,7 @@ impl<R> Dac<R>
             self.distribution_mapping.insert((distribution, value), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
         }
-    } */
+    }
 }
 
 // --- CIRCUIT EVALUATION ---

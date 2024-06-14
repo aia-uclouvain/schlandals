@@ -37,7 +37,7 @@ use std::time::{Instant, Duration};
 use crate::diagrams::dac::dac::*;
 use crate::diagrams::TypeNode;
 use super::logger::Logger;
-use crate::parser::*;
+use crate::{parser::*, ApproximateMethod};
 use crate::Branching;
 use rayon::prelude::*;
 use super::Learning;
@@ -64,7 +64,7 @@ pub struct Learner<const S: bool> {
 impl <const S: bool> Learner<S> {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
+    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
         // Retrieves the distributions values and computes their unsoftmaxed values
@@ -81,8 +81,8 @@ impl <const S: bool> Learner<S> {
         let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
 
         // Compiling the train and test queries into arithmetic circuits
-        let mut train_dacs = generate_dacs(inputs, branching, epsilon, compile_timeout);
-        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, compile_timeout);
+        let mut train_dacs = generate_dacs(inputs, branching, epsilon, approx, compile_timeout);
+        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, approx, compile_timeout);
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];

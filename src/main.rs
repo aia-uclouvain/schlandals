@@ -71,6 +71,9 @@ enum Command {
         /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
         #[clap(short, long)]
         epsilon: Option<f64>,
+        /// If epsilon present, use the appropriate approximate method
+        #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
+        approx: ApproximateMethod,
     },
     /// Learn distribution parameters from a set of queries
     Learn {
@@ -134,6 +137,9 @@ enum Command {
         /// (i.e. if the loss is below this value for a number of epochs, stop the training)
         #[clap(long, default_value_t=5)]
         patience: usize,
+        /// If epsilon present, use the appropriate approximate method
+        #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
+        approx: ApproximateMethod,
     }
 }
 
@@ -147,16 +153,16 @@ fn main() {
         Command::Search { input, branching, statistics, memory , epsilon, approx, unweighted} => {
            schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, unweighted);
         },
-        Command::Compile { input, branching, fdac, dotfile, epsilon} => {
+        Command::Compile { input, branching, fdac, dotfile, epsilon, approx} => {
             let e = match epsilon {
                 Some(v) => v,
                 None => 0.0,
             };
-            schlandals::compile(input, branching, fdac, dotfile, e, timeout);
+            schlandals::compile(input, branching, fdac, dotfile, e, approx, timeout);
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log , ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
-            epoch_drop, early_stop_threshold, early_stop_delta, patience} => {
+            epoch_drop, early_stop_threshold, early_stop_delta, patience, approx} => {
             let params = LearnParameters::new(
                 lr,
                 nepochs,
@@ -175,7 +181,7 @@ fn main() {
                 process::exit(1);
             }
             
-            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, jobs, semiring, params);
+            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, approx, jobs, semiring, params);
         }
     }
 }

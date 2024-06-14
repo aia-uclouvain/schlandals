@@ -24,6 +24,7 @@ use crate::propagator::Propagator;
 use crate::parser::*;
 use crate::solvers::*;
 use crate::{common::F128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
+use crate::ApproximateMethod;
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
 /// logistic function to multiple dimensions.
@@ -38,7 +39,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, timeout: u64) -> Vec<Dac<R>> {
+pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
     inputs.par_iter().map(|input| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -47,7 +48,15 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
                 let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
-                compile!(compiler)
+                match approx {
+                    ApproximateMethod::Bounds => {
+                        compile!(compiler, false)
+                    },
+                    ApproximateMethod::LDS => {
+                        compile!(compiler, true)
+                    },
+                    
+                }
             },
             FileType::FDAC => {
                 println!("Reading {}", input.to_str().unwrap());

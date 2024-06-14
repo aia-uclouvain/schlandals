@@ -23,7 +23,7 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, u64::MAX);
+                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, schlandals::ApproximateMethod::Bounds, u64::MAX);
                 assert!(($value - sol).abs() < 0.000001);
             }
 

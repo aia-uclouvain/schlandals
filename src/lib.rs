@@ -111,8 +111,11 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
     solution.to_f64()
 }
 
-fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
-    let mut dac: Dac<Float> = compile!(compiler);
+fn _compile(compiler: GenericSolver, approx: ApproximateMethod, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
+    let mut dac: Dac<Float> = match approx {
+        ApproximateMethod::Bounds => compile!(compiler, false),
+        ApproximateMethod::LDS => compile!(compiler, true),
+    };
     dac.evaluate();
     if let Some(f) = dotfile {
         let out = dac.as_graphviz();
@@ -133,11 +136,11 @@ fn _compile(compiler: GenericSolver, fdac: Option<PathBuf>, dotfile: Option<Path
     dac.solution()
 }
 
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, timeout: u64) -> f64 {
+pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> f64 {
     let solution = match type_of_input(&input) {
         FileType::CNF => {
             let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
-            _compile(compiler, fdac, dotfile)
+            _compile(compiler, approx, fdac, dotfile)
         },
         FileType::FDAC => {
             let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
@@ -149,19 +152,19 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     solution.to_f64()
 }
 
-pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
+pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, approx: ApproximateMethod, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
     let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
-    _compile(solver, fdac, dotfile)
+    _compile(solver, approx, fdac, dotfile)
 }
 
 
-pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
+pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
             }
         },
         #[cfg(feature = "tensor")]
@@ -176,7 +179,7 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, bran
 }
 
 pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
-            log:bool, epsilon: f64, jobs: usize, semiring: Semiring, params: LearnParameters) {    
+            log:bool, epsilon: f64, approx: ApproximateMethod, jobs: usize, semiring: Semiring, params: LearnParameters) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -200,7 +203,7 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
             test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
         }
     }
-    let mut learner = make_learner(inputs, expected, epsilon, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
+    let mut learner = make_learner(inputs, expected, epsilon, approx, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
     learner.train(&params);
 }
 

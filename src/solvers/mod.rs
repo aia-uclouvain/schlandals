@@ -194,16 +194,16 @@ macro_rules! lds {
 }
 
 macro_rules! compile {
-    ($c:expr) => {
+    ($c:expr, $l:expr) => {
         match $c {
-            GenericSolver::SMinInDegree(mut solver) => solver.compile(),
-            GenericSolver::SMinOutDegree(mut solver) => solver.compile(),
-            GenericSolver::SMaxDegree(mut solver) => solver.compile(),
-            GenericSolver::SVSIDS(mut solver) => solver.compile(),
-            GenericSolver::QMinInDegree(mut solver) => solver.compile(),
-            GenericSolver::QMinOutDegree(mut solver) => solver.compile(),
-            GenericSolver::QMaxDegree(mut solver) => solver.compile(),
-            GenericSolver::QVSIDS(mut solver) => solver.compile(),
+            GenericSolver::SMinInDegree(mut solver) => solver.compile($l),
+            GenericSolver::SMinOutDegree(mut solver) => solver.compile($l),
+            GenericSolver::SMaxDegree(mut solver) => solver.compile($l),
+            GenericSolver::SVSIDS(mut solver) => solver.compile($l),
+            GenericSolver::QMinInDegree(mut solver) => solver.compile($l),
+            GenericSolver::QMinOutDegree(mut solver) => solver.compile($l),
+            GenericSolver::QMaxDegree(mut solver) => solver.compile($l),
+            GenericSolver::QVSIDS(mut solver) => solver.compile($l),
         }
     }
 }
@@ -269,10 +269,10 @@ pub struct SearchCacheEntry {
     distribution: Option<DistributionIndex>,
     /// The cache keys of the subcomponents related to the variable of the distribution
     variable_component_keys: Vec<(usize, Vec<CacheKey>)>,
-    /// The distribution variables that were fixed by the propagation for each variable of the distribution
-    forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, usize)>)>,
-    /// The distribution variables that were uncontrained by the propagation and not summing to 1
-    unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)>,
+    /// The distribution variables (new, old) that were fixed by the propagation for each variable of the distribution (new, old)
+    forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)>,
+    /// The distribution variables (new, old) that were uncontrained by the propagation and not summing to 1 and their distribution (new, old)
+    unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)>,
     /// The node index of the cache entry in the diagram if is has already been created
     node_index: Option<NodeIndex>,
 }
@@ -281,7 +281,7 @@ impl SearchCacheEntry {
 
     /// Returns a new cache entry
     pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, variable_component_keys: Vec<(usize, Vec<CacheKey>)>, 
-               forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, usize)>)>, unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)>) -> Self {
+               forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)>, unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)>) -> Self {
         Self {
             bounds,
             discrepancy,
@@ -311,11 +311,7 @@ impl SearchCacheEntry {
         self.variable_component_keys.clone()
     }
 
-    pub fn forced_distribution_variables(&self) -> Vec<(usize, Vec<(DistributionIndex, usize)>)> {
-        self.forced_distribution_variables.clone()
-    }
-
-    pub fn forced_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, usize)>> {
+    pub fn forced_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, usize, usize)>> {
         if let Some(forced) = self.forced_distribution_variables.iter().find(|(v, _)| *v == variable) {
             Some(forced.1.clone())
         }
@@ -324,11 +320,7 @@ impl SearchCacheEntry {
         }
     }
 
-    pub fn unconstrained_distribution_variables(&self) -> Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)> {
-        self.unconstrained_distribution_variables.clone()
-    }
-
-    pub fn unconstrained_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, Vec<usize>)>> {
+    pub fn unconstrained_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>> {
         if let Some(unconstr) = self.unconstrained_distribution_variables.iter().find(|(v, _)| *v == variable) {
             Some(unconstr.1.clone())
         }

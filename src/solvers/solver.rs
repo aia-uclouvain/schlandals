@@ -198,14 +198,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.propagator.set_forced();
     }
 
-    pub fn compile<R: SemiRing>(&mut self) -> Dac<R> { //discrepancy: Option<usize>
+    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> { //discrepancy: Option<usize>
         // TODO discrepancy: 
         // do we want a compilation timeout? then compile a the end of each discrepancy iteration
         // or do we want to give a specific discrepancy to achieve? Then adapt search to immediately use that value
         let start = Instant::now();
-        let discrepancy: Option<usize> = None;
-
         self.state.save_state();
+
         // Preprocessing
         let preproc_result = self.preprocess();
         // Create the DAC and add elements from the preprocessing
@@ -214,28 +213,28 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         dac.set_root(parent_i);
         // Forced variables from the propagation
         let (fixed_distribution_variables, fixed_unconstrained_distribution_variables) = self.forced_from_propagation();
-        for (d, v) in fixed_distribution_variables {
-            let distribution_node = dac.distribution_value_node_index(d, v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
+        for (d, old_d, v, old_v) in fixed_distribution_variables {
+            let distribution_node = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
             dac.add_node_output(distribution_node, parent_i);
         }
         // Unconstrained distribution variables
-        for (d, values) in fixed_unconstrained_distribution_variables {
+        for (d, old_d, values) in fixed_unconstrained_distribution_variables {
             let sum_node = dac.add_sum_node();
-            for v in values {
-                let distribution_node = dac.distribution_value_node_index(d, v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
+            for (v, old_v) in values {
+                let distribution_node = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
                 dac.add_node_output(distribution_node, sum_node);
             }
             dac.add_node_output(sum_node, parent_i);
         }
-
         if preproc_result.is_some() {
             return dac;
         }
         self.restructure_after_preprocess();  
 
         // Perform the actual search that will fill the cache
-        self.pwmc(discrepancy.is_some());
+        self.pwmc(is_lds);
 
+        // Build the rest of the DAC from the search cache
         let root_component = ComponentIndex(0);
         let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
         if let Some(root_c) = self.cache.get(&self.component_extractor[root_component].get_cache_key()) {
@@ -267,8 +266,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
                     // Adding to the new product node all the propagated variables, including the distribution value we branch on
                     if let Some(forced_distribution_variables) = current.forced_distribution_variables_of(variable) {
-                        for (d, v) in forced_distribution_variables {
-                            let distribution_prop = dac.distribution_value_node_index(d, v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
+                        for (d, old_d, v, old_v) in forced_distribution_variables {
+                            let distribution_prop = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
                             dac.add_node_output(distribution_prop, prod_node_i);
                             is_unsat = false;
                         }
@@ -276,10 +275,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
                     // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
                     if let Some(unconstrained_distribution_variables) = current.unconstrained_distribution_variables_of(variable) {
-                        for (d, values) in unconstrained_distribution_variables {
+                        for (d, old_d, values) in unconstrained_distribution_variables {
                             let sum_node_unconstrained = dac.add_sum_node();
-                            for v in values {
-                                let distribution_unconstrained = dac.distribution_value_node_index(d, v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
+                            for (v, old_v) in values {
+                                let distribution_unconstrained = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
                                 dac.add_node_output(distribution_unconstrained, sum_node_unconstrained);
                             }
                             dac.add_node_output(sum_node_unconstrained, prod_node_i);
@@ -348,9 +347,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
     }
 
-    fn forced_from_propagation(&mut self) -> (Vec<(DistributionIndex, usize)>, Vec<(DistributionIndex, Vec<usize>)>) {
-        let mut forced_distribution_variables: Vec<(DistributionIndex, usize)> = vec![];
-        let mut unconstrained_distribution_variables: Vec<(DistributionIndex, Vec<usize>)> = vec![];
+    fn forced_from_propagation(&mut self) -> (Vec<(DistributionIndex, DistributionIndex, usize, usize)>, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>) {
+        let mut forced_distribution_variables: Vec<(DistributionIndex, DistributionIndex, usize, usize)> = vec![];
+        let mut unconstrained_distribution_variables: Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)> = vec![];
 
         if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
             // First, we look at the assignments
@@ -361,7 +360,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     let distribution = self.problem[variable].distribution().unwrap();
                     // This represent which "probability index" is send to the node
                     let value_index = variable.0 - self.problem[distribution].start().0;
-                    forced_distribution_variables.push((distribution, value_index));
+                    let old_distribution = self.problem[distribution].old_index();
+                    let old_value_index = self.problem[variable].old_index() - self.problem[distribution].old_first().0;
+                    forced_distribution_variables.push((distribution, old_distribution, value_index, old_value_index));
                 }
             }
 
@@ -369,15 +370,17 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // distribution has at least one value set to false.
             // Otherwise it would always send 1.0 to the product node.
             for distribution in self.propagator.unconstrained_distributions_iter() {
+                let old_distribution: DistributionIndex = self.problem[distribution].old_index();
                 if self.problem[distribution].number_false(&self.state) != 0 {
                     let mut values = vec![];
                     for variable in self.problem[distribution].iter_variables() {
                         if !self.problem[variable].is_fixed(&self.state) {
                             let value_index = variable.0 - self.problem[distribution].start().0;
-                            values.push(value_index);
+                            let old_value_index = self.problem[variable].old_index() - self.problem[distribution].old_first().0;
+                            values.push((value_index, old_value_index));
                         }
                     }
-                    unconstrained_distribution_variables.push((distribution, values));
+                    unconstrained_distribution_variables.push((distribution, old_distribution, values));
                 }
             }
             
@@ -414,8 +417,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
             let mut child_id = 0;
             let mut variable_component_keys: Vec<(usize, Vec<CacheKey>)> = vec![];
-            let mut forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, usize)>)> = vec![];
-            let mut unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, Vec<usize>)>)> = vec![];
+            let mut forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)> = vec![];
+            let mut unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)> = vec![];
             for variable in self.problem[distribution].iter_variables() {
                 let mut keys = vec![];
                 let mut forced_distribution_var = vec![]; 
