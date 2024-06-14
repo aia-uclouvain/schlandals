@@ -161,7 +161,9 @@ impl Propagator {
     /// parents/children in the problem and, if necessary, computes the unconstrained probability of the distributions.
     /// It returns the overall unconstrained probability of the component after the whole propagation.
     pub fn propagate_unconstrained_clauses(&mut self, g: &mut Problem, state: &mut StateManager) {
+        let mut count = 0;
         while let Some(clause) = self.unconstrained_clauses.pop() {
+            count += 1;
             for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
                 g[parent].remove_child(clause, state);
             }
@@ -228,11 +230,11 @@ impl Propagator {
             
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence(){
-                    g.set_clause_unconstrained(clause, state);
+                    self.add_unconstrained_clause(clause, g, state);
                 }
             } else {
                 for clause in g[variable].iter_clauses_negative_occurence(){
-                    g.set_clause_unconstrained(clause, state);
+                    self.add_unconstrained_clause(clause, g, state);
                 }
             }
             
@@ -248,7 +250,7 @@ impl Propagator {
                         }
                         if g[clause].is_unit(state) {
                             let l = g[clause].get_unit_assigment(state);
-                            self.add_to_propagation_stack(l.to_variable(), if l.is_positive() { true } else { false }, level, Some(Reason::Clause(clause)));
+                            self.add_to_propagation_stack(l.to_variable(), l.is_positive(), level, Some(Reason::Clause(clause)));
                         }
                     }
                 }
@@ -336,16 +338,6 @@ impl Propagator {
         for clause in extractor.component_iter(component){
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
-            }
-            for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
-                if !g[parent].is_constrained(state) {
-                    g[clause].remove_parent(parent, state);
-                }
-            }
-            for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
-                if !g[child].is_constrained(state) {
-                    g[clause].remove_child(child, state);
-                }
             }
         }
 
