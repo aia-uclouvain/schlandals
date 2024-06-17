@@ -104,6 +104,11 @@ impl Variable {
         self.weight
     }
 
+    /// Sets the initial index of the variable in the problem
+    pub fn set_old_index(&mut self, index: usize) {
+        self.old_index = index;
+    }
+
     /// Returns the initial index of the variable in the problem
     pub fn old_index(&self) -> usize {
         self.old_index

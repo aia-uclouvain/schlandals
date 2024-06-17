@@ -107,6 +107,7 @@ impl Problem {
                 let initial_index = current_start + i;
                 self.variables[new_index].set_distribution(distribution_id);
                 self.variables[new_index].set_weight(w);
+                self.variables[new_index].set_old_index(initial_index);
                 mapping.insert(initial_index + 1, new_index + 1);
             }
             current_start += weights.len();
