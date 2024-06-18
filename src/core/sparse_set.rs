@@ -87,6 +87,9 @@ impl<T> SparseSet<T>
     
     /// Adds element `eleme` to the sparse-set
     pub fn add(&mut self, elem: T, state: &mut StateManager) {
+        if self.indexes.contains_key(&elem) {
+            return;
+        }
         // Note: this is a strange way to insert into a sparse-set. But with clause learning, it
         // happens that a clause is added during the search, hence while the sparse-set is not
         // full. This ensure that the element is added in the "alive" part of the set, and that the
@@ -101,12 +104,19 @@ impl<T> SparseSet<T>
     
     /// Removes element `elem` from the sparse-set
     pub fn remove(&mut self, elem: T, state: &mut StateManager) {
-        let last_idx = self.plain.len() - 1 - state.get_usize(self.removed);
         let cur_idx = *self.indexes.get(&elem).unwrap();
+        if cur_idx >= self.len(state) {
+            return;
+        }
+        let last_idx = self.plain.len() - 1 - state.get_usize(self.removed);
         self.plain.swap(cur_idx, last_idx);
         self.indexes.insert(self.plain[cur_idx], cur_idx);
         self.indexes.insert(self.plain[last_idx], last_idx);
         state.increment_usize(self.removed);
+    }
+
+    pub fn remove_all(&self, state: &mut StateManager) {
+        state.set_usize(self.removed, self.plain.len());
     }
     
     /// Iterates over the current elements of the sparse-set

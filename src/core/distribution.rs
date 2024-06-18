@@ -20,11 +20,12 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::problem::{DistributionIndex, VariableIndex};
-use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleBool, BoolManager, ReversibleF64, F64Manager};
+use super::{problem::{ClauseIndex, DistributionIndex, VariableIndex}, sparse_set::SparseSet};
+use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleF64, F64Manager};
+use rustc_hash::FxHashMap;
 
 /// A distribution of the input problem
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct Distribution {
     /// Id of the distribution in the problem
     id: usize,
@@ -32,14 +33,12 @@ pub struct Distribution {
     first: VariableIndex,
     /// Number of variable in the distribution
     size: usize,
-    /// Number of constrained clauses in which the distribution appears
-    number_clause_unconstrained: ReversibleUsize,
-    /// Number of clauses in which the distribution appears
-    number_clause: usize,
+    /// Reversible sparse set containing the distribution constraining the distribution. We assume
+    /// that the distribution do not appear twice in the same clause. At the time of the writing of
+    /// these line this is a reasonnable constraint, but time will tell if I must update this code.
+    clauses: SparseSet<ClauseIndex>,
     /// Number of variables assigned to F in the distribution
     number_false: ReversibleUsize,
-    /// Is the distribution still constrained ?
-    constrained: ReversibleBool,
     /// Sum of the weight of the unfixed variables in the distribution
     remaining: ReversibleF64,
     /// Is the distribution a candidate for branching ?
@@ -57,27 +56,29 @@ impl Distribution {
             id,
             first,
             size,
-            number_clause_unconstrained: state.manage_usize(0),
-            number_clause: 0,
+            clauses: SparseSet::new(state),
             number_false: state.manage_usize(0),
-            constrained: state.manage_bool(true),
             remaining: state.manage_f64(1.0),
             branching_candidate: true,
             old_index: id,
             old_first: first,
         }
     }
-    
-    /// Increments the number of clauses in which the distribution appears
-    pub fn increment_clause(&mut self) {
-        self.number_clause += 1;
+
+    pub fn add_clause(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        self.clauses.add(clause, state);
     }
-    
-    /// Decrements the number of constrained clause in which the distribution appears. This
-    /// operation is reversed when the trail restore its state.
-    /// Returns the remaining number of constrained clauses in which it appears.
-    pub fn decrement_constrained(&self, state: &mut StateManager) -> usize {
-        self.number_clause - state.increment_usize(self.number_clause_unconstrained)
+
+    pub fn remove_clause(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        self.clauses.remove(clause, state);
+    }
+
+    pub fn is_constrained(&self, state: &StateManager) -> bool {
+        self.clauses.len(state) != 0
+    }
+
+    pub fn set_unconstrained(&self, state: &mut StateManager) {
+        self.clauses.remove_all(state);
     }
 
     /// Icrements the number of variable assigned to false in the distribution. This operation
@@ -124,14 +125,6 @@ impl Distribution {
         self.size = size;
     }
     
-    pub fn is_constrained(&self, state: &StateManager) -> bool {
-        state.get_bool(self.constrained)
-    }
-
-    pub fn set_unconstrained(&self, state: &mut StateManager) {
-        state.set_bool(self.constrained, false);
-    }
-
     pub fn remaining(&self, state: &StateManager) -> f64 {
         state.get_f64(self.remaining)
     }
@@ -150,17 +143,21 @@ impl Distribution {
         self.branching_candidate
     }
 
-    pub fn number_clause_unconstrained(&self) -> ReversibleUsize {
-        self.number_clause_unconstrained
-    }
-
     pub fn size(&self) -> usize { self.size }
+
+    pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
+        self.clauses.clear(map, state);
+    }
 
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
     pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> {
         (self.first.0..(self.first.0 + self.size)).map(VariableIndex)
+    }
+
+    pub fn iter_clauses(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.clauses.iter(state)
     }
 }
 

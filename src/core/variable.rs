@@ -192,6 +192,10 @@ impl Variable {
     pub fn get_assignment_position(&self, state: &StateManager) -> usize {
         state.get_usize(self.assignment_position)
     }
+
+    pub fn number_clauses(&self) -> usize {
+        self.clauses_positive.len() + self.clauses_negative.len()
+    }
     
     // --- ITERATOR --- //
 

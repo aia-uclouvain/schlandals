@@ -181,7 +181,7 @@ impl Problem {
             }
             if let Some(distribution) = self[literal.to_variable()].distribution() {
                 if !is_learned {
-                    self[distribution].increment_clause();
+                    self[distribution].add_clause(cid, state);
                 }
             }
         }
@@ -270,18 +270,6 @@ impl Problem {
             }
         }
 
-        for distribution in self.distributions_iter() {
-            let start = self[distribution].start();
-            let size = self[distribution].size();
-            for variable in self.variables_iter() {
-                if let Some(d) = self[variable].distribution() {
-                    if d == distribution {
-                        assert!(variable >= start && variable < start + size);
-                    }
-                }
-            }
-        }
-
         for variable in self.variables_iter() {
             let word_index = variable.0 / WORD_SIZE;
             let mask: u128 = 1 << (variable.0 % WORD_SIZE);
@@ -303,6 +291,9 @@ impl Problem {
             self[clause].set_bitword_index(word_index);
         }
 
+        for distribution in self.distributions_iter() {
+            self[distribution].update_clauses(&clauses_map, state);
+        }
     }
     
     // --- problem MODIFICATIONS --- //
@@ -342,11 +333,6 @@ impl Problem {
         self.watchers[variable.0].push(clause);
     }
 
-    /// Decrements the number of constrained clauses a distribution is in
-    pub fn decrement_distribution_constrained_clause_counter(&self, distribution: DistributionIndex, state: &mut StateManager) -> usize {
-        state.decrement_usize(self.distributions[distribution.0].number_clause_unconstrained())
-    }
-    
     // --- QUERIES --- //
     
     /// Set a clause as unconstrained
