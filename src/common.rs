@@ -152,8 +152,7 @@ impl Solution {
     }
 
     pub fn epsilon(&self) -> f64 {
-
-        ((self.upper_bound.to_f64()/(self.lower_bound.to_f64()+FLOAT_CMP_THRESHOLD)).sqrt()-1.0 as f64).max(0.0)
+        ((self.upper_bound.to_f64()/(self.lower_bound.to_f64()+FLOAT_CMP_THRESHOLD)).sqrt() - 1.0).max(0.0)
     }
 }
 

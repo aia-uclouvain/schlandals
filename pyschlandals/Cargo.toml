@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.19.0"
-schlandals = {version = "0.1.0", path = ".."}
+schlandals = {path = ".."}
 rug = { version = "1.18.0", features = ["float"] }

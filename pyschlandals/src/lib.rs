@@ -1,22 +1,18 @@
 use pyo3::prelude::*;
 use pyo3::Python;
 use std::path::PathBuf;
-use schlandals::*;
+use schlandals::common::Branching;
 mod train;
 
 #[pyclass]
 #[derive(Clone, Copy)]
 pub enum PyBranching {
     MinInDegree,
-    MinOutDegree,
-    MaxDegree,
 }
 
 fn get_branching_from_pybranching(branching: PyBranching) -> Branching {
     match branching {
         PyBranching::MinInDegree => Branching::MinInDegree,
-        PyBranching::MinOutDegree => Branching::MinOutDegree,
-        PyBranching::MaxDegree => Branching::MaxDegree,
     }
 }
 
@@ -57,8 +53,13 @@ impl PyProblem {
     }
 
     pub fn solve(&self) -> (f64, f64) {
-        let solution = schlandals::solve_from_problem(&self.distributions, &self.clauses, get_branching_from_pybranching(self.branching), self.epsilon, Some(self.memory_limit), self.timeout, self.statistics);
-        solution.bounds()
+        let mut schlandals_arg = schlandals::Args::default();
+        schlandals_arg.timeout = self.timeout;
+        schlandals_arg.branching = get_branching_from_pybranching(self.branching);
+        schlandals_arg.statistics = self.statistics;
+        schlandals_arg.memory = self.memory_limit;
+        schlandals_arg.epsilon = self.epsilon;
+        schlandals::pysearch(schlandals_arg, &self.distributions, &self.clauses)
     }
 
     pub fn to_cnf(&self) -> String {

@@ -209,6 +209,21 @@ pub fn search(args: Args) -> f64 {
     solution.to_f64()
 }
 
+pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) -> (f64, f64) {
+    let parameters = args.solver_param();
+    let mut state = StateManager::default();
+    let propagator = Propagator::new(&mut state);
+    let problem = create_problem(distributions, clauses, &mut state);
+    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+    let solution = match solver {
+        GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+        GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+    };
+    solution.print();
+    solution.bounds()
+}
+
 pub fn compile(args: Args) -> f64 {
     let parameters = args.solver_param();
     let mut state = StateManager::default();
