@@ -76,6 +76,10 @@ impl PyProblem {
         }
         cnf
     }
+
+    pub fn copy(&self) -> PyProblem {
+        self.clone()
+    }
 }
 
 #[pymodule]
