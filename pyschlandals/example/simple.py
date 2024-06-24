@@ -17,6 +17,10 @@ problem.add_clause([15, -13, -7])
 problem.add_clause([15, -14, -9])
 problem.add_clause([16, -13, -8])
 problem.add_clause([16, -14, -10])
-problem.add_clause([-15])
 
+p2 = problem.copy()
+
+problem.add_clause([-15])
+p2.add_clause([-16])
 print(problem.solve())
+print(p2.solve())
