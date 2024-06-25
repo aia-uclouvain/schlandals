@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use super::*;
 
 use schlandals::learning::LearnParameters;
+use schlandals::ApproximateMethod;
 
 #[pyclass]
 #[derive(Clone)]
@@ -125,6 +126,7 @@ pub fn pylearn(train_file: String, param: PyLearnParameters, branching: Option<P
                       outfolder,
                       if let Some(v) = log { v } else { false },
                       if let Some(v) = epsilon { v } else { 0.0 },
+                      ApproximateMethod::Bounds,
                       if let Some(v) = jobs { v } else { 1 },
                       get_semiring_from_pysemiring(if let Some(v) = semiring { v } else { PySemiring::Probability }),
                       get_param_from_pyparam(param))

@@ -2,9 +2,7 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use std::path::PathBuf;
 use schlandals::*;
-
 mod train;
-use train::*;
 
 #[pyclass]
 #[derive(Clone, Copy)]
@@ -58,61 +56,25 @@ impl PyProblem {
         self.clauses.push(clause);
     }
 
-    pub fn solve(&self) -> Option<f64> {
-        match schlandals::solve_from_problem(&self.distributions, &self.clauses, get_branching_from_pybranching(self.branching), self.epsilon, Some(self.memory_limit), self.timeout, self.statistics) {
-            Ok(p) => Some(p.to_f64()),
-            Err(e) => {
-                println!("{:?}", e);
-                None
-            }
+    pub fn solve(&self) -> (f64, f64) {
+        let solution = schlandals::solve_from_problem(&self.distributions, &self.clauses, get_branching_from_pybranching(self.branching), self.epsilon, Some(self.memory_limit), self.timeout, self.statistics);
+        solution.bounds()
+    }
+
+    pub fn to_cnf(&self) -> String {
+        let mut cnf = String::new();
+        let number_variables = *self.clauses.iter().map(|c| c.iter().max().unwrap()).max().unwrap();
+        let number_clauses = self.clauses.len();
+        cnf.push_str(&format!("p cnf {} {}\n", number_variables, number_clauses));
+        for distribution in self.distributions.iter() {
+            let dstr = distribution.iter().map(|f| format!("{}", f)).collect::<Vec<String>>().join(" "); 
+            cnf.push_str(&format!("c p distribution {}\n", dstr))
         }
-    }
-
-    pub fn compile(&self, fdac: Option<String>, dotfile: Option<String>) -> Option<f64> {
-        match schlandals::compile_from_problem(&self.distributions,
-                                               &self.clauses,
-                                               get_branching_from_pybranching(self.branching),
-                                               self.epsilon,
-                                               Some(self.memory_limit),
-                                               self.timeout,
-                                               self.statistics,
-                                               if let Some(path) = fdac { Some(PathBuf::from(path)) } else { None },
-                                               if let Some(path) = dotfile { Some(PathBuf::from(path)) } else { None },) {
-            Ok(p) => Some(p.to_f64()),
-            Err(e) => {
-                println!("{:?}", e);
-                None
-            }
+        for clause in self.clauses.iter() {
+            let cstr = clause.iter().map(|l| format!("{}", l)).collect::<Vec<String>>().join(" ");
+            cnf.push_str(&format!("{} 0\n", cstr));
         }
-    }
-}
-
-
-#[pyfunction]
-#[pyo3(name = "search")]
-fn pysearch(file: String, branching: PyBranching, epsilon: Option<f64>, memory_limit: Option<u64>, timeout: Option<u64>) -> Option<f64> {
-    let e = if epsilon.is_none() {
-        0.0
-    } else {
-        epsilon.unwrap()
-    };
-    let to = if timeout.is_none() { u64::MAX } else { timeout.unwrap() };
-    match schlandals::search(PathBuf::from(file), get_branching_from_pybranching(branching), false, memory_limit, e, to) {
-        Err(_) => None,
-        Ok(p) => Some(p.to_f64()),
-    }
-}
-
-#[pyfunction]
-#[pyo3(name = "compile")]
-fn pycompile(file: String, branching: PyBranching, epsilon: Option<f64>, output_circuit: Option<String>, output_dot: Option<String>, timeout: Option<u64>) -> Option<f64> {
-    let fdac = if let Some(file) = output_circuit { Some(PathBuf::from(file)) } else { None };
-    let fdot = if let Some(file) = output_dot { Some(PathBuf::from(file)) } else { None };
-    let e = if let Some(e) = epsilon { e } else { 0.0 };
-    let to = if timeout.is_none() { u64::MAX } else { timeout.unwrap() };
-    match schlandals::compile(PathBuf::from(file), get_branching_from_pybranching(branching), fdac, fdot, e, to) {
-        Err(_) => None,
-        Ok(p) => Some(p.to_f64()),
+        cnf
     }
 }
 
@@ -121,9 +83,6 @@ fn pycompile(file: String, branching: PyBranching, epsilon: Option<f64>, output_
 fn pwmc_submodule(py: Python<'_>, parent_module: &PyModule) -> PyResult<()> {
     let module = PyModule::new(py, "pwmc")?;
     module.add_class::<PyProblem>()?;
-    module.add_function(wrap_pyfunction!(pycompile, module)?)?;
-    module.add_function(wrap_pyfunction!(pysearch, module)?)?;
-
     parent_module.add_submodule(module)?;
     py.import("sys")?.getattr("modules")?.set_item("pyschlandals.pwmc", module)?;
     Ok(())
