@@ -145,6 +145,10 @@ impl Distribution {
 
     pub fn size(&self) -> usize { self.size }
 
+    pub fn domain_size(&self, state: &StateManager) -> usize {
+        self.clauses.len(state)
+    }
+
     pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.clauses.clear(map, state);
     }

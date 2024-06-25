@@ -146,15 +146,11 @@ impl Propagator {
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
-        if g[distribution].number_false(state) == 0 || g[distribution].number_false(state) == g[distribution].size() - 1 {
+        if g[distribution].domain_size(state) == 0 {
             return;
         }
         self.unconstrained_distributions.push(distribution);
-        let mut p = F128!(0.0);
-        for weight in g[distribution].iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()) {
-            p += weight;
-        }
-        self.propagation_prob *= p;
+        self.propagation_prob *= g[distribution].iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()).sum::<f64>();
     }
     
     /// Propagates all the unconstrained clauses in the unconstrained clauses stack. It actually updates the sparse-sets of
@@ -169,14 +165,8 @@ impl Propagator {
                 g[child].remove_parent(clause, state);
             }
             debug_assert!(!self.unconstrained_clauses.contains(&clause));
-            if g[clause].is_learned() {
-                continue;
-            }
-            for variable in g[clause].iter_variables().collect::<Vec<VariableIndex>>() {
-                if g[variable].is_probabilitic() && !g[variable].is_fixed(state) {
-                    let distribution = g[variable].distribution().unwrap();
-                    g[distribution].remove_clause(clause, state);
-                }
+            for distribution in g[clause].iter_variables().filter(|v| g[*v].is_probabilitic()).map(|v| g[v].distribution().unwrap()).collect::<Vec<DistributionIndex>>() {
+                g[distribution].remove_clause(clause, state);
             }
         }
     }
@@ -227,6 +217,8 @@ impl Propagator {
             self.lit_flags.push(LitFlags::new());
             g.set_variable(variable, value, l, reason, state);
             
+            // TODO: check why this was only g.set_clause_unconstrained and not add unconstrained
+            // clause
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence(){
                     self.add_unconstrained_clause(clause, g, state);
@@ -274,20 +266,19 @@ impl Propagator {
 
             if is_p {
                 let distribution = g[variable].distribution().unwrap();
-                for clause in g[variable].iter_clauses_positive_occurence().filter(|c| !g[*c].is_learned()).collect::<Vec<ClauseIndex>>() {
-                    g[distribution].remove_clause(clause, state);
-                }
-                for clause in g[variable].iter_clauses_negative_occurence().filter(|c|!g[*c].is_learned()).collect::<Vec<ClauseIndex>>() {
-                    g[distribution].remove_clause(clause, state);
+                if !value {
+                    for clause in g[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                        g[distribution].remove_clause(clause, state);
+                    }
                 }
                 if value {
                     g[distribution].set_unconstrained(state);
-                    
                     self.propagation_prob *= g[variable].weight().unwrap();
-                    for v in g[distribution].iter_variables().filter(|va| *va != variable) {
+                    for v in g[distribution].iter_variables().filter(|va| !g[*va].is_fixed(state) && *va != variable) {
                         self.add_to_propagation_stack(v, false, level, Some(Reason::Distribution(distribution)));
                     }
                 } else if g[distribution].number_unfixed(state) == 1 {
+                    g[distribution].set_unconstrained(state);
                     if let Some(v) = g[distribution].iter_variables().find(|v| !g[*v].is_fixed(state)) {
                         self.add_to_propagation_stack(v, true, level, Some(Reason::Distribution(distribution)));
                     }
@@ -301,7 +292,10 @@ impl Propagator {
             }
         }
         self.propagate_unconstrained_clauses(g, state);
-        for distribution in g.distributions_iter() {
+        // Possibly the bug: we detect too many unconstrained distribution, some may be constrained
+        // by learned clause and have an impact on the problem but we do not detect them because we
+        // do not use the learned clause in the branching.
+        for distribution in extractor.component_distribution_iter(component) {
             if !g[distribution].is_constrained(state) {
                 self.propagate_unconstrained_distribution(g, distribution, state);
             }
@@ -348,7 +342,19 @@ impl Propagator {
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
             }
+            for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
+                if !g[parent].is_constrained(state) {
+                    g[clause].remove_parent(parent,state);
+                }
+            }
+
+            for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
+                if !g[child].is_constrained(state) {
+                    g[clause].remove_child(child,state);
+                }
+            }
         }
+
 
         for clause in extractor.component_iter(component){
             if g[clause].is_constrained(state) && !g[clause].is_learned() {

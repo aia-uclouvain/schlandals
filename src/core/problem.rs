@@ -180,9 +180,7 @@ impl Problem {
                 }
             }
             if let Some(distribution) = self[literal.to_variable()].distribution() {
-                if !is_learned {
-                    self[distribution].add_clause(cid, state);
-                }
+                self[distribution].add_clause(cid, state);
             }
         }
         self.clauses.push(clause);

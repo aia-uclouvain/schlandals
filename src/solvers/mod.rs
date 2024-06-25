@@ -63,6 +63,10 @@ impl Solution {
     pub fn to_f64(&self) -> f64 {
         (self.lower_bound.clone() * self.upper_bound.clone()).sqrt().to_f64()
     }
+
+    pub fn bounds(&self) -> (f64, f64) {
+        (self.lower_bound.to_f64(), self.upper_bound.to_f64())
+    }
 }
 
 impl std::fmt::Display for Solution {
