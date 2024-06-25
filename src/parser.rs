@@ -118,8 +118,7 @@ fn parse_unweighted_problem(filepath: &PathBuf, state: &mut StateManager) -> Pro
                         let mut literals: Vec<Literal> = vec![];
                         for lit in clause.split_whitespace() {
                             let parsed_lit = lit.parse::<isize>().unwrap();
-                            let is_positive = parsed_lit > 0;
-                            let mut variable = (parsed_lit.abs() * 2 - if is_positive { 0 } else { 1 }) as usize;
+                            let mut variable = parsed_lit.abs() as usize;
                             if let Some(new_var) = variable_mapping.get(&variable) {
                                 variable = *new_var;
                             }
