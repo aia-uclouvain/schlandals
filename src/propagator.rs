@@ -345,12 +345,14 @@ impl Propagator {
             for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
                 if !g[parent].is_constrained(state) {
                     g[clause].remove_parent(parent,state);
+                    g[parent].remove_child(clause, state);
                 }
             }
 
             for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
                 if !g[child].is_constrained(state) {
                     g[clause].remove_child(child,state);
+                    g[child].remove_parent(clause, state);
                 }
             }
         }
