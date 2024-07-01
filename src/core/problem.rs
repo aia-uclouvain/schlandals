@@ -160,21 +160,17 @@ impl Problem {
             let variable = literal.to_variable();
             if literal.is_positive() {
                 self[variable].add_clause_positive_occurence(cid);
-                if !is_learned {
-                    for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
-                        clause.add_child(child, state);
-                        self[child].add_parent(cid, state);
-                        self[child].increment_in_degree();
-                    }
+                for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
+                    clause.add_child(child, state);
+                    self[child].add_parent(cid, state);
+                    self[child].increment_in_degree();
                 }
             } else {
                 self[variable].add_clause_negative_occurence(cid);
-                if !is_learned {
-                    for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
-                        clause.add_parent(parent, state);
-                        self[parent].add_child(cid, state);
-                        clause.increment_in_degree();
-                    }
+                for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                    clause.add_parent(parent, state);
+                    self[parent].add_child(cid, state);
+                    clause.increment_in_degree();
                 }
             }
             if let Some(distribution) = self[literal.to_variable()].distribution() {

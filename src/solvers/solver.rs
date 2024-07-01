@@ -197,7 +197,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         // Init the various structures
         self.branching_heuristic.init(&self.problem, &self.state);
-        self.propagator.set_forced();
     }
 
     pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> { //discrepancy: Option<usize>

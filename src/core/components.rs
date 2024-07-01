@@ -92,9 +92,6 @@ pub struct Component {
     /// Maximum probability of the sub-problem represented by the component (i.e., all remaining
     /// valid interpretation are models)
     max_probability: f64,
-    /// If the distributions are splitted into (non-)trainable, then this flags indicates if there
-    /// are trainable distributions in the component.
-    has_learned_distribution: bool,
     /// Bitwise representation of the problem
     bit_repr: Bitvec,
 }
@@ -107,10 +104,6 @@ impl Component {
 
     pub fn max_probability(&self) -> f64 {
         self.max_probability
-    }
-
-    pub fn has_learned_distribution(&self) -> bool {
-        self.has_learned_distribution
     }
 
     pub fn get_cache_key(&self) -> CacheKey {
@@ -137,7 +130,6 @@ impl ComponentExtractor {
             number_distribution: g.number_distributions(),
             hash: 0,
             max_probability: 1.0,
-            has_learned_distribution: false,
             bit_repr,
         }];
         Self {
@@ -188,7 +180,6 @@ impl ComponentExtractor {
         comp_number_distribution: &mut usize,
         hash: &mut u64,
         max_probability: &mut f64,
-        has_learned_distribution: &mut bool,
         bit_repr: &mut Bitvec,
         state: &mut StateManager,
     ) {
@@ -221,13 +212,10 @@ impl ComponentExtractor {
                 }
 
                 // Explores the clauses that share a distribution with the current clause
-                // TODO: Might break here
                 if g[clause].has_probabilistic(state) {
-                    // TODO: Might break here
                     for variable in g[clause].iter_probabilistic_variables() {
                         if !g[variable].is_fixed(state) {
                             let distribution = g[variable].distribution().unwrap();
-                            *has_learned_distribution |= g[distribution].is_branching_candidate();
                             if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, comp_number_distribution) {
                                 let current_d_pos = self.distribution_positions[distribution.0];
                                 let new_d_pos = comp_distribution_start + *comp_number_distribution;
@@ -239,14 +227,11 @@ impl ComponentExtractor {
                                 }
                                 *max_probability *= g[distribution].remaining(state);
                                 *comp_number_distribution += 1;
-                                // TODO: Might also break here? 
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
-                                        // TODO: Might also break here? 
                                         for c in g[v].iter_clauses_negative_occurence() {      
                                             self.exploration_stack.push(c);
                                         }
-                                        // TODO: Might also break here? 
                                         for c in g[v].iter_clauses_positive_occurence() {
                                             self.exploration_stack.push(c);
                                         }
@@ -258,12 +243,10 @@ impl ComponentExtractor {
                 }
                 
                 // Recursively explore the nodes in the connected components
-                // TODO: Might also break here? 
                 for parent in g[clause].iter_parents(state) {
                     self.exploration_stack.push(parent);
                 }
                 
-                // TODO: Might also break here? 
                 for child in g[clause].iter_children(state) {
                     self.exploration_stack.push(child);
                 }
@@ -305,7 +288,6 @@ impl ComponentExtractor {
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
-                let mut has_learned_distribution = false;
                 let mut bit_repr = Bitvec::new(g.number_clauses_problem() + g.number_variables());
                 self.exploration_stack.push(clause);
                 self.explore_component(
@@ -316,12 +298,11 @@ impl ComponentExtractor {
                     &mut number_distribution,
                     &mut hash,
                     &mut max_probability,
-                    &mut has_learned_distribution,
                     &mut bit_repr,
                     state,
                 );
                 if number_distribution > 0 {
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, has_learned_distribution, bit_repr});
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, bit_repr});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -414,7 +395,6 @@ impl ComponentExtractor {
             number_distribution: self.distributions.len(),
             hash: 0,
             max_probability,
-            has_learned_distribution: false,
             bit_repr: Bitvec::ones(number_clause + number_variables),
         };
     }

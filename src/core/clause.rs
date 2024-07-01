@@ -180,7 +180,7 @@ impl Clause {
         let bounds = self.literals.get_bounds(state);
         bounds.0 + bounds.1 == 1
     }
-    
+
     /// Returns the last unfixed literal in the unit clause
     pub fn get_unit_assigment(&self, state: &StateManager) -> Literal {
         debug_assert!(self.is_unit(state));
@@ -191,7 +191,7 @@ impl Clause {
             self.literals[0]
         }
     }
-    
+
     /// Returns true iff the clause stil has unfixed deterministic variables in its body
     pub fn has_deterministic_in_body(&self, state: &StateManager) -> bool {
         let bound_deterministic = self.literals.get_bounds(state).0;

@@ -67,7 +67,6 @@ pub struct Propagator {
     base_assignments: ReversibleUsize,
     unconstrained_distributions: Vec<DistributionIndex>,
     propagation_prob: Float,
-    forced: usize,
 }
 
 impl Propagator {
@@ -82,17 +81,12 @@ impl Propagator {
             base_assignments: state.manage_usize(0),
             unconstrained_distributions: vec![],
             propagation_prob: F128!(0.0),
-            forced: 0,
         }
     }
     
     /// Sets the number of clauses for the f-reachable and t-reachable vectors
     pub fn init(&mut self, number_clauses: usize) {
         self.clause_flags.resize(number_clauses, ClauseFlags::new());
-    }
-    
-    pub fn set_forced(&mut self) {
-        self.forced = self.assignments.len();
     }
     
     /// Adds a variable to be propagated with the given value
@@ -180,7 +174,7 @@ impl Propagator {
     }
     
     pub fn restore(&mut self, state: &StateManager) {
-        let limit = state.get_usize(self.base_assignments).max(self.forced);
+        let limit = state.get_usize(self.base_assignments);
         self.assignments.truncate(limit);
         self.lit_flags.truncate(limit);
         for i in 0..limit {
@@ -205,10 +199,10 @@ impl Propagator {
                 if reason.is_none() {
                     return PropagationResult::Err(level);
                 }
-                debug_assert!(reason.is_some());
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
                 let head = learned_clause.iter().copied().find(|l| l.is_positive());
                 let clause = g.add_clause(learned_clause, head, state, true);
+                self.clause_flags.push(ClauseFlags::default());
                 extractor.add_clause_to_component(component, clause);
                 return PropagationResult::Err(backjump);
             }
@@ -278,7 +272,6 @@ impl Propagator {
                         self.add_to_propagation_stack(v, false, level, Some(Reason::Distribution(distribution)));
                     }
                 } else if g[distribution].number_unfixed(state) == 1 {
-                    g[distribution].set_unconstrained(state);
                     if let Some(v) = g[distribution].iter_variables().find(|v| !g[*v].is_fixed(state)) {
                         self.add_to_propagation_stack(v, true, level, Some(Reason::Distribution(distribution)));
                     }
@@ -287,7 +280,7 @@ impl Propagator {
         }
         self.set_reachability(g, state, component, extractor);
         for clause in extractor.component_iter(component) {
-            if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
+            if !self.clause_flags[clause.0].is_reachable() {
                 self.add_unconstrained_clause(clause, g, state);
             }
         }
@@ -312,7 +305,7 @@ impl Propagator {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::TrueReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::TrueReachable);
             for child in g[clause].iter_children(state) {
-                if g[child].is_constrained(state) && !g[child].is_learned() {
+                if g[child].is_constrained(state) {
                     self.set_t_reachability(g, state, child);
                 }
             }
@@ -328,7 +321,7 @@ impl Propagator {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::FalseReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::FalseReachable);
             for parent in g[clause].iter_parents(state) {
-                if g[parent].is_constrained(state) && !g[parent].is_learned() {
+                if g[parent].is_constrained(state) {
                     self.set_f_reachability(g, state, parent);
                 }
             }
@@ -339,27 +332,25 @@ impl Propagator {
     fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
         // First we update the parents/child in the problem and clear the flags
         for clause in extractor.component_iter(component){
-            if !g[clause].is_learned() {
-                self.clause_flags[clause.0].clear();
-                for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
-                    if !g[parent].is_constrained(state) {
-                        g[clause].remove_parent(parent,state);
-                        g[parent].remove_child(clause, state);
-                    }
+            self.clause_flags[clause.0].clear();
+            for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
+                if !g[parent].is_constrained(state) {
+                    g[clause].remove_parent(parent,state);
+                    g[parent].remove_child(clause, state);
                 }
+            }
 
-                for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
-                    if !g[child].is_constrained(state) {
-                        g[clause].remove_child(child,state);
-                        g[child].remove_parent(clause, state);
-                    }
+            for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
+                if !g[child].is_constrained(state) {
+                    g[clause].remove_child(child,state);
+                    g[child].remove_parent(clause, state);
                 }
             }
         }
 
 
         for clause in extractor.component_iter(component){
-            if g[clause].is_constrained(state) && !g[clause].is_learned() {
+            if g[clause].is_constrained(state) {
                 debug_assert!(!g[clause].is_unit(state));
                 match g[clause].head() {
                     None => self.set_f_reachability(g, state, clause),
@@ -396,7 +387,7 @@ impl Propagator {
         if !self.lit_flags[assignment_pos].is_set(LitFlag::IsMarked) {
             return false;
         }
-        for i in (self.forced..cursor).rev() {
+        for i in (0..cursor).rev() {
             let lit = self.assignments[i];
             if self.lit_flags[i].is_set(LitFlag::IsMarked) {
                 return false;
@@ -483,10 +474,10 @@ impl Propagator {
         };
         let mut cursor = self.assignments.len();
         loop {
-            cursor -= 1;
-            if cursor < self.forced {
-                break;
+            if cursor == 0 {
+                return (vec![], -1)
             }
+            cursor -= 1;
             
             // Check if the current assignment is an UIP
             let lit = self.assignments[cursor];
@@ -525,7 +516,7 @@ impl Propagator {
         
         let mut learned: Vec<Literal> = vec![];
         // We build the clause from based on the UIP
-        for i in (self.forced..cursor+1).rev() {
+        for i in (0..cursor+1).rev() {
             let lit = self.assignments[i];
             if self.lit_flags[i].is_set(LitFlag::IsMarked) && !self.is_implied(lit, g, state) {
                 learned.push(lit.opposite());
@@ -534,7 +525,7 @@ impl Propagator {
         
         let mut count_used = 0;
         let mut backjump = cursor;
-        for i in (self.forced..cursor+1).rev() {
+        for i in (0..cursor+1).rev() {
             let lit = self.assignments[i];
             if self.lit_flags[i].is_set(LitFlag::IsInConflictClause) {
                 count_used += 1;
