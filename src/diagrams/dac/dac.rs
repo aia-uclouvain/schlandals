@@ -180,7 +180,8 @@ impl<R> Dac<R>
 
     pub fn solution(&self) -> Solution {
         let p = self.circuit_probability().to_f64();
-        Solution::new(F128!(p), F128!(p), self.compile_time)
+        let bounds = self.bounds();
+        Solution::new(bounds.0, bounds.1, self.compile_time)
     }
 
     /// Returns the bounds of the circuit.

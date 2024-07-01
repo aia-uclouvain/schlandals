@@ -244,8 +244,12 @@ impl<R> Node<R>
     }
 
     /// Sets the bounding factor of the node
-    pub fn set_bounds(&mut self, bounds: Bounds){
-        self.bounds = bounds;
+    pub fn set_bounds_pin_pout(&mut self, bounds: Bounds){
+        self.bounds = (bounds.0, 1.0 - bounds.1);
+    }
+
+    pub fn set_bounds_lb_ub(&mut self, lower: f64, upper: f64){
+        self.bounds = (F128!(lower), F128!(upper));
     }
 
     /// Adds the given float to the path value of the node

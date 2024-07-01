@@ -136,13 +136,15 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             sol
         } else {
             let mut discrepancy = 1;
+            let mut prev_time = 0;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
                 solution.print();
-                if self.start.elapsed().as_secs() >= self.timeout || solution.has_converged(self.epsilon) {
+                if self.start.elapsed().as_secs() >= self.timeout || solution.has_converged(self.epsilon) || 2*self.start.elapsed().as_secs() - prev_time >= self.timeout {
                     self.statistics.print();
                     return solution;
                 }
+                prev_time = self.start.elapsed().as_secs();
                 discrepancy += 1;
             }
         }
@@ -232,13 +234,16 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.restructure_after_preprocess();  
 
         // Perform the actual search that will fill the cache
-        self.pwmc(is_lds);
+        let sol = self.pwmc(is_lds);
 
         // Build the rest of the DAC from the search cache
         let root_component = ComponentIndex(0);
         let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
         if let Some(root_c) = self.cache.get(&self.component_extractor[root_component].get_cache_key()) {
-            dac[parent_i].set_bounds(root_c.bounds().clone());
+            dac[parent_i].set_bounds_pin_pout(root_c.bounds().clone());
+        }
+        else {
+            dac[parent_i].set_bounds_lb_ub(sol.lower_bound.to_f64(), sol.upper_bound.to_f64());
         }
         self.build_dac(&mut dac, parent_i, self.component_extractor[root_component].get_cache_key(), &mut map);
         dac.optimize_structure();
@@ -255,7 +260,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // Calcul de epsilon sur base de upper et lower?
             if let Some(_distribution) = current.distribution() {
                 let sum_node = dac.add_sum_node();
-                dac[sum_node].set_bounds(current.bounds().clone());
+                dac[sum_node].set_bounds_pin_pout(current.bounds().clone());
                 c.insert(component_key, sum_node);
                 dac.add_node_output(sum_node, parent_node);
                 // Iterate on the variables the distribution with the associated cache key
