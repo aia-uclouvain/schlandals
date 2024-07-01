@@ -265,7 +265,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 dac.add_node_output(sum_node, parent_node);
                 // Iterate on the variables the distribution with the associated cache key
                 for (variable, keys) in current.variable_component_keys(){
-                    let mut is_unsat= keys.len() == 0;
+                    let mut is_unsat= keys.is_empty();
                     // Create a new product node for the distribution value
                     let prod_node_i = dac.add_prod_node();
 

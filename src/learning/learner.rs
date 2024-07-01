@@ -88,14 +88,12 @@ impl <const S: bool> Learner<S> {
         let mut train_expected = vec![];
         let mut test_data = vec![];
         let mut test_expected = vec![];
-        while !train_dacs.is_empty() {
-            let d = train_dacs.pop().unwrap();
+        while let Some(d) = train_dacs.pop() {
             let expected = expected_outputs.pop().unwrap();
             train_data.push(d);
             train_expected.push(F128!(expected));
         }
-        while !test_dacs.is_empty() {
-            let d = test_dacs.pop().unwrap();
+        while let Some(d) = test_dacs.pop() {
             let expected = expected_test.pop().unwrap();
             test_data.push(d);
             test_expected.push(F128!(expected));
@@ -180,7 +178,7 @@ impl <const S: bool> Learner<S> {
     // Compute the gradient of the distributions, from the different DAC queries
     // The computation is done in a top-down way, starting from the root node
     // and uses the chaine rule of the derivative to cumulatively compute the gradient in the leaves
-    pub fn compute_gradients(&mut self, gradient_loss: &Vec<f64>) {
+    pub fn compute_gradients(&mut self, gradient_loss: &[f64]) {
         self.zero_grads();
         for query_id in 0..self.train.len() {
             self.train[query_id].zero_paths();
@@ -227,8 +225,8 @@ impl <const S: bool> Learner<S> {
                         let child_w = self.get_probability(d, v);
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
                             let weight = self.get_probability(d, params);
-                            self.gradients[d][params] -= factor.clone() * weight.clone() * child_w.clone();
-                            sum_other_w += weight.clone();
+                            self.gradients[d][params] -= factor.clone() * weight * child_w;
+                            sum_other_w += weight;
                         }
                         self.gradients[d][v] += factor * child_w * sum_other_w;
                     }

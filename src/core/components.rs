@@ -228,7 +228,7 @@ impl ComponentExtractor {
                         if !g[variable].is_fixed(state) {
                             let distribution = g[variable].distribution().unwrap();
                             *has_learned_distribution |= g[distribution].is_branching_candidate();
-                            if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, &comp_number_distribution) {
+                            if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, comp_number_distribution) {
                                 let current_d_pos = self.distribution_positions[distribution.0];
                                 let new_d_pos = comp_distribution_start + *comp_number_distribution;
                                 if current_d_pos != new_d_pos {
@@ -356,7 +356,7 @@ impl ComponentExtractor {
     pub fn find_constrained_distribution(&self, component: ComponentIndex, problem: &Problem, state: &StateManager) -> bool {
         let start = self.components[component.0].start;
         let end = start + self.components[component.0].size;
-        self.clauses[start..end].iter().copied().find(|c| problem[*c].is_constrained(state) && !problem[*c].is_learned() && problem[*c].has_probabilistic(state)).is_some()
+        self.clauses[start..end].iter().copied().any(|c| problem[c].is_constrained(state) && !problem[c].is_learned() && problem[c].has_probabilistic(state))
     }
     
     /// Returns the number of components

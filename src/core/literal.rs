@@ -37,7 +37,7 @@ impl Literal {
     
     /// Returns the varaible represented by the literal
     pub fn to_variable(&self) -> VariableIndex {
-        VariableIndex(self.0.abs() as usize - 1)
+        VariableIndex(self.0.unsigned_abs() - 1)
     }
 
     /// Returns a literal from its string representation

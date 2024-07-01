@@ -42,17 +42,20 @@ pub struct WatchedVector {
 impl WatchedVector {
 
     pub fn new(literals: Vec<Literal>, limit: usize, state: &mut StateManager) -> Self {
-        let vector = Self {
+         Self {
             literals,
             limit,
             constrained: state.manage_bool(true),
-        };
-        vector
+        }
     }
 
     /// Returns the number of literals in the vector
     pub fn len(&self) -> usize {
         self.literals.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
     
     /// Returns the number of unfixed deterministic/probabilistic watchers for this vector

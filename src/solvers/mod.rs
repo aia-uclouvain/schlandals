@@ -316,21 +316,11 @@ impl SearchCacheEntry {
     }
 
     pub fn forced_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, usize, usize)>> {
-        if let Some(forced) = self.forced_distribution_variables.iter().find(|(v, _)| *v == variable) {
-            Some(forced.1.clone())
-        }
-        else {
-            None
-        }
+        self.forced_distribution_variables.iter().find(|(v, _)| *v == variable).map(|forced| forced.1.clone())
     }
 
     pub fn unconstrained_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>> {
-        if let Some(unconstr) = self.unconstrained_distribution_variables.iter().find(|(v, _)| *v == variable) {
-            Some(unconstr.1.clone())
-        }
-        else {
-            None
-        }
+        self.unconstrained_distribution_variables.iter().find(|(v, _)| *v == variable).map(|unconstr| unconstr.1.clone())
     }
 
     pub fn node_index(&self) -> Option<NodeIndex> {

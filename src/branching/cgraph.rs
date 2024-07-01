@@ -41,13 +41,10 @@ impl BranchingDecision for MinInDegree {
                 let score = g[clause].number_constrained_parents(state);
                 let tie = g[clause].in_degree();
                 if score < best_score || (score == best_score && tie < best_tie) {
-                    match g[clause].get_constrained_distribution(state, g) {
-                        Some(d) => {
-                            selected = Some(d);
-                            best_score = score;
-                            best_tie = tie;
-                        },
-                        None => (),
+                    if let Some(d) = g[clause].get_constrained_distribution(state, g) {
+                        selected = Some(d);
+                        best_score = score;
+                        best_tie = tie;
                     }
                 }
             }
@@ -87,13 +84,10 @@ impl BranchingDecision for MinOutDegree {
                 let score = g[clause].number_constrained_children(state);
                 let tie = g[clause].number_children();
                 if score < best_score || (score == best_score && tie < best_tie) {
-                    match g[clause].get_constrained_distribution(state, g) {
-                        Some(d) => {
-                            selected = Some(d);
-                            best_score = score;
-                            best_tie = tie;
-                        },
-                        None => (),
+                    if let Some(d) = g[clause].get_constrained_distribution(state, g) {
+                        selected = Some(d);
+                        best_score = score;
+                        best_tie = tie;
                     }
                 }
             }
@@ -125,12 +119,9 @@ impl BranchingDecision for MaxDegree {
             if g[clause].is_constrained(state) && !g[clause].is_learned() && g[clause].has_probabilistic(state) {
                 let score = g[clause].number_constrained_children(state) + g[clause].number_constrained_parents(state);
                 if score > best_score {
-                    match g[clause].get_constrained_distribution(state, g) {
-                        Some(d) => {
-                            selected = Some(d);
-                            best_score = score;
-                        },
-                        None => (),
+                    if let Some(d) = g[clause].get_constrained_distribution(state, g) {
+                        selected = Some(d);
+                        best_score = score;
                     }
                 }
             }

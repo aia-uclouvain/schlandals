@@ -200,7 +200,7 @@ impl Clause {
                 return true;
             }
         }
-        return false;
+        false
     }
     
     /// Returns true iff the clause is learned

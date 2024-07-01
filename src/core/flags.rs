@@ -14,7 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-///! This modules provide flags for the clauses and the literals. They are used during the propagation to set
+/// This modules provide flags for the clauses and the literals. They are used during the propagation to set
 /// various information
 
 
@@ -66,6 +66,12 @@ impl ClauseFlags {
     } 
 }
 
+impl Default for ClauseFlags {
+    fn default () -> Self {
+        Self::new()
+    }
+}
+
 /// Flags that a literal can take
 pub enum LitFlag {
     /// No flags
@@ -108,5 +114,11 @@ impl LitFlags {
     #[inline]
     pub fn is_set(&self, flag: LitFlag) -> bool {
         self.0 & (flag as u8) != 0
+    }
+}
+
+impl Default for LitFlags {
+    fn default() -> Self {
+        Self::new()
     }
 }

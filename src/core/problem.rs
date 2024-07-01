@@ -88,7 +88,7 @@ impl Problem {
     /// returned.
     pub fn add_distributions(
         &mut self,
-        distributions: &Vec<Vec<f64>>,
+        distributions: &[Vec<f64>],
         state: &mut StateManager,
     ) -> FxHashMap<usize, usize> {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
@@ -133,12 +133,10 @@ impl Problem {
                 Ordering::Greater
             } else if !self[a_var].is_probabilitic() && self[b_var].is_probabilitic() {
                 Ordering::Less
+            } else if self[a_var].decision_level() < self[b_var].decision_level() {
+                Ordering::Greater
             } else {
-                if self[a_var].decision_level() < self[b_var].decision_level() {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
+                Ordering::Less
             }
         });
         
@@ -234,7 +232,7 @@ impl Problem {
             let number_remaining_clauses = self[variable].clear_clauses(&clauses_map);
             let is_unconstrained = if self[variable].is_probabilitic() {
                 let distribution = self[variable].distribution().unwrap();
-                (number_remaining_clauses == 0 && distributions_map.get(&distribution).is_none()) || self[variable].is_fixed(state)
+                (number_remaining_clauses == 0 && !distributions_map.contains_key(&distribution)) || self[variable].is_fixed(state)
             } else {
                 number_remaining_clauses == 0 || self[variable].is_fixed(state)
             };
@@ -277,10 +275,8 @@ impl Problem {
 
         for clause in self.clauses_iter() {
             self[clause].clear_literals(&variables_map);
-            for option_v in self[clause].get_watchers() {
-                if let Some(v) = option_v {
-                    self.watchers[v.0].push(clause);
-                }
+            for v in self[clause].get_watchers().into_iter().flatten() {
+                self.watchers[v.0].push(clause);
             }
             let i = clause.0 + self.variables.len();
             let word_index = i / WORD_SIZE;

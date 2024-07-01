@@ -54,13 +54,13 @@ pub enum FileType {
     FDAC,
 }
 
-pub fn problem_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, state: &mut StateManager) -> Problem {
+pub fn problem_from_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], state: &mut StateManager) -> Problem {
     let mut number_var = 0;
     for clause in clauses.iter() {
-        number_var = number_var.max(clause.iter().map(|l| l.abs() as usize).max().unwrap());
+        number_var = number_var.max(clause.iter().map(|l| l.unsigned_abs()).max().unwrap());
     }
     let mut g = Problem::new(state, number_var, clauses.len());
-    g.add_distributions(&distributions, state);
+    g.add_distributions(distributions, state);
     for clause in clauses.iter() {
         let mut literals: Vec<Literal> = vec![];
         let mut head: Option<Literal> = None;
@@ -68,7 +68,7 @@ pub fn problem_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isi
             if lit == 0 {
                 panic!("Variables in clauses can not be 0");
             }
-            let var = VariableIndex(lit.abs() as usize - 1);
+            let var = VariableIndex(lit.unsigned_abs() - 1);
             let trail_value_index = g[var].get_value_index();
             let literal = Literal::from_variable(var, lit > 0, trail_value_index);
             if lit > 0 {
@@ -118,7 +118,7 @@ fn parse_unweighted_problem(filepath: &PathBuf, state: &mut StateManager) -> Pro
                         let mut literals: Vec<Literal> = vec![];
                         for lit in clause.split_whitespace() {
                             let parsed_lit = lit.parse::<isize>().unwrap();
-                            let mut variable = parsed_lit.abs() as usize;
+                            let mut variable = parsed_lit.unsigned_abs();
                             if let Some(new_var) = variable_mapping.get(&variable) {
                                 variable = *new_var;
                             }
@@ -189,7 +189,7 @@ pub fn problem_from_cnf(
                         for lit in clause.split_whitespace() {
                             let parsed_lit = lit.parse::<isize>().unwrap();
                             let is_positive = parsed_lit > 0;
-                            let mut variable = parsed_lit.abs() as usize;
+                            let mut variable = parsed_lit.unsigned_abs();
                             if let Some(new_var) = variable_mapping.get(&variable) {
                                 variable = *new_var;
                             }

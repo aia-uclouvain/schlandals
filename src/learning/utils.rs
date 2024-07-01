@@ -75,12 +75,7 @@ pub fn do_early_stopping(avg_loss:f64, prev_loss:f64, count:&mut usize, stopping
     else {
         *count = 0;
     }
-    if (avg_loss < stopping_criterion) || *count>=patience {
-        true
-    }
-    else {
-        false
-    }
+    avg_loss < stopping_criterion || *count >= patience
 }
 
 /// Structure representing a dataset for the learners. A dataset is a set of queries (boolean

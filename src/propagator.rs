@@ -341,18 +341,18 @@ impl Propagator {
         for clause in extractor.component_iter(component){
             if !g[clause].is_learned() {
                 self.clause_flags[clause.0].clear();
-            }
-            for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
-                if !g[parent].is_constrained(state) {
-                    g[clause].remove_parent(parent,state);
-                    g[parent].remove_child(clause, state);
+                for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
+                    if !g[parent].is_constrained(state) {
+                        g[clause].remove_parent(parent,state);
+                        g[parent].remove_child(clause, state);
+                    }
                 }
-            }
 
-            for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
-                if !g[child].is_constrained(state) {
-                    g[clause].remove_child(child,state);
-                    g[child].remove_parent(clause, state);
+                for child in g[clause].iter_children(state).collect::<Vec<ClauseIndex>>() {
+                    if !g[child].is_constrained(state) {
+                        g[clause].remove_child(child,state);
+                        g[child].remove_parent(clause, state);
+                    }
                 }
             }
         }
@@ -405,7 +405,7 @@ impl Propagator {
                 return true;
             }
         }
-        return false;
+        false
     }
     
     fn is_implied(&mut self, lit: Literal, g: &Problem, state: &StateManager) -> bool {
@@ -418,7 +418,7 @@ impl Propagator {
         }
         
         match g[lit.to_variable()].reason(state) {
-            None => return false,
+            None => false,
             Some(r) => {
                 match r {
                     Reason::Clause(c) => {
@@ -430,7 +430,7 @@ impl Propagator {
                             }
                         }
                         self.lit_flags[pos].set(LitFlag::IsImplied);
-                        return true;
+                        true
                     },
                     Reason::Distribution(d) => {
                         if lit.is_positive() {
@@ -442,7 +442,7 @@ impl Propagator {
                                 }
                             }
                             self.lit_flags[pos].set(LitFlag::IsImplied);
-                            return true;
+                            true
                         } else {
                             let assigned = g[d].iter_variables().find(|v| g[*v].value(state).is_some() && g[*v].value(state).unwrap()).unwrap();
                             let p = g[assigned].get_assignment_position(state);
@@ -452,7 +452,7 @@ impl Propagator {
                                 return false;
                             }
                             self.lit_flags[pos].set(LitFlag::IsImplied);
-                            return true;
+                            true
                         }
                     }
                 }
@@ -544,7 +544,7 @@ impl Propagator {
             }
         }
         
-        (learned, g[self.assignments[backjump].to_variable()].decision_level() as isize)
+        (learned, g[self.assignments[backjump].to_variable()].decision_level())
     }
 
     pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
