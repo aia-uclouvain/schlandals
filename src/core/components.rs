@@ -29,7 +29,7 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::problem::{ClauseIndex, Problem, DistributionIndex};
-use crate::{propagator::Propagator, solvers::CacheKey};
+use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 use crate::core::bitvec::Bitvec;
 

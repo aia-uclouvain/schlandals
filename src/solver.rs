@@ -16,13 +16,12 @@
 use rustc_hash::FxHashMap;
 use search_trail::{SaveAndRestore, StateManager};
 
-use super::statistics::Statistics;
-use super::*;
+use crate::statistics::Statistics;
 use crate::branching::BranchingDecision;
 use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
-use crate::ac::ac::Dac;
+use crate::ac::ac::{NodeIndex, Dac};
 use crate::ac::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
@@ -31,6 +30,8 @@ use rug::Float;
 use std::time::Instant;
 
 type SearchResult = (SearchCacheEntry, isize);
+type DistributionChoice = (DistributionIndex, VariableIndex);
+type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 
 /// This structure represent a general solver in Schlandals. It stores a representation of the
 /// problem and various structure that are used when solving it.
@@ -401,8 +402,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         self.restructure_after_preprocess();
 
-        // NOTE: todo check after pwmc and skip pwmc if is_some() (or maybe pwmc would not add
-        // anything to the cache)
         if preproc_result.is_some() {
             return dac;
         }
@@ -449,7 +448,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         dac.set_root(root);
 
         dac.set_compile_time(start.elapsed().as_secs());
-        println!("{}", dac.evaluate());
         dac
     }
 
@@ -540,5 +538,90 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             
         }
         (forced_distribution_variables, unconstrained_distribution_variables)
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct CacheChildren {
+    children_keys: Vec<CacheKey>,
+    forced_choices: Vec<DistributionChoice>,
+    unconstrained_distributions: Vec<UnconstrainedDistribution>,
+}
+
+impl CacheChildren {
+    pub fn new(forced_choices: Vec<DistributionChoice>, unconstrained_distributions: Vec<UnconstrainedDistribution>) -> Self {
+        Self {
+            children_keys: vec![],
+            forced_choices,
+            unconstrained_distributions,
+        }
+    }
+
+    pub fn add_key(&mut self, key: CacheKey) {
+        self.children_keys.push(key);
+    }
+}
+/// An entry in the cache for the search. It contains the bounds computed when the sub-problem was
+/// explored as well as various informations used by the solvers.
+#[derive(Clone)]
+pub struct SearchCacheEntry {
+    /// The current bounds on the sub-problem
+    bounds: Bounds,
+    /// Maximum discrepancy used for that node
+    discrepancy: usize,
+    /// The distribution on which to branch in this problem
+    distribution: Option<DistributionIndex>,
+    children: FxHashMap<VariableIndex, CacheChildren>,
+}
+
+impl SearchCacheEntry {
+
+    /// Returns a new cache entry
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>) -> Self {
+        Self {
+            bounds,
+            discrepancy,
+            distribution,
+            children,
+        }
+    }
+
+    /// Returns a reference to the bounds of this entry
+    pub fn bounds(&self) -> Bounds {
+        self.bounds.clone()
+    }
+
+    /// Returns the discrepancy of the node
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    pub fn distribution(&self) -> Option<DistributionIndex> {
+        self.distribution
+    }
+
+    pub fn forced_choices(&self, variable: VariableIndex) -> &Vec<DistributionChoice> {
+        &self.children.get(&variable).unwrap().forced_choices
+    }
+
+    pub fn unconstrained_distribution_variables_of(&self, variable: VariableIndex) -> &Vec<UnconstrainedDistribution> {
+        &self.children.get(&variable).unwrap().unconstrained_distributions
+    }
+
+    pub fn number_children(&self) -> usize {
+        self.children.len()
+    }
+
+    pub fn variable_number_children(&self, variable: VariableIndex) -> usize {
+        let entry = self.children.get(&variable).unwrap();
+        entry.children_keys.len() + entry.forced_choices.len() + entry.unconstrained_distributions.len()
+    }
+
+    pub fn children_variables(&self) -> Vec<VariableIndex> {
+        self.children.keys().copied().collect()
+    }
+
+    pub fn child_keys(&self, variable: VariableIndex) -> Vec<CacheKey> {
+        self.children.get(&variable).unwrap().children_keys.clone()
     }
 }

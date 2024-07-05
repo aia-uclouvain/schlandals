@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use schlandals::*;
-use schlandals::Branching::*;
+use schlandals::common::Branching::*;
+use schlandals::common::ApproximateMethod::*;
 use schlandals::ac::ac::Dac;
 
 use std::path::PathBuf;
@@ -13,30 +14,17 @@ macro_rules! test_input_with_branching {
             #[test]
             fn [<search_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), Branching::$b, false, None, 0.0, schlandals::ApproximateMethod::Bounds, u64::MAX, false);
+                let sol = search(PathBuf::from(filename), $b, false, None, 0.0, Bounds, u64::MAX, false);
                 assert!(($value - sol).abs() < 0.000001);
             }
             
             #[test]
             fn [<compile_ $b _ $name>]() {
                 let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, schlandals::ApproximateMethod::Bounds, u64::MAX);
+                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, Bounds, u64::MAX);
                 assert!(($value - sol).abs() < 0.000001);
             }
 
-            /*
-            #[test]
-            fn [<compile_from_file_ $b _ $name>]() {i
-                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let dac = compile(PathBuf::from(filename), $b, None, None, 0.0).unwrap();
-                let mut file = Builder::new().prefix("tmp").suffix(".dac").tempfile().unwrap();
-                writeln!(file, "{}", dac).unwrap();
-                let mut read_dac: Dac<Float> = Dac::from_file(&PathBuf::from(file.path()));
-                let sol = read_dac.evaluate();
-                let expected = Float::with_val(113, $value);
-                assert!((expected - sol).abs() < 0.000001);
-            }
-            */
         }
     }
 }
@@ -45,8 +33,6 @@ macro_rules! integration_tests {
     ($dir:ident, $($name:ident: $value:expr,)*) => {
         $(
             test_input_with_branching!{$dir, $name, $value, MinInDegree}
-            //test_input_with_branching!{$dir, $name, $value, MinOutDegree}
-            //test_input_with_branching!{$dir, $name, $value, MaxDegree}
         )*
     }
 }

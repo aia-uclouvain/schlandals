@@ -22,9 +22,9 @@ use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::parser::*;
-use crate::solvers::*;
 use crate::{common::F128, ac::{semiring::SemiRing, ac::Dac}};
 use crate::ApproximateMethod;
+use crate::{generic_solver, make_solver};
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
 /// logistic function to multiple dimensions.
@@ -50,10 +50,16 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                 let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
                 match approx {
                     ApproximateMethod::Bounds => {
-                        compile!(compiler, false)
+                        match compiler {
+                            crate::GenericSolver::SMinInDegree(mut s) => s.compile(false),
+                            crate::GenericSolver::QMinInDegree(mut s) => s.compile(false),
+                        }
                     },
                     ApproximateMethod::LDS => {
-                        compile!(compiler, true)
+                        match compiler {
+                            crate::GenericSolver::SMinInDegree(mut s) => s.compile(true),
+                            crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
+                        }
                     },
                     
                 }
