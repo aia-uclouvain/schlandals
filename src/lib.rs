@@ -18,9 +18,7 @@ use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
 
 use learning::{learner::Learner, LearnParameters};
 use learning::Learning;
-#[cfg(feature = "tensor")]
-use learning::tensor_learner::TensorLearner;
-use diagrams::dac::dac::Dac;
+use ac::ac::Dac;
 use solvers::GenericSolver;
 use search_trail::StateManager;
 use clap::ValueEnum;
@@ -42,7 +40,7 @@ mod parser;
 mod propagator;
 mod preprocess;
 pub mod learning;
-pub mod diagrams;
+pub mod ac;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]

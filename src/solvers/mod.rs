@@ -14,20 +14,23 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::core::problem::{DistributionIndex, Problem};
+use crate::core::problem::{DistributionIndex, VariableIndex, Problem};
 use crate::branching::*;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::Branching;
 use crate::common::FLOAT_CMP_THRESHOLD;
 use crate::core::bitvec::Bitvec;
-use crate::diagrams::NodeIndex;
+use crate::ac::ac::NodeIndex;
 
+use rustc_hash::FxHashMap;
 use search_trail::StateManager;
 use rug::Float;
 use std::hash::Hash;
 
 pub type Bounds = (Float, Float);
+type DistributionChoice = (DistributionIndex, VariableIndex);
+type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 
 /// This structure represent a (possibly partial) solution found by the solver.
 /// It is represented by a lower- and upper-bound on the true probability at the time at which the
@@ -261,6 +264,27 @@ impl PartialEq for CacheKey {
 
 impl Eq for CacheKey {}
 
+#[derive(Default, Clone)]
+pub struct CacheChildren {
+    children_keys: Vec<CacheKey>,
+    forced_choices: Vec<DistributionChoice>,
+    unconstrained_distributions: Vec<UnconstrainedDistribution>,
+}
+
+impl CacheChildren {
+    pub fn new(forced_choices: Vec<DistributionChoice>, unconstrained_distributions: Vec<UnconstrainedDistribution>) -> Self {
+        Self {
+            children_keys: vec![],
+            forced_choices,
+            unconstrained_distributions,
+        }
+    }
+
+    pub fn add_key(&mut self, key: CacheKey) {
+        self.children_keys.push(key);
+    }
+}
+
 /// An entry in the cache for the search. It contains the bounds computed when the sub-problem was
 /// explored as well as various informations used by the solvers.
 #[derive(Clone)]
@@ -271,29 +295,18 @@ pub struct SearchCacheEntry {
     discrepancy: usize,
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
-    /// The cache keys of the subcomponents related to the variable of the distribution
-    variable_component_keys: Vec<(usize, Vec<CacheKey>)>,
-    /// The distribution variables (new, old) that were fixed by the propagation for each variable of the distribution (new, old)
-    forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)>,
-    /// The distribution variables (new, old) that were uncontrained by the propagation and not summing to 1 and their distribution (new, old)
-    unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)>,
-    /// The node index of the cache entry in the diagram if is has already been created
-    node_index: Option<NodeIndex>,
+    children: FxHashMap<VariableIndex, CacheChildren>,
 }
 
 impl SearchCacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, variable_component_keys: Vec<(usize, Vec<CacheKey>)>, 
-               forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)>, unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)>) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>) -> Self {
         Self {
             bounds,
             discrepancy,
             distribution,
-            variable_component_keys,
-            forced_distribution_variables,
-            unconstrained_distribution_variables,
-            node_index: None,
+            children,
         }
     }
 
@@ -311,23 +324,32 @@ impl SearchCacheEntry {
         self.distribution
     }
 
-    pub fn variable_component_keys(&self) -> Vec<(usize, Vec<CacheKey>)> {
-        self.variable_component_keys.clone()
+    pub fn children(&self, variable: VariableIndex) -> &Vec<CacheKey> {
+        &self.children.get(&variable).unwrap().children_keys
     }
 
-    pub fn forced_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, usize, usize)>> {
-        self.forced_distribution_variables.iter().find(|(v, _)| *v == variable).map(|forced| forced.1.clone())
+    pub fn forced_choices(&self, variable: VariableIndex) -> &Vec<DistributionChoice> {
+        &self.children.get(&variable).unwrap().forced_choices
     }
 
-    pub fn unconstrained_distribution_variables_of(&self, variable: usize) -> Option<Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>> {
-        self.unconstrained_distribution_variables.iter().find(|(v, _)| *v == variable).map(|unconstr| unconstr.1.clone())
+    pub fn unconstrained_distribution_variables_of(&self, variable: VariableIndex) -> &Vec<UnconstrainedDistribution> {
+        &self.children.get(&variable).unwrap().unconstrained_distributions
     }
 
-    pub fn node_index(&self) -> Option<NodeIndex> {
-        self.node_index
+    pub fn number_children(&self) -> usize {
+        self.children.len()
     }
 
-    pub fn set_node_index(&mut self, node_index: NodeIndex) {
-        self.node_index = Some(node_index);
+    pub fn variable_number_children(&self, variable: VariableIndex) -> usize {
+        let entry = self.children.get(&variable).unwrap();
+        entry.children_keys.len() + entry.forced_choices.len() + entry.unconstrained_distributions.len()
+    }
+
+    pub fn children_variables(&self) -> Vec<VariableIndex> {
+        self.children.keys().copied().collect()
+    }
+
+    pub fn child_keys(&self, variable: VariableIndex) -> Vec<CacheKey> {
+        self.children.get(&variable).unwrap().children_keys.clone()
     }
 }

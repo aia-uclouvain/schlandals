@@ -23,7 +23,7 @@ use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::parser::*;
 use crate::solvers::*;
-use crate::{common::F128, diagrams::{semiring::SemiRing, dac::dac::Dac}};
+use crate::{common::F128, ac::{semiring::SemiRing, ac::Dac}};
 use crate::ApproximateMethod;
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the

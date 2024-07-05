@@ -1,12 +1,9 @@
 #![allow(non_snake_case)]
-use rug::Float;
 use schlandals::*;
 use schlandals::Branching::*;
-use schlandals::diagrams::dac::dac::Dac;
+use schlandals::ac::ac::Dac;
 
 use std::path::PathBuf;
-use tempfile::Builder;
-use std::io::Write;
 
 use paste::paste;
 

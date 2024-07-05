@@ -262,9 +262,7 @@ impl ComponentExtractor {
         g: &mut Problem,
         state: &mut StateManager,
         component: ComponentIndex,
-        propagator: &mut Propagator,
     ) -> bool {
-        debug_assert!(propagator.unconstrained_clauses.is_empty());
         let end = state.get_usize(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them

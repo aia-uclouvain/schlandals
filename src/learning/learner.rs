@@ -34,8 +34,8 @@
 
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
-use crate::diagrams::dac::dac::*;
-use crate::diagrams::TypeNode;
+use crate::ac::ac::*;
+use crate::ac::node::NodeType;
 use super::logger::Logger;
 use crate::{parser::*, ApproximateMethod};
 use crate::Branching;
@@ -195,7 +195,7 @@ impl <const S: bool> Learner<S> {
                 for child_index in start..end {
                     let child = self.train[query_id].input_at(child_index);
                     match self.train[query_id][node].get_type() {
-                        TypeNode::Product => {
+                        NodeType::Product => {
                             // If it is a product node, we need to divide the path value by the value of the child
                             // This is equivalent to multiplying the values of the other children
                             // If the value of the child is 0, then the path value is simply 0
@@ -205,14 +205,13 @@ impl <const S: bool> Learner<S> {
                             }
                             self.train[query_id][child].add_to_path_value(val);
                         },
-                        TypeNode::Sum => {
+                        NodeType::Sum => {
                             // If it is a sum node, we simply propagate the path value to the children
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
-                        TypeNode::Approximate => { },
-                        TypeNode::Distribution { .. } => {},
+                        NodeType::Distribution { .. } => {},
                     }
-                    if let TypeNode::Distribution { d, v } = self.train[query_id][child].get_type() {
+                    if let NodeType::Distribution { d, v } = self.train[query_id][child].get_type() {
                         // Compute the gradient for children that are leaf distributions
                         let mut factor = path_val.clone() * gradient_loss[query_id];
                         if self.train[query_id][node].is_product() {

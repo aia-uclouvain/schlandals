@@ -186,6 +186,12 @@ impl Propagator {
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
     pub fn propagate(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize, is_preproc: bool) -> PropagationResult {
+        for clause in extractor.component_iter(component) {
+            if g[clause].is_unit(state) {
+                let l = g[clause].get_unit_assigment(state);
+                self.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
+            }
+        }
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
@@ -348,10 +354,8 @@ impl Propagator {
             }
         }
 
-
         for clause in extractor.component_iter(component){
             if g[clause].is_constrained(state) {
-                debug_assert!(!g[clause].is_unit(state));
                 match g[clause].head() {
                     None => self.set_f_reachability(g, state, clause),
                     Some(h) => {
