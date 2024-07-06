@@ -22,7 +22,9 @@ use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
 use crate::parser::*;
-use crate::{common::F128, ac::{semiring::SemiRing, ac::Dac}};
+use crate::common::F128;
+use crate::ac::ac::Dac;
+use crate::semiring::SemiRing;
 use crate::ApproximateMethod;
 use crate::{generic_solver, make_solver};
 

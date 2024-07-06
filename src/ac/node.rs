@@ -18,7 +18,7 @@
 //! The node is generic over a semiring R
 
 use rug::Float;
-use crate::ac::semiring::*;
+use crate::semiring::*;
 use crate::common::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

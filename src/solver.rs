@@ -22,7 +22,7 @@ use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
 use crate::ac::ac::{NodeIndex, Dac};
-use crate::ac::semiring::SemiRing;
+use crate::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;

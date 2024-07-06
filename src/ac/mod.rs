@@ -16,4 +16,3 @@
 
 pub mod ac;
 pub mod node;
-pub mod semiring;

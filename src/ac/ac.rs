@@ -38,7 +38,7 @@ use rustc_hash::FxHashMap;
 use crate::common::*;
 
 use crate::core::problem::{Problem, DistributionIndex, VariableIndex};
-use crate::ac::semiring::*;
+use crate::semiring::*;
 use crate::common::Solution;
 
 use super::node::*;
