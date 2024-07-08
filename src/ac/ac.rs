@@ -199,16 +199,16 @@ impl<R> Dac<R>
             let start = self.nodes[node.0].input_start();
             let end = start + self.nodes[node.0].number_inputs();
             if self[node].is_product() {
-                let value = R::mul_children((start..end).map(|idx| {
+                let value = if start != end { R::mul_children((start..end).map(|idx| {
                     let child = self.inputs[idx];
                     self[child].value()
-                }));
+                })) } else { R::zero() };
                 self[node].set_value(value);
             } else if self[node].is_sum() {
-                let value = R::sum_children((start..end).map(|idx| {
+                let value = if start != end { R::sum_children((start..end).map(|idx| {
                     let child = self.inputs[idx];
                     self[child].value()
-                }));
+                })) } else { R::one() };
                 self[node].set_value(value);
             }
         }

@@ -366,7 +366,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 child_entry.add_key(self.component_extractor[sub_component].get_cache_key());
                             }
                         }
-                        if is_node_sat {
+                        if is_node_sat && prod_p_in > FLOAT_CMP_THRESHOLD {
                             children_map.insert(variable, child_entry);
                         }
                         self.restore();
