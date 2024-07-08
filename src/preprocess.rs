@@ -58,6 +58,10 @@ where
                 self.propagator.add_to_propagation_stack(variable, false, 0, None);
             }
         }
+
+        for l in self.problem.clauses_iter().filter(|c| self.problem[*c].is_unit(self.state)).map(|c| self.problem[c].get_unit_assigment(self.state)) {
+            self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
+        }
         
         match self.propagator.propagate(self.problem, self.state, ComponentIndex(0), self.component_extractor, 0, true) {
             Err(_) => return None,
