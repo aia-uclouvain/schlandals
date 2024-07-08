@@ -154,6 +154,9 @@ impl Problem {
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
         for literal in clause.iter().collect::<Vec<Literal>>() {
             let variable = literal.to_variable();
+            if is_learned {
+                self[variable].add_learned_clause(cid);
+            }
             if literal.is_positive() {
                 self[variable].add_clause_positive_occurence(cid);
                 if !is_learned {

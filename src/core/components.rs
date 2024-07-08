@@ -229,10 +229,10 @@ impl ComponentExtractor {
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
-                                        for c in g[v].iter_clauses_negative_occurence() {      
+                                        for c in g[v].iter_clauses_negative_occurence().filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
-                                        for c in g[v].iter_clauses_positive_occurence() {
+                                        for c in g[v].iter_clauses_positive_occurence().filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
                                     }
@@ -244,10 +244,12 @@ impl ComponentExtractor {
                 
                 // Recursively explore the nodes in the connected components
                 for parent in g[clause].iter_parents(state) {
+                    assert!(!g[parent].is_learned());
                     self.exploration_stack.push(parent);
                 }
                 
                 for child in g[clause].iter_children(state) {
+                    assert!(!g[child].is_learned());
                     self.exploration_stack.push(child);
                 }
             }
@@ -357,19 +359,18 @@ impl ComponentExtractor {
     /// Adds a clause to a component. This function is called when the solver encounters an UNSAT and needs to learn a clause.
     /// During this process we ensure that the learned clause is horn and can be safely added in the component for further detections.
     pub fn add_clause_to_component(&mut self, component: ComponentIndex, clause: ClauseIndex) {
-        debug_assert!(clause.0 == self.clause_positions.len());
-        let start = self.components[component.0].start;   
-        self.clauses.insert(start, clause);
-        for i in 0..self.clause_positions.len() {
-            if self.clause_positions[i] >= start {
-                self.clause_positions[i] += 1;
-            }
+        let start = self.components[component.0].start;
+        let end = start + self.components[component.0].size;
+        self.clauses.insert(end, clause);
+        self.clause_positions.push(end);
+        for i in end+1..self.clauses.len() {
+            let c = self.clauses[i];
+            self.clause_positions[c.0] = i;
         }
-        self.clause_positions.push(start);
         for comp in self.components.iter_mut() {
-            if comp.start <= start && comp.start + comp.size > start {
+            if comp.start <= start && comp.start + comp.size >= end {
                 comp.size += 1;
-            } else if comp.start > start {
+            } else if comp.start >= end {
                 comp.start += 1;
             }
         }
