@@ -280,7 +280,7 @@ impl Propagator {
         }
         self.set_reachability(g, state, component, extractor);
         for clause in extractor.component_iter(component) {
-            if !self.clause_flags[clause.0].is_reachable() {
+            if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
                 self.add_unconstrained_clause(clause, g, state);
             }
         }
@@ -332,6 +332,9 @@ impl Propagator {
     fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
         // First we update the parents/child in the problem and clear the flags
         for clause in extractor.component_iter(component){
+            if g[clause].is_learned() {
+                continue;
+            }
             self.clause_flags[clause.0].clear();
             for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
                 if !g[parent].is_constrained(state) {
