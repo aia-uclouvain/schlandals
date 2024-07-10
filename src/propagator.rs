@@ -140,9 +140,6 @@ impl Propagator {
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
-        if g[distribution].domain_size(state) == 0 {
-            return;
-        }
         self.unconstrained_distributions.push(distribution);
         self.propagation_prob *= g[distribution].iter_variables().filter(|v| !g[*v].is_fixed(state)).map(|v| g[v].weight().unwrap()).sum::<f64>();
     }
