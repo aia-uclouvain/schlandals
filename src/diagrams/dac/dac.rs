@@ -128,6 +128,11 @@ impl<R> Dac<R>
         self.root = Some(root);
     }
 
+    /// Returns the index of the root node
+    pub fn root(&self) -> NodeIndex {
+        self.root.unwrap()
+    }
+
     /// Returns the number of computational nodes in the circuit
     pub fn number_nodes(&self) -> usize {
         self.nodes.len()

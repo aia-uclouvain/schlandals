@@ -44,6 +44,7 @@ use super::Learning;
 use crate::common::F128;
 use super::utils::*;
 use super::*;
+use crate::common::*;
 use rug::{Assign, Float};
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
@@ -82,7 +83,25 @@ impl <const S: bool> Learner<S> {
 
         // Compiling the train and test queries into arithmetic circuits
         let mut train_dacs = generate_dacs(inputs, branching, epsilon, approx, compile_timeout);
-        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, approx, compile_timeout);
+        if approx == ApproximateMethod::LDS {
+            let mut present_distributions = vec![false; distributions.len()];
+            let mut cnt_unfinished = 0;
+            for dac in train_dacs.iter() {
+                if dac.bounds().1 - dac.bounds().0 > FLOAT_CMP_THRESHOLD {
+                    cnt_unfinished += 1;
+                }
+                for node in dac.iter() {
+                    if let TypeNode::Distribution { d, .. } = dac[node].get_type() {
+                        present_distributions[d] = true;
+                    }
+                }
+                let (lb, ub) = dac.bounds();
+                println!("lb {} ub {}, epsilon: {}", lb.clone(), ub.clone(), (ub/lb).sqrt()-F128!(1.0));
+            }
+            println!("Present distributions counted {}", present_distributions.iter().filter(|b| **b).count());
+            println!("Unfinished DACs: {}", cnt_unfinished);
+        }
+        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, ApproximateMethod::Bounds, u64::MAX);
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
