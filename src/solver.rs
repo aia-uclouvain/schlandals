@@ -16,14 +16,13 @@
 use rustc_hash::FxHashMap;
 use search_trail::{SaveAndRestore, StateManager};
 
-use super::statistics::Statistics;
-use super::*;
+use crate::statistics::Statistics;
 use crate::branching::BranchingDecision;
 use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
-use crate::diagrams::dac::dac::Dac;
-use crate::diagrams::semiring::SemiRing;
+use crate::ac::ac::{NodeIndex, Dac};
+use crate::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
@@ -31,6 +30,8 @@ use rug::Float;
 use std::time::Instant;
 
 type SearchResult = (SearchCacheEntry, isize);
+type DistributionChoice = (DistributionIndex, VariableIndex);
+type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 
 /// This structure represent a general solver in Schlandals. It stores a representation of the
 /// problem and various structure that are used when solving it.
@@ -199,129 +200,20 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.branching_heuristic.init(&self.problem, &self.state);
     }
 
-    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> { //discrepancy: Option<usize>
-        // TODO discrepancy: 
-        // do we want a compilation timeout? then compile a the end of each discrepancy iteration
-        // or do we want to give a specific discrepancy to achieve? Then adapt search to immediately use that value
-        let start = Instant::now();
-        self.state.save_state();
-
-        // Preprocessing
-        let preproc_result = self.preprocess();
-        // Create the DAC and add elements from the preprocessing
-        let mut dac = Dac::new();
-        let parent_i = dac.add_prod_node();
-        dac.set_root(parent_i);
-        // Forced variables from the propagation
-        let (fixed_distribution_variables, fixed_unconstrained_distribution_variables) = self.forced_from_propagation();
-        for (d, old_d, v, old_v) in fixed_distribution_variables {
-            let distribution_node = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
-            dac.add_node_output(distribution_node, parent_i);
-        }
-        // Unconstrained distribution variables
-        for (d, old_d, values) in fixed_unconstrained_distribution_variables {
-            let sum_node = dac.add_sum_node();
-            for (v, old_v) in values {
-                let distribution_node = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
-                dac.add_node_output(distribution_node, sum_node);
-            }
-            dac.add_node_output(sum_node, parent_i);
-        }
-        if preproc_result.is_some() {
-            return dac;
-        }
-        self.restructure_after_preprocess();  
-
-        // Perform the actual search that will fill the cache
-        let sol = self.pwmc(is_lds);
-
-        // Build the rest of the DAC from the search cache
-        let root_component = ComponentIndex(0);
-        let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
-        if let Some(root_c) = self.cache.get(&self.component_extractor[root_component].get_cache_key()) {
-            dac[parent_i].set_bounds_pin_pout(root_c.bounds().clone());
-        }
-        else {
-            dac[parent_i].set_bounds_lb_ub(sol.lower_bound.to_f64(), sol.upper_bound.to_f64());
-        }
-        self.build_dac(&mut dac, parent_i, self.component_extractor[root_component].get_cache_key(), &mut map);
-        dac.optimize_structure();
-        dac.set_compile_time(start.elapsed().as_secs());
-        dac
-    }
-
-    pub fn build_dac<R: SemiRing>(&self, dac: &mut Dac<R>, parent_node: NodeIndex, component_key: CacheKey, c: &mut FxHashMap<CacheKey, NodeIndex>) {
-        if let Some(child_i) = c.get_mut(&component_key) {
-            dac.add_node_output(*child_i, parent_node);
-            return;
-        }
-        if let Some(current) = self.cache.get(&component_key) {
-            // Calcul de epsilon sur base de upper et lower?
-            if let Some(_distribution) = current.distribution() {
-                let sum_node = dac.add_sum_node();
-                dac[sum_node].set_bounds_pin_pout(current.bounds().clone());
-                c.insert(component_key, sum_node);
-                dac.add_node_output(sum_node, parent_node);
-                // Iterate on the variables the distribution with the associated cache key
-                for (variable, keys) in current.variable_component_keys(){
-                    let mut is_unsat= keys.is_empty();
-                    // Create a new product node for the distribution value
-                    let prod_node_i = dac.add_prod_node();
-
-                    // Adding to the new product node all the propagated variables, including the distribution value we branch on
-                    if let Some(forced_distribution_variables) = current.forced_distribution_variables_of(variable) {
-                        for (d, old_d, v, old_v) in forced_distribution_variables {
-                            let distribution_prop = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
-                            dac.add_node_output(distribution_prop, prod_node_i);
-                            is_unsat = false;
-                        }
-                    }
-
-                    // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
-                    if let Some(unconstrained_distribution_variables) = current.unconstrained_distribution_variables_of(variable) {
-                        for (d, old_d, values) in unconstrained_distribution_variables {
-                            let sum_node_unconstrained = dac.add_sum_node();
-                            for (v, old_v) in values {
-                                let distribution_unconstrained = dac.distribution_value_node_index(d, v, old_d, old_v, self.problem[VariableIndex(v + self.problem[d].start().0)].weight().unwrap());
-                                dac.add_node_output(distribution_unconstrained, sum_node_unconstrained);
-                            }
-                            dac.add_node_output(sum_node_unconstrained, prod_node_i);
-                            is_unsat = false;
-                        }
-                    }
-
-                    if !is_unsat {
-                        dac.add_node_output(prod_node_i, sum_node);
-                        // Recursively build the DAC for each sub-component
-                        for cache_key in keys {
-                            self.build_dac(dac, prod_node_i, cache_key.clone(), c);
-                        }
-                    }                 
-                }
-            }    
-        }
-    }
-
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
         let (result,_) = self.get_bounds_from_cache(ComponentIndex(0), (1.0+self.epsilon).powf(2.0), 1, discrepancy);
         let p_in = result.bounds().0.clone();
         let p_out = result.bounds().1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
         let ub: Float =
-            1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
+        1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
         Solution::new(lb, ub, self.start.elapsed().as_secs())
     }
 
     /// Retrieves the bounds of a sub-problem from the cache. If the sub-problem has never been
     /// explored or that the bounds, given the bounding factor, are not good enough, the
     /// sub-problem is solved and the result is inserted in the cache.
-    fn get_bounds_from_cache(
-        &mut self,
-        component: ComponentIndex,
-        bound_factor: f64,
-        level: isize,
-        discrepancy: usize,
-    ) -> SearchResult {
+    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, level: isize, discrepancy: usize) -> SearchResult {
         self.statistics.cache_access();
         let cache_key = self.component_extractor[component].get_cache_key();
         match self.cache.get(&cache_key) {
@@ -351,59 +243,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
     }
 
-    fn forced_from_propagation(&mut self) -> (Vec<(DistributionIndex, DistributionIndex, usize, usize)>, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>) {
-        let mut forced_distribution_variables: Vec<(DistributionIndex, DistributionIndex, usize, usize)> = vec![];
-        let mut unconstrained_distribution_variables: Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)> = vec![];
-
-        if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
-            // First, we look at the assignments
-            for literal in self.propagator.assignments_iter(&self.state) {
-                let variable = literal.to_variable();
-                // Only take probabilistic variables set to true
-                if self.problem[variable].is_probabilitic() && literal.is_positive() && self.problem[variable].weight().unwrap() != 1.0 {
-                    let distribution = self.problem[variable].distribution().unwrap();
-                    // This represent which "probability index" is send to the node
-                    let value_index = variable.0 - self.problem[distribution].start().0;
-                    let old_distribution = self.problem[distribution].old_index();
-                    let old_value_index = self.problem[variable].old_index() - self.problem[distribution].old_first().0;
-                    forced_distribution_variables.push((distribution, old_distribution, value_index, old_value_index));
-                }
-            }
-
-            // Then, for each unconstrained distribution, we create a sum_node, but only if the
-            // distribution has at least one value set to false.
-            // Otherwise it would always send 1.0 to the product node.
-            for distribution in self.propagator.unconstrained_distributions_iter() {
-                let old_distribution: DistributionIndex = self.problem[distribution].old_index();
-                if self.problem[distribution].number_false(&self.state) != 0 {
-                    let mut values = vec![];
-                    for variable in self.problem[distribution].iter_variables() {
-                        if !self.problem[variable].is_fixed(&self.state) {
-                            let value_index = variable.0 - self.problem[distribution].start().0;
-                            let old_value_index = self.problem[variable].old_index() - self.problem[distribution].old_first().0;
-                            values.push((value_index, old_value_index));
-                        }
-                    }
-                    unconstrained_distribution_variables.push((distribution, old_distribution, values));
-                }
-            }
-            
-        }
-        (forced_distribution_variables, unconstrained_distribution_variables)
-    }
-
     /// Choose a distribution on which to branch, in the sub-problem, and solves the sub-problems
     /// resulting from the branching, recursively.
     /// Returns the bounds of the sub-problem as well as the level to which the solver must
     /// backtrack.
-    fn branch(
-        &mut self,
-        component: ComponentIndex,
-        level: isize,
-        bound_factor: f64,
-        discrepancy: usize,
-        choice: Option<DistributionIndex>,
-    ) -> SearchResult {
+    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize, choice: Option<DistributionIndex>) -> SearchResult {
         let decision = if choice.is_some() {
             choice
         } else {
@@ -420,14 +264,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // computation of p_out
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
             let mut child_id = 0;
-            let mut variable_component_keys: Vec<(usize, Vec<CacheKey>)> = vec![];
-            let mut forced_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, usize, usize)>)> = vec![];
-            let mut unconstrained_distribution_variables: Vec<(usize, Vec<(DistributionIndex, DistributionIndex, Vec<(usize, usize)>)>)> = vec![];
+            let mut children_map: FxHashMap<VariableIndex, CacheChildren> = FxHashMap::default();
             for variable in self.problem[distribution].iter_variables() {
-                let mut keys = vec![];
-                let mut forced_distribution_var = vec![]; 
-                let mut unconstrained_distribution_var = vec![];
-
                 if self.problem[variable].is_fixed(&self.state) {
                     continue;
                 }
@@ -436,15 +274,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 }
                 let v_weight = self.problem[variable].weight().unwrap();
                 self.state.save_state();
-                match self.propagator.propagate_variable(
-                    variable,
-                    true,
-                    &mut self.problem,
-                    &mut self.state,
-                    component,
-                    &mut self.component_extractor,
-                    level,
-                ) {
+                match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(backtrack_level) => {
                         self.statistics.unsat();
                         // The assignment triggered an UNSAT, so the whole sub-problem is part of
@@ -454,9 +284,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), vec![], vec![], vec![]), backtrack_level);
+                            return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), FxHashMap::default()), backtrack_level);
                         }
-                    }
+                    },
                     Ok(_) => {
                         // No problem during propagation. Before exploring the sub-problems, we can
                         // update the upper bound with the information stored in the propagator
@@ -464,36 +294,38 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         // propagation).
                         let p = self.propagator.get_propagation_prob().clone();
                         let removed = unsat_factor
-                            - self
-                                .component_extractor
-                                .component_distribution_iter(component)
-                                .filter(|d| *d != distribution)
-                                .map(|d| self.problem[d].remaining(&self.state))
-                                .product::<f64>();
+                        - self
+                            .component_extractor
+                            .component_distribution_iter(component)
+                            .filter(|d| *d != distribution)
+                            .map(|d| self.problem[d].remaining(&self.state))
+                            .product::<f64>();
                         p_out += removed * v_weight;
-                        // It is possible that the propagation removes enough variable so that the
-                        // bounds are close enough
-                        
                         let new_discrepancy = discrepancy - child_id;
+                        // Now that we've branched and applied the propagation, we split the
+                        // remaining problem into independent sub-components and solve them
+                        // independently.
+                        // Their bounds must be multiplied by each other, this is a product node.
                         let mut prod_p_in = F128!(1.0);
                         let mut prod_p_out = F128!(1.0);
                         let mut prod_maximum_probability = F128!(1.0);
-                        
-                        (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
-                        
+
                         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
                             self.cache.clear();
                         }
-                        self.state.save_state();
                         for child_distribution in self.component_extractor.component_distribution_iter(component) {
                             if self.problem[child_distribution].is_constrained(&self.state) {
                                 prod_maximum_probability *= self.problem[child_distribution].remaining(&self.state);
                             }
                         }
-                
+                        let (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
+                        let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
+
+                        self.state.save_state();
                         // If there are no more component to explore (i.e. the sub-problem only contains
                         // deterministic variables), then detect_components return false.
-                        if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component, &mut self.propagator) {
+                        let mut is_node_sat = true;
+                        if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             self.statistics.and_node();
                             let number_components = self.component_extractor.number_components(&self.state);
                             self.statistics.decomposition(number_components);
@@ -502,51 +334,296 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 // If the solver has no more time, assume that there are no solutions in the
                                 // remaining of the components. This way we always produce a valid lower/upper
                                 // bound.
-                                keys.push(self.component_extractor[sub_component].get_cache_key());
                                 if self.start.elapsed().as_secs() >= self.timeout {
-                                    return (SearchCacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), variable_component_keys, forced_distribution_variables, unconstrained_distribution_variables), level - 1);
+                                    return (SearchCacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), children_map), level - 1);
                                 }
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
-                                assert!(0.0 <= sub_maximum_probability && sub_maximum_probability <= 1.0);
                                 let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level +1, new_discrepancy); // the function was called with level + 1 and level was given
-                                
+
                                 if backtrack_level != level { // the function was called with level + 1 and level was used here
                                     // Or node is unsat
                                     self.restore();
-                                    return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), vec![], vec![], vec![]), backtrack_level);
+                                    return (SearchCacheEntry::new((F128!(0.0),
+                                        F128!(maximum_probability)),
+                                        usize::MAX,
+                                        Some(distribution),
+                                        FxHashMap::default()), backtrack_level);
                                 }
                                 // If any of the component is not fully explored, then so is the node
                                 let (sub_p_in, sub_p_out) = sub_problem.bounds();
                                 prod_p_in *= sub_p_in;
                                 prod_p_out *= sub_maximum_probability - sub_p_out.clone();
-                                if prod_p_in == F128!(0.0) {
+                                // In case prod_p_in is 0, it means that one of the component has
+                                // probability 0, hence we do not need to explore further.
+                                // Notice that we do not need to set prod_p_out to the maximum
+                                // probability. After the loop, we reassign prod_p_out using the
+                                // maximum probability of the product, an prod_p_out is 0 in this
+                                // case.
+                                if prod_p_in <= FLOAT_CMP_THRESHOLD {
+                                    is_node_sat = false;
                                     break;
                                 }
+                                child_entry.add_key(self.component_extractor[sub_component].get_cache_key());
                             }
+                        }
+                        if is_node_sat && prod_p_in > FLOAT_CMP_THRESHOLD {
+                            children_map.insert(variable, child_entry);
                         }
                         self.restore();
                         prod_p_out = prod_maximum_probability.clone() - prod_p_out;
-                        
-                        if prod_p_in == F128!(0.0) {
-                            keys.clear();
-                            forced_distribution_var.clear();
-                            unconstrained_distribution_var.clear();
-                        }
                         p_in += prod_p_in * &p;
                         p_out += prod_p_out * &p;
-                    
                     }
                 }
-                variable_component_keys.push((variable.0-self.problem[distribution].start().0, keys));
-                forced_distribution_variables.push((variable.0 - self.problem[distribution].start().0, forced_distribution_var));
-                unconstrained_distribution_variables.push((variable.0 - self.problem[distribution].start().0, unconstrained_distribution_var));
                 self.restore();
                 child_id += 1;
             }
-            let cache_entry = SearchCacheEntry::new((p_in, p_out), discrepancy, Some(distribution), variable_component_keys, forced_distribution_variables, unconstrained_distribution_variables);
+            let cache_entry = SearchCacheEntry::new((p_in, p_out),
+                discrepancy,
+                Some(distribution),
+                children_map,
+            );
             (cache_entry, level - 1)
         } else {
-            (SearchCacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None, vec![], vec![], vec![]), level - 1)
+            (SearchCacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None, FxHashMap::default()), level - 1)
         }
+    }
+}
+
+impl<B: BranchingDecision, const S: bool> Solver<B, S> {
+
+    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> {
+        let start = Instant::now();
+        self.state.save_state();
+        let preproc_result = self.preprocess();
+        // Create the DAC and add elements from the preprocessing
+        let forced_by_propagation = self.forced_from_propagation();
+
+        self.restructure_after_preprocess();
+
+        if preproc_result.is_some() {
+            return Dac::default();
+        }
+        // Perform the actual search that will fill the cache
+        let sol = self.pwmc(is_lds);
+        let (lb, ub) = sol.bounds();
+        let epsilon = (ub/lb).sqrt() as f64-1.0;
+        let mut dac = Dac::new(epsilon);
+
+        // Adds the distributions in the circuit
+        for distribution in self.problem.distributions_iter() {
+            for v in self.problem[distribution].iter_variables() {
+                let _ = dac.distribution_value_node(&self.problem, distribution, v);
+            }
+        }
+
+        let mut has_node_search = false;
+        let mut root_number_children = if self.cache.contains_key(&self.component_extractor[ComponentIndex(0)].get_cache_key()) { has_node_search = true; 1 } else { 0 };
+        root_number_children += forced_by_propagation.0.len() + forced_by_propagation.1.len();
+        let root = dac.prod_node(root_number_children);
+        let mut child_id = root.input_start();
+
+        // Forced variables from the propagation
+        for (d, variable) in forced_by_propagation.0.iter().copied() {
+            let distribution_node = dac.distribution_value_node(&self.problem, d, variable);
+            dac.add_input(child_id, distribution_node);
+            child_id += 1;
+        }
+        // Unconstrained distribution variables
+        for (d, values) in forced_by_propagation.1 {
+            let sum_node = dac.sum_node(values.len());
+            for (i, v) in values.iter().copied().enumerate() {
+                let distribution_node = dac.distribution_value_node(&self.problem, d, v);
+                dac.add_input(sum_node.input_start() + i, distribution_node);
+            }
+            let sum_id = dac.add_node(sum_node);
+            dac.add_input(child_id, sum_id);
+            child_id += 1;
+        }
+
+        let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
+        if has_node_search {
+            let node_search = self.build_dac(&mut dac, self.component_extractor[ComponentIndex(0)].get_cache_key(), &mut map);
+            dac.add_input(child_id, node_search);
+        }
+        let root = dac.add_node(root);
+        dac.set_root(root);
+
+        dac.set_compile_time(start.elapsed().as_secs());
+        dac
+    }
+
+    pub fn build_dac<R: SemiRing>(&self, dac: &mut Dac<R>, component_key: CacheKey, c: &mut FxHashMap<CacheKey, NodeIndex>) -> NodeIndex {
+        if let Some(child_i) = c.get(&component_key) {
+            return *child_i;
+        }
+        let current = self.cache.get(&component_key).unwrap();
+        let sum_node_child = current.number_children();
+        let sum_node = dac.sum_node(sum_node_child);
+
+        let mut sum_node_child = 0;
+        // Iterate on the variables the distribution with the associated cache key
+        for variable in current.children_variables() {
+            let number_children = current.variable_number_children(variable);
+            if number_children == 0 {
+                continue;
+            }
+            let prod_node = dac.prod_node(number_children);
+
+            let mut child_id = prod_node.input_start();
+            // Adding to the new product node all the propagated variables, including the distribution value we branch on
+            for (d, v) in current.forced_choices(variable).iter().copied() {
+                let distribution_prop = dac.distribution_value_node(&self.problem, d, v);
+                dac.add_input(child_id, distribution_prop);
+                child_id += 1;
+
+            }
+
+            // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
+            for (d, values) in current.unconstrained_distribution_variables_of(variable) {
+                let sum_node_unconstrained = dac.sum_node(values.len());
+                for (i, v) in values.iter().copied().enumerate() {
+                    let distribution_unconstrained = dac.distribution_value_node( &self.problem, *d, v);
+                    dac.add_input(sum_node_unconstrained.input_start() + i, distribution_unconstrained);
+                }
+                let id = dac.add_node(sum_node_unconstrained);
+                dac.add_input(child_id, id);
+                child_id += 1;
+            }
+            // Recursively build the DAC for each sub-component
+            for cache_key in current.child_keys(variable) {
+                let id = self.build_dac(dac, cache_key, c);
+                dac.add_input(child_id, id);
+                child_id += 1;
+            }
+            let id = dac.add_node(prod_node);
+            dac.add_input(sum_node.input_start() + sum_node_child, id);
+            sum_node_child += 1;
+        }
+        let sum_index = dac.add_node(sum_node);
+        c.insert(component_key, sum_index);
+        sum_index
+    }
+
+    /// Returns the choices (i.e., assignments to the distributions) made during the propagation as
+    /// well as the distributions that are not constrained anymore.
+    /// A choice for a distribution is a pair (d, i) = (DistributionIndex, usize) that indicates that
+    /// the i-th value of disitribution d is true.
+    /// An unconstrained distribution is a pair (d, v) = (DistributionIndex, Vec<usize>) that
+    /// indicates that distribution d does not appear in any clauses and its values in v are not
+    /// set yet.
+    fn forced_from_propagation(&mut self) -> (Vec<DistributionChoice>, Vec<UnconstrainedDistribution>) {
+        let mut forced_distribution_variables: Vec<DistributionChoice> = vec![];
+        let mut unconstrained_distribution_variables: Vec<UnconstrainedDistribution> = vec![];
+
+        if self.propagator.has_assignments(&self.state) || self.propagator.has_unconstrained_distribution() {
+            // First, we look at the assignments
+            for literal in self.propagator.assignments_iter(&self.state) {
+                let variable = literal.to_variable();
+                // Only take probabilistic variables set to true
+                if self.problem[variable].is_probabilitic() && literal.is_positive() && self.problem[variable].weight().unwrap() != 1.0 {
+                    let distribution = self.problem[variable].distribution().unwrap();
+                    // This represent which "probability index" is send to the node
+                    forced_distribution_variables.push((distribution, variable));
+                }
+            }
+
+            // Then, for each unconstrained distribution, we create a sum_node, but only if the
+            // distribution has at least one value set to false.
+            // Otherwise it would always send 1.0 to the product node.
+            for distribution in self.propagator.unconstrained_distributions_iter() {
+                if self.problem[distribution].number_false(&self.state) != 0 {
+                    let values = self.problem[distribution].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>();
+                    unconstrained_distribution_variables.push((distribution, values));
+                }
+            }
+            
+        }
+        (forced_distribution_variables, unconstrained_distribution_variables)
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct CacheChildren {
+    children_keys: Vec<CacheKey>,
+    forced_choices: Vec<DistributionChoice>,
+    unconstrained_distributions: Vec<UnconstrainedDistribution>,
+}
+
+impl CacheChildren {
+    pub fn new(forced_choices: Vec<DistributionChoice>, unconstrained_distributions: Vec<UnconstrainedDistribution>) -> Self {
+        Self {
+            children_keys: vec![],
+            forced_choices,
+            unconstrained_distributions,
+        }
+    }
+
+    pub fn add_key(&mut self, key: CacheKey) {
+        self.children_keys.push(key);
+    }
+}
+/// An entry in the cache for the search. It contains the bounds computed when the sub-problem was
+/// explored as well as various informations used by the solvers.
+#[derive(Clone)]
+pub struct SearchCacheEntry {
+    /// The current bounds on the sub-problem
+    bounds: Bounds,
+    /// Maximum discrepancy used for that node
+    discrepancy: usize,
+    /// The distribution on which to branch in this problem
+    distribution: Option<DistributionIndex>,
+    children: FxHashMap<VariableIndex, CacheChildren>,
+}
+
+impl SearchCacheEntry {
+
+    /// Returns a new cache entry
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>) -> Self {
+        Self {
+            bounds,
+            discrepancy,
+            distribution,
+            children,
+        }
+    }
+
+    /// Returns a reference to the bounds of this entry
+    pub fn bounds(&self) -> Bounds {
+        self.bounds.clone()
+    }
+
+    /// Returns the discrepancy of the node
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    pub fn distribution(&self) -> Option<DistributionIndex> {
+        self.distribution
+    }
+
+    pub fn forced_choices(&self, variable: VariableIndex) -> &Vec<DistributionChoice> {
+        &self.children.get(&variable).unwrap().forced_choices
+    }
+
+    pub fn unconstrained_distribution_variables_of(&self, variable: VariableIndex) -> &Vec<UnconstrainedDistribution> {
+        &self.children.get(&variable).unwrap().unconstrained_distributions
+    }
+
+    pub fn number_children(&self) -> usize {
+        self.children.len()
+    }
+
+    pub fn variable_number_children(&self, variable: VariableIndex) -> usize {
+        let entry = self.children.get(&variable).unwrap();
+        entry.children_keys.len() + entry.forced_choices.len() + entry.unconstrained_distributions.len()
+    }
+
+    pub fn children_variables(&self) -> Vec<VariableIndex> {
+        self.children.keys().copied().collect()
+    }
+
+    pub fn child_keys(&self, variable: VariableIndex) -> Vec<CacheKey> {
+        self.children.get(&variable).unwrap().children_keys.clone()
     }
 }

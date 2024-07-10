@@ -15,10 +15,10 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::{Parser, Subcommand};
-use schlandals::ApproximateMethod;
 use std::path::PathBuf;
 use std::process;
 use schlandals::learning::LearnParameters;
+use schlandals::common::*;
 
 #[derive(Debug, Parser)]
 #[clap(name="Schlandals", version, author, about)]
@@ -37,8 +37,8 @@ enum Command {
         #[clap(short, long, value_parser)]
         input: PathBuf,
         /// How to branch
-        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
-        branching: schlandals::Branching,
+        #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
+        branching: Branching,
         /// Collect stats during the search, default yes
         #[clap(short, long, action)]
         statistics: bool,
@@ -60,8 +60,8 @@ enum Command {
         #[clap(short, long, value_parser)]
         input: PathBuf,
         /// How to branch
-        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
-        branching: schlandals::Branching,
+        #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
+        branching: Branching,
         /// If present, store a textual representation of the compiled circuit
         #[clap(long)]
         fdac: Option<PathBuf>,
@@ -84,8 +84,8 @@ enum Command {
         #[clap(long, value_parser, value_delimiter=' ')]
         testfile: Option<PathBuf>,
         /// How to branch
-        #[clap(short, long, value_enum, default_value_t=schlandals::Branching::MinInDegree)]
-        branching: schlandals::Branching,
+        #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
+        branching: Branching,
         /// If present, folder in which to store the output files
         #[clap(long)]
         outfolder: Option<PathBuf>,
@@ -106,18 +106,18 @@ enum Command {
         epsilon: f64,
         /// Loss to use for the training, default is the MAE
         /// Possible values: MAE, MSE
-        #[clap(long, default_value_t=schlandals::Loss::MAE, value_enum)]
-        loss: schlandals::Loss, 
+        #[clap(long, default_value_t=Loss::MAE, value_enum)]
+        loss: Loss, 
         /// Number of threads to use for the evaluation of the DACs
         #[clap(long, default_value_t=1, short)]
         jobs: usize,
         /// The semiring on which to evaluate the circuits. If `tensor`, use torch
         /// to compute the gradients. If `probability`, use custom efficient backpropagations
-        #[clap(long, short, default_value_t=schlandals::Semiring::Probability, value_enum)]
-        semiring: schlandals::Semiring,
+        #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
+        semiring: Semiring,
         /// The optimizer to use if `tensor` is selected as semiring
-        #[clap(long, short, default_value_t=schlandals::Optimizer::Adam, value_enum)]
-        optimizer: schlandals::Optimizer,
+        #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
+        optimizer: Optimizer,
         /// The drop in the learning rate to apply at each step
         #[clap(long, default_value_t=0.75)]
         lr_drop: f64,

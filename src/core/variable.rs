@@ -34,12 +34,16 @@ pub struct Variable {
     id: usize,
     /// The weight of the variable. None if the variable is deterministic
     weight: Option<f64>,
+    /// Index of the variable in the distribution (from the initial problem, after sorting them by
+    /// weight)
+    index_in_distribution: Option<usize>,
     /// The distribution in which the variable is.  None if the variable is deterministic
     distribution: Option<DistributionIndex>,
     /// The clauses in which the variable appears with positive polarity
     clauses_positive: Vec<ClauseIndex>,
     /// The clauses in which the variable appears with negative polarity
     clauses_negative: Vec<ClauseIndex>,
+    learned_clauses: Vec<ClauseIndex>,
     /// The value assigned to the variable
     value: ReversibleOptionBool,
     /// Level at which the decision was made for this variable
@@ -54,19 +58,19 @@ pub struct Variable {
     hash: u64,
     bitmask: u128,
     bitword_index: usize,
-    /// Initial index of the variable in the problem
-    old_index: usize,
 }
 
 impl Variable {
     
-    pub fn new(id: usize, weight: Option<f64>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, weight: Option<f64>, index_in_distribution: Option<usize>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
         Self {
             id,
             weight,
+            index_in_distribution,
             distribution,
             clauses_positive: vec![],
             clauses_negative: vec![],
+            learned_clauses: vec![],
             value: state.manage_option_bool(None),
             decision: -1,
             assignment_position: state.manage_usize(0),
@@ -75,13 +79,17 @@ impl Variable {
             hash: rand::random(),
             bitmask: 0,
             bitword_index: 0,
-            old_index: id,
         }
     }
     
     /// Sets the weight of the variable to the given value
     pub fn set_weight(&mut self, weight: f64) {
         self.weight = Some(weight);
+    }
+
+    /// Sets the index of the variable in the distribution
+    pub fn set_distribution_index(&mut self, index: usize) {
+        self.index_in_distribution = Some(index);
     }
     
     /// Set the distribution of the variable to the given distribution
@@ -104,14 +112,13 @@ impl Variable {
         self.weight
     }
 
-    /// Sets the initial index of the variable in the problem
-    pub fn set_old_index(&mut self, index: usize) {
-        self.old_index = index;
+    pub fn index_in_distribution(&self) -> Option<usize> {
+        self.index_in_distribution
     }
 
     /// Returns the initial index of the variable in the problem
     pub fn old_index(&self) -> usize {
-        self.old_index
+        self.id
     }
     
     /// Sets the variable to the given value. This operation is reverted when
@@ -196,6 +203,10 @@ impl Variable {
     pub fn number_clauses(&self) -> usize {
         self.clauses_positive.len() + self.clauses_negative.len()
     }
+
+    pub fn add_learned_clause(&mut self, clause: ClauseIndex) {
+        self.learned_clauses.push(clause);
+    }
     
     // --- ITERATOR --- //
 
@@ -207,6 +218,10 @@ impl Variable {
     /// Returns an iterator on the clauses in which the variable appears with a negative polarity
     pub fn iter_clauses_negative_occurence(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.clauses_negative.iter().copied()
+    }
+
+    pub fn iter_learned_clauses(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.learned_clauses.iter().copied()
     }
 
     pub fn clear_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>) -> usize {

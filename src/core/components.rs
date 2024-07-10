@@ -29,7 +29,7 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::problem::{ClauseIndex, Problem, DistributionIndex};
-use crate::{propagator::Propagator, solvers::CacheKey};
+use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 use crate::core::bitvec::Bitvec;
 
@@ -229,10 +229,10 @@ impl ComponentExtractor {
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
-                                        for c in g[v].iter_clauses_negative_occurence() {      
+                                        for c in g[v].iter_clauses_negative_occurence().filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
-                                        for c in g[v].iter_clauses_positive_occurence() {
+                                        for c in g[v].iter_clauses_positive_occurence().filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
                                     }
@@ -262,9 +262,7 @@ impl ComponentExtractor {
         g: &mut Problem,
         state: &mut StateManager,
         component: ComponentIndex,
-        propagator: &mut Propagator,
     ) -> bool {
-        debug_assert!(propagator.unconstrained_clauses.is_empty());
         let end = state.get_usize(self.limit);
         // If we backtracked, then there are component that are not needed anymore, we truncate
         // them
@@ -354,27 +352,6 @@ impl ComponentExtractor {
         let start = self.components[component.0].distribution_start;
         let end = start + self.components[component.0].number_distribution;
         self.distributions[start..end].iter().copied()
-    }
-
-    /// Adds a clause to a component. This function is called when the solver encounters an UNSAT and needs to learn a clause.
-    /// During this process we ensure that the learned clause is horn and can be safely added in the component for further detections.
-    pub fn add_clause_to_component(&mut self, component: ComponentIndex, clause: ClauseIndex) {
-        debug_assert!(clause.0 == self.clause_positions.len());
-        let start = self.components[component.0].start;   
-        self.clauses.insert(start, clause);
-        for i in 0..self.clause_positions.len() {
-            if self.clause_positions[i] >= start {
-                self.clause_positions[i] += 1;
-            }
-        }
-        self.clause_positions.push(start);
-        for comp in self.components.iter_mut() {
-            if comp.start <= start && comp.start + comp.size > start {
-                comp.size += 1;
-            } else if comp.start > start {
-                comp.start += 1;
-            }
-        }
     }
 
     pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize, max_probability: f64) {

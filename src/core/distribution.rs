@@ -20,7 +20,7 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::{problem::{ClauseIndex, DistributionIndex, VariableIndex}, sparse_set::SparseSet};
+use super::{problem::{ClauseIndex, VariableIndex}, sparse_set::SparseSet};
 use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleF64, F64Manager};
 use rustc_hash::FxHashMap;
 
@@ -43,8 +43,6 @@ pub struct Distribution {
     remaining: ReversibleF64,
     /// Is the distribution a candidate for branching ?
     branching_candidate: bool,
-    /// Initial index of the distribution in the problem
-    old_index: usize,
     /// Initial first variable of the distribution in the problem
     old_first: VariableIndex,
 }
@@ -60,7 +58,6 @@ impl Distribution {
             number_false: state.manage_usize(0),
             remaining: state.manage_f64(1.0),
             branching_candidate: true,
-            old_index: id,
             old_first: first,
         }
     }
@@ -103,8 +100,8 @@ impl Distribution {
     }
 
     /// Returns the initial index of the distribution in the problem
-    pub fn old_index(&self) -> DistributionIndex {
-        DistributionIndex(self.old_index)
+    pub fn old_index(&self) -> usize {
+        self.id
     }
 
     /// Returns the initial first variable of the distribution in the problem

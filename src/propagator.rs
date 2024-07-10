@@ -201,9 +201,8 @@ impl Propagator {
                 }
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
                 let head = learned_clause.iter().copied().find(|l| l.is_positive());
-                let clause = g.add_clause(learned_clause, head, state, true);
-                self.clause_flags.push(ClauseFlags::default());
-                extractor.add_clause_to_component(component, clause);
+                let _ = g.add_clause(learned_clause, head, state, true);
+                //extractor.add_clause_to_component(component, clause);
                 return PropagationResult::Err(backjump);
             }
             g[variable].set_assignment_position(self.assignments.len(), state);
@@ -215,10 +214,12 @@ impl Propagator {
             // clause
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence(){
+                    //g.set_clause_unconstrained(clause, state);
                     self.add_unconstrained_clause(clause, g, state);
                 }
             } else {
                 for clause in g[variable].iter_clauses_negative_occurence(){
+                    //g.set_clause_unconstrained(clause, state);
                     self.add_unconstrained_clause(clause, g, state);
                 }
             }
@@ -280,7 +281,7 @@ impl Propagator {
         }
         self.set_reachability(g, state, component, extractor);
         for clause in extractor.component_iter(component) {
-            if !self.clause_flags[clause.0].is_reachable() {
+            if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
                 self.add_unconstrained_clause(clause, g, state);
             }
         }
@@ -305,7 +306,7 @@ impl Propagator {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::TrueReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::TrueReachable);
             for child in g[clause].iter_children(state) {
-                if g[child].is_constrained(state) {
+                if !g[child].is_learned() && g[child].is_constrained(state) {
                     self.set_t_reachability(g, state, child);
                 }
             }
@@ -321,7 +322,7 @@ impl Propagator {
         if !self.clause_flags[clause.0].is_set(ClauseFlag::FalseReachable) {
             self.clause_flags[clause.0].set(ClauseFlag::FalseReachable);
             for parent in g[clause].iter_parents(state) {
-                if g[parent].is_constrained(state) {
+                if !g[parent].is_learned() && g[parent].is_constrained(state) {
                     self.set_f_reachability(g, state, parent);
                 }
             }
@@ -332,6 +333,9 @@ impl Propagator {
     fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
         // First we update the parents/child in the problem and clear the flags
         for clause in extractor.component_iter(component){
+            if g[clause].is_learned() {
+                continue;
+            }
             self.clause_flags[clause.0].clear();
             for parent in g[clause].iter_parents(state).collect::<Vec<ClauseIndex>>() {
                 if !g[parent].is_constrained(state) {
@@ -348,10 +352,8 @@ impl Propagator {
             }
         }
 
-
         for clause in extractor.component_iter(component){
-            if g[clause].is_constrained(state) {
-                debug_assert!(!g[clause].is_unit(state));
+            if !g[clause].is_learned() && g[clause].is_constrained(state) {
                 match g[clause].head() {
                     None => self.set_f_reachability(g, state, clause),
                     Some(h) => {

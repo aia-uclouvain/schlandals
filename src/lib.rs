@@ -14,98 +14,64 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::{path::PathBuf, fs::File, io::{Write,BufRead,BufReader}};
-
-use learning::{learner::Learner, LearnParameters};
-use learning::Learning;
-#[cfg(feature = "tensor")]
-use learning::tensor_learner::TensorLearner;
-use diagrams::dac::dac::Dac;
-use solvers::GenericSolver;
-use search_trail::StateManager;
-use clap::ValueEnum;
+use std::path::PathBuf;
+use std::fs::File;
+use std::io::{Write, BufRead, BufReader};
 use rug::Float;
 
-use crate::core::components::ComponentExtractor;
-use solvers::Solution;
-use crate::solvers::*;
-use crate::parser::*;
+use learning::{Learning, learner::Learner, LearnParameters};
+use ac::ac::Dac;
+use search_trail::StateManager;
+
+use core::components::ComponentExtractor;
+use common::Solution;
+use core::problem::Problem;
+use parser::*;
 
 use propagator::Propagator;
+use common::*;
+use branching::*;
 
 // Re-export the modules
-mod common;
+mod solver;
+mod statistics;
+pub mod common;
 mod branching;
 pub mod core;
-pub mod solvers;
 mod parser;
 mod propagator;
 mod preprocess;
 pub mod learning;
-pub mod diagrams;
+pub mod ac;
+mod semiring;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Branching {
-    /// Minimum In-degree of a clause in the implication-graph
-    MinInDegree,
-    /// Minimum Out-degree of a clause in the implication-graph
-    MinOutDegree,
-    /// Maximum degree of a clause in the implication-graph
-    MaxDegree,
-    /// Variable State Independent Decaying Sum
-    VSIDS,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Loss {
-    MAE,
-    MSE,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Semiring {
-    Probability,
-    #[cfg(feature = "tensor")]
-    Tensor,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Optimizer {
-    Adam,
-    SGD,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum ApproximateMethod {
-    /// Bound-based pruning
-    Bounds,
-    /// Limited Discrepancy Search
-    LDS,
-}
-
-impl std::fmt::Display for ApproximateMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ApproximateMethod::Bounds => write!(f, "bounds"),
-            ApproximateMethod::LDS => write!(f, "lds"),
-        }
-    }
-}
-
 pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
     let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
-    search!(solver)
+    match solver {
+        GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+        GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+    }
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) -> f64 {
     let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics, unweighted);
     let solution = match approx {
-        ApproximateMethod::Bounds => search!(solver),
-        ApproximateMethod::LDS => lds!(solver),
+        ApproximateMethod::Bounds => {
+            match solver {
+                GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+                GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+            }
+        },
+        ApproximateMethod::LDS => {
+            match solver {
+                GenericSolver::SMinInDegree(mut solver) => solver.search(true),
+                GenericSolver::QMinInDegree(mut solver) => solver.search(true),
+            }
+        },
     };
     solution.print();
     solution.to_f64()
@@ -113,8 +79,18 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
 
 fn _compile(compiler: GenericSolver, approx: ApproximateMethod, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
     let mut dac: Dac<Float> = match approx {
-        ApproximateMethod::Bounds => compile!(compiler, false),
-        ApproximateMethod::LDS => compile!(compiler, true),
+        ApproximateMethod::Bounds => {
+            match compiler {
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(false),
+            }
+        },
+        ApproximateMethod::LDS => {
+            match compiler {
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(true),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(true),
+            }
+        },
     };
     dac.evaluate();
     if let Some(f) = dotfile {
@@ -215,3 +191,64 @@ impl std::fmt::Display for Loss {
         }
     }
 }
+
+pub use solver::Solver;
+
+pub enum GenericSolver {
+    SMinInDegree(Solver<MinInDegree, true>),
+    QMinInDegree(Solver<MinInDegree, false>),
+}
+
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
+    if stat {
+        match branching {
+            Branching::MinInDegree => {
+                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                GenericSolver::SMinInDegree(solver)
+            },
+        }
+    } else {
+        match branching {
+            Branching::MinInDegree => {
+                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                GenericSolver::QMinInDegree(solver)
+            },
+        }
+    }
+}
+
+macro_rules! solver_from_problem {
+    ($d:expr, $c:expr, $b:expr, $e:expr, $m:expr, $t:expr, $s:expr) => {
+        {
+            let mut state = StateManager::default();
+            let problem = problem_from_problem($d, $c, &mut state);
+            let propagator = Propagator::new(&mut state);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
+            let mlimit = if let Some(m) = $m {
+                m
+            } else {
+                u64::MAX
+            };
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+        }
+    };
+}
+use solver_from_problem;
+
+macro_rules! make_solver {
+    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr, $u: expr) => {
+        {
+            let mut state = StateManager::default();
+            let propagator = Propagator::new(&mut state);
+            let problem = problem_from_cnf($i, &mut state, false, $u);
+            let component_extractor = ComponentExtractor::new(&problem, &mut state);
+            let mlimit = if let Some(m) = $m {
+                m
+            } else {
+                u64::MAX
+            };
+            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+        }
+    };
+}
+pub(crate) use make_solver;

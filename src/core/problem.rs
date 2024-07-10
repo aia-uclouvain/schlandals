@@ -63,7 +63,7 @@ impl Problem {
 
     /// Creates a new empty implication problem
     pub fn new(state: &mut StateManager, n_var: usize, n_clause: usize) -> Self {
-        let variables = (0..n_var).map(|i| Variable::new(i, None, None, state)).collect();
+        let variables = (0..n_var).map(|i| Variable::new(i, None, None, None, state)).collect();
         let watchers = (0..n_var).map(|_| vec![]).collect();
         Self {
             variables,
@@ -86,11 +86,7 @@ impl Problem {
     /// Moreover, the variables are stored by decreasing probability. The mapping from the old
     /// variables index (the ones used in the encoding) and the new one (in the vector) is
     /// returned.
-    pub fn add_distributions(
-        &mut self,
-        distributions: &[Vec<f64>],
-        state: &mut StateManager,
-    ) -> FxHashMap<usize, usize> {
+    pub fn add_distributions(&mut self, distributions: &[Vec<f64>], state: &mut StateManager) -> FxHashMap<usize, usize> {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
@@ -107,7 +103,7 @@ impl Problem {
                 let initial_index = current_start + i;
                 self.variables[new_index].set_distribution(distribution_id);
                 self.variables[new_index].set_weight(w);
-                self.variables[new_index].set_old_index(initial_index);
+                self.variables[new_index].set_distribution_index(i);
                 mapping.insert(initial_index + 1, new_index + 1);
             }
             current_start += weights.len();
@@ -158,19 +154,26 @@ impl Problem {
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
         for literal in clause.iter().collect::<Vec<Literal>>() {
             let variable = literal.to_variable();
+            if is_learned {
+                self[variable].add_learned_clause(cid);
+            }
             if literal.is_positive() {
                 self[variable].add_clause_positive_occurence(cid);
-                for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
-                    clause.add_child(child, state);
-                    self[child].add_parent(cid, state);
-                    self[child].increment_in_degree();
+                if !is_learned {
+                    for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
+                        clause.add_child(child, state);
+                        self[child].add_parent(cid, state);
+                        self[child].increment_in_degree();
+                    }
                 }
             } else {
                 self[variable].add_clause_negative_occurence(cid);
-                for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
-                    clause.add_parent(parent, state);
-                    self[parent].add_child(cid, state);
-                    clause.increment_in_degree();
+                if !is_learned {
+                    for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                        clause.add_parent(parent, state);
+                        self[parent].add_child(cid, state);
+                        clause.increment_in_degree();
+                    }
                 }
             }
             if let Some(distribution) = self[literal.to_variable()].distribution() {
