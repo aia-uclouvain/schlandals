@@ -27,6 +27,7 @@ use crate::ac::ac::Dac;
 use crate::semiring::SemiRing;
 use crate::ApproximateMethod;
 use crate::{generic_solver, make_solver};
+use crate::solver::SolverParameters;
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
 /// logistic function to multiple dimensions.
@@ -49,7 +50,8 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
             FileType::CNF => {
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
-                let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
+                let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
+                let compiler = make_solver!(&input, branching, parameters, false, false);
                 match approx {
                     ApproximateMethod::Bounds => {
                         match compiler {
