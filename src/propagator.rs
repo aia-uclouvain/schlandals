@@ -214,13 +214,13 @@ impl Propagator {
             // clause
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence(){
-                    g.set_clause_unconstrained(clause, state);
-                    //self.add_unconstrained_clause(clause, g, state);
+                    //g.set_clause_unconstrained(clause, state);
+                    self.add_unconstrained_clause(clause, g, state);
                 }
             } else {
                 for clause in g[variable].iter_clauses_negative_occurence(){
-                    g.set_clause_unconstrained(clause, state);
-                    //self.add_unconstrained_clause(clause, g, state);
+                    //g.set_clause_unconstrained(clause, state);
+                    self.add_unconstrained_clause(clause, g, state);
                 }
             }
 
