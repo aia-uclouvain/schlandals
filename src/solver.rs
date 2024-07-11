@@ -400,6 +400,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if !is_lds {
             let sol = self.do_discrepancy_iteration(usize::MAX);
             self.statistics.print();
+            if sol.has_converged(0.0) && sol.bounds().0 < FLOAT_CMP_THRESHOLD {
+                let mut ac = Dac::default();
+                ac.set_compile_time(start.elapsed().as_secs());
+                return ac;
+            }
             let epsilon = (sol.bounds().1/sol.bounds().0).sqrt()-1.0;
             let mut ac = self.build_ac(epsilon, &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());

@@ -25,7 +25,7 @@ macro_rules! F128 {
 }
 pub(crate) use F128;
 
-pub const FLOAT_CMP_THRESHOLD: f64 = 0.0000001;
+pub const FLOAT_CMP_THRESHOLD: f64 = 0.000001;
 
 pub type Bounds = (Float, Float);
 

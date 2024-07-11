@@ -141,6 +141,7 @@ impl Propagator {
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
         if !g[distribution].is_fixed(state) {
+            self.unconstrained_distributions.push(distribution);
             self.propagation_prob *= g[distribution].remaining(state);
         }
     }

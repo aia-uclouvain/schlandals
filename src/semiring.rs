@@ -29,7 +29,7 @@ use std::ops::{AddAssign, MulAssign};
 use rug::Assign;
 
 /// Trait that defines the behavior of a semiring.
-pub trait SemiRing: AddAssign + MulAssign + Send + Sized + std::fmt::Display {
+pub trait SemiRing: AddAssign + MulAssign + Send + Sized + Clone + std::fmt::Display {
 
     /// Returns the neutral element for the multiplication
     fn one() -> Self {

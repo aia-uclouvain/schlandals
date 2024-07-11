@@ -176,12 +176,15 @@ impl<R> Dac<R>
     /// Returns the probability of the circuit. If the circuit has not been evaluated,
     /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
     /// sum node
-    pub fn circuit_probability(&self) -> &R {
-        self.nodes.last().unwrap().value()
+    pub fn circuit_probability(&self) -> R {
+        if self.is_empty() {
+            return R::zero();
+        }
+        self.nodes.last().unwrap().value().clone()
     }
 
     pub fn solution(&self) -> Solution {
-        let p = self.nodes.last().unwrap().value().to_f64();
+        let p = if !self.is_empty() {self.nodes.last().unwrap().value().to_f64()} else {0.0};
         Solution::new(F128!(p), F128!(p), self.compile_time)
     }
 
@@ -205,7 +208,10 @@ impl<R> Dac<R>
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self) -> &R {
+    pub fn evaluate(&mut self) -> R {
+        if self.is_empty() {
+            return R::zero();
+        }
         for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
             let start = self.nodes[node.0].input_start();
             let end = start + self.nodes[node.0].number_inputs();
@@ -224,7 +230,7 @@ impl<R> Dac<R>
             }
         }
         // Last node is the root since it has the higher layer
-        self.nodes.last().unwrap().value()
+        self.nodes.last().unwrap().value().clone()
     }
 
 
