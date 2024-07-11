@@ -122,30 +122,30 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         self.restructure_after_preprocess();
 
-        self.pwmc(is_lds)
-    }
-
-    fn pwmc(&mut self, is_lds: bool) -> Solution {
+        //let (sol, _): (Solution, Option<Dac<Float>>) = self.pwmc(is_lds, false);
         if self.problem.number_clauses() == 0 {
             let lb = self.preproc_in.clone().unwrap();
             let ub = F128!(1.0 - self.preproc_out.unwrap());
-            return Solution::new(lb, ub, self.start.elapsed().as_secs());
+            let sol = Solution::new(lb, ub, self.start.elapsed().as_secs());
+            return sol
         }
         if !is_lds {
             let sol = self.do_discrepancy_iteration(usize::MAX);
             self.statistics.print();
-            sol
+            return sol
         } else {
             let mut discrepancy = 1;
-            let mut prev_time = 0;
+            let mut complete_sol = None;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
-                solution.print();
-                if self.start.elapsed().as_secs() >= self.timeout || solution.has_converged(self.epsilon) || 2*self.start.elapsed().as_secs() - prev_time >= self.timeout {
-                    self.statistics.print();
-                    return solution;
+                if self.start.elapsed().as_secs() < self.timeout || complete_sol.as_ref().is_none() {
+                    solution.print();
+                    complete_sol = Some(solution);
                 }
-                prev_time = self.start.elapsed().as_secs();
+                if self.start.elapsed().as_secs() >= self.timeout || complete_sol.as_ref().unwrap().has_converged(self.epsilon) {
+                    self.statistics.print();
+                    return complete_sol.unwrap()
+                }
                 discrepancy += 1;
             }
         }
@@ -398,18 +398,49 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let preproc_result = self.preprocess();
         // Create the DAC and add elements from the preprocessing
         let forced_by_propagation = self.forced_from_propagation();
-
         self.restructure_after_preprocess();
 
         if preproc_result.is_some() {
             return Dac::default();
         }
         // Perform the actual search that will fill the cache
-        let sol = self.pwmc(is_lds);
-        let (lb, ub) = sol.bounds();
-        let epsilon = (ub/lb).sqrt() as f64-1.0;
-        let mut dac = Dac::new(epsilon);
+        //let (sol, d) = self.pwmc(is_lds, true);
+        if self.problem.number_clauses() == 0 {
+            let mut ac = self.build_ac(0.0, &forced_by_propagation);
+            ac.set_compile_time(start.elapsed().as_secs());
+            return ac
+        }
+        if !is_lds {
+            let sol = self.do_discrepancy_iteration(usize::MAX);
+            self.statistics.print();
+            let epsilon = (sol.bounds().1/sol.bounds().0).sqrt()-1.0;
+            let mut ac = self.build_ac(epsilon, &forced_by_propagation);
+            ac.set_compile_time(start.elapsed().as_secs());
+            return ac
+        } else {
+            let mut discrepancy = 1;
+            let mut complete_sol = None;
+            let mut complete_ac = None;
+            loop {
+                let solution = self.do_discrepancy_iteration(discrepancy);
+                if self.start.elapsed().as_secs() < self.timeout || complete_sol.as_ref().is_none() {
+                    let epsilon = (solution.bounds().1/solution.bounds().0).sqrt()-1.0;
+                    complete_ac = Some(self.build_ac(epsilon, &forced_by_propagation));
+                    solution.print();
+                    complete_sol = Some(solution);
+                }
+                if self.start.elapsed().as_secs() >= self.timeout || complete_sol.as_ref().unwrap().has_converged(self.epsilon) {
+                    self.statistics.print();
+                    complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
+                    return complete_ac.unwrap();
+                }
+                discrepancy += 1;
+            }
+        }        
+    }
 
+    pub fn build_ac<R: SemiRing>(&self, epsilon: f64, forced_by_propagation:&(Vec<(DistributionIndex, VariableIndex)>, Vec<(DistributionIndex, Vec<VariableIndex>)>)) -> Dac<R> {
+        let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
             for v in self.problem[distribution].iter_variables() {
@@ -430,10 +461,10 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             child_id += 1;
         }
         // Unconstrained distribution variables
-        for (d, values) in forced_by_propagation.1 {
+        for (d, values) in forced_by_propagation.1.iter() {
             let sum_node = dac.sum_node(values.len());
             for (i, v) in values.iter().copied().enumerate() {
-                let distribution_node = dac.distribution_value_node(&self.problem, d, v);
+                let distribution_node = dac.distribution_value_node(&self.problem, *d, v);
                 dac.add_input(sum_node.input_start() + i, distribution_node);
             }
             let sum_id = dac.add_node(sum_node);
@@ -443,17 +474,15 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
         if has_node_search {
-            let node_search = self.build_dac(&mut dac, self.component_extractor[ComponentIndex(0)].get_cache_key(), &mut map);
+            let node_search = self.explore_cache(&mut dac, self.component_extractor[ComponentIndex(0)].get_cache_key(), &mut map);
             dac.add_input(child_id, node_search);
         }
         let root = dac.add_node(root);
         dac.set_root(root);
-
-        dac.set_compile_time(start.elapsed().as_secs());
         dac
     }
 
-    pub fn build_dac<R: SemiRing>(&self, dac: &mut Dac<R>, component_key: CacheKey, c: &mut FxHashMap<CacheKey, NodeIndex>) -> NodeIndex {
+    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, component_key: CacheKey, c: &mut FxHashMap<CacheKey, NodeIndex>) -> NodeIndex {
         if let Some(child_i) = c.get(&component_key) {
             return *child_i;
         }
@@ -492,7 +521,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             }
             // Recursively build the DAC for each sub-component
             for cache_key in current.child_keys(variable) {
-                let id = self.build_dac(dac, cache_key, c);
+                let id = self.explore_cache(dac, cache_key, c);
                 dac.add_input(child_id, id);
                 child_id += 1;
             }
