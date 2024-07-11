@@ -32,6 +32,9 @@ use propagator::Propagator;
 use common::*;
 use branching::*;
 
+pub use solver::Solver;
+use solver::SolverParameters;
+
 // Re-export the modules
 mod solver;
 mod statistics;
@@ -50,7 +53,8 @@ use peak_alloc::PeakAlloc;
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
-    let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
+    let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX }, epsilon, timeout);
+    let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
     match solver {
         GenericSolver::SMinInDegree(mut solver) => solver.search(false),
         GenericSolver::QMinInDegree(mut solver) => solver.search(false),
@@ -58,7 +62,8 @@ pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize
 }
 
 pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) -> f64 {
-    let solver = make_solver!(&input, branching, epsilon, memory, timeout, statistics, unweighted);
+    let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX}, epsilon, timeout);
+    let solver = make_solver!(&input, branching, parameters, statistics, unweighted);
     let solution = match approx {
         ApproximateMethod::Bounds => {
             match solver {
@@ -113,9 +118,10 @@ fn _compile(compiler: GenericSolver, approx: ApproximateMethod, fdac: Option<Pat
 }
 
 pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> f64 {
+    let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
     let solution = match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, epsilon, None, timeout, false, false);
+            let compiler = make_solver!(&input, branching, parameters, false, false);
             _compile(compiler, approx, fdac, dotfile)
         },
         FileType::FDAC => {
@@ -128,8 +134,9 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     solution.to_f64()
 }
 
-pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, approx: ApproximateMethod, memory: Option<u64>, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
-    let solver = solver_from_problem!(distributions, clauses, branching, epsilon, memory, timeout, statistics);
+pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
+    let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
+    let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
     _compile(solver, approx, fdac, dotfile)
 }
 
@@ -143,14 +150,6 @@ pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, appr
                 Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
             }
         },
-        #[cfg(feature = "tensor")]
-        Semiring::Tensor => {
-            if log {
-                Box::new(TensorLearner::<true>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
-            } else {
-                Box::new(TensorLearner::<false>::new(inputs, expected, epsilon, branching, outfolder, jobs, params.compilation_timeout(), params.optimizer, test_inputs, test_expected))
-            }
-        }
     }
 }
 
@@ -192,25 +191,23 @@ impl std::fmt::Display for Loss {
     }
 }
 
-pub use solver::Solver;
-
 pub enum GenericSolver {
     SMinInDegree(Solver<MinInDegree, true>),
     QMinInDegree(Solver<MinInDegree, false>),
 }
 
-pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, mlimit: u64, epsilon: f64, timeout: u64, stat: bool) -> GenericSolver {
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool) -> GenericSolver {
     if stat {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
                 GenericSolver::SMinInDegree(solver)
             },
         }
     } else {
         match branching {
             Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, mlimit, epsilon, timeout);
+                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
                 GenericSolver::QMinInDegree(solver)
             },
         }
@@ -218,36 +215,26 @@ pub fn generic_solver(problem: Problem, state: StateManager, component_extractor
 }
 
 macro_rules! solver_from_problem {
-    ($d:expr, $c:expr, $b:expr, $e:expr, $m:expr, $t:expr, $s:expr) => {
+    ($d:expr, $c:expr, $b:expr, $p:expr, $s:expr) => {
         {
             let mut state = StateManager::default();
             let problem = problem_from_problem($d, $c, &mut state);
             let propagator = Propagator::new(&mut state);
             let component_extractor = ComponentExtractor::new(&problem, &mut state);
-            let mlimit = if let Some(m) = $m {
-                m
-            } else {
-                u64::MAX
-            };
-            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, $p, $s)
         }
     };
 }
 use solver_from_problem;
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $e:expr, $m:expr, $t: expr, $s:expr, $u: expr) => {
+    ($i:expr, $b:expr, $p:expr, $s:expr, $u: expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
             let problem = problem_from_cnf($i, &mut state, false, $u);
             let component_extractor = ComponentExtractor::new(&problem, &mut state);
-            let mlimit = if let Some(m) = $m {
-                m
-            } else {
-                u64::MAX
-            };
-            generic_solver(problem, state, component_extractor, $b, propagator, mlimit, $e, $t, $s)
+            generic_solver(problem, state, component_extractor, $b, propagator, $p, $s)
         }
     };
 }

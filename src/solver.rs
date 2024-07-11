@@ -29,7 +29,7 @@ use crate::PEAK_ALLOC;
 use rug::Float;
 use std::time::Instant;
 
-type SearchResult = (SearchCacheEntry, isize);
+type SearchResult = (CacheEntry, isize);
 type DistributionChoice = (DistributionIndex, VariableIndex);
 type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 
@@ -61,22 +61,15 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     branching_heuristic: Box<B>,
     /// Runs Boolean Unit Propagation and Schlandals' specific propagation at each decision node
     propagator: Propagator,
-    /// Error factor when running an approximate search over a sub-problem. If equals to 0.0, then
-    /// run an exact search
-    epsilon: f64,
-    /// Memory limit, in megabytes, when running a search over a sub-problem
-    mlimit: u64,
-    cache: FxHashMap<CacheKey, SearchCacheEntry>,
+    cache: FxHashMap<CacheKey, CacheEntry>,
     /// Statistics gathered during the solving
     statistics: Statistics<S>,
-    /// Time limit accorded to the solver
-    timeout: u64,
-    /// Start time of the solver
-    start: Instant,
     /// Product of the weight of the variables set to true during propagation
     preproc_in: Option<Float>,
     /// Probability of removed interpretation during propagation
     preproc_out: Option<f64>,
+    /// Parameters of the solving
+    parameters: SolverParameters,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -86,9 +79,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         component_extractor: ComponentExtractor,
         branching_heuristic: Box<B>,
         propagator: Propagator,
-        mlimit: u64,
-        epsilon: f64,
-        timeout: u64,
+        parameters: SolverParameters,
     ) -> Self {
         Self {
             problem,
@@ -96,14 +87,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             component_extractor,
             branching_heuristic,
             propagator,
-            epsilon,
-            mlimit,
             cache: FxHashMap::default(),
             statistics: Statistics::default(),
-            timeout,
-            start: Instant::now(),
             preproc_in: None,
             preproc_out: None,
+            parameters,
         }
     }
 
@@ -115,7 +103,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn search(&mut self, is_lds: bool) -> Solution {
-        self.start = Instant::now();
+        self.parameters.start = Instant::now();
         self.state.save_state();
         if let Some(sol) = self.preprocess() {
             return sol;
@@ -126,8 +114,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if self.problem.number_clauses() == 0 {
             let lb = self.preproc_in.clone().unwrap();
             let ub = F128!(1.0 - self.preproc_out.unwrap());
-            let sol = Solution::new(lb, ub, self.start.elapsed().as_secs());
-            return sol
+            return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
         }
         if !is_lds {
             let sol = self.do_discrepancy_iteration(usize::MAX);
@@ -138,11 +125,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut complete_sol = None;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
-                if self.start.elapsed().as_secs() < self.timeout || complete_sol.as_ref().is_none() {
+                if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     solution.print();
                     complete_sol = Some(solution);
                 }
-                if self.start.elapsed().as_secs() >= self.timeout || complete_sol.as_ref().unwrap().has_converged(self.epsilon) {
+                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) {
                     self.statistics.print();
                     return complete_sol.unwrap()
                 }
@@ -166,7 +153,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             return Some(Solution::new(
                 F128!(0.0),
                 F128!(0.0),
-                self.start.elapsed().as_secs(),
+                self.parameters.start.elapsed().as_secs(),
             ));
         }
         self.preproc_in = Some(preproc.unwrap());
@@ -201,13 +188,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
-        let (result,_) = self.get_bounds_from_cache(ComponentIndex(0), (1.0+self.epsilon).powf(2.0), 1, discrepancy);
+        let (result,_) = self.get_bounds_from_cache(ComponentIndex(0), (1.0+self.parameters.epsilon).powf(2.0), 1, discrepancy);
         let p_in = result.bounds().0.clone();
         let p_out = result.bounds().1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
         let ub: Float =
         1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
-        Solution::new(lb, ub, self.start.elapsed().as_secs())
+        Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
     /// Retrieves the bounds of a sub-problem from the cache. If the sub-problem has never been
@@ -269,7 +256,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if self.problem[variable].is_fixed(&self.state) {
                     continue;
                 }
-                if self.start.elapsed().as_secs() >= self.timeout || child_id == discrepancy {
+                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || child_id == discrepancy {
                     break;
                 }
                 let v_weight = self.problem[variable].weight().unwrap();
@@ -284,7 +271,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             // The clause learning scheme tells us that we need to backtrack
                             // non-chronologically. There are no models in this sub-problem
                             self.restore();
-                            return (SearchCacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), FxHashMap::default()), backtrack_level);
+                            return (CacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), FxHashMap::default()), backtrack_level);
                         }
                     },
                     Ok(_) => {
@@ -310,7 +297,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         let mut prod_p_out = F128!(1.0);
                         let mut prod_maximum_probability = F128!(1.0);
 
-                        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.mlimit {
+                        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
                             self.cache.clear();
                         }
                         for child_distribution in self.component_extractor.component_distribution_iter(component) {
@@ -334,8 +321,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 // If the solver has no more time, assume that there are no solutions in the
                                 // remaining of the components. This way we always produce a valid lower/upper
                                 // bound.
-                                if self.start.elapsed().as_secs() >= self.timeout {
-                                    return (SearchCacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), children_map), level - 1);
+                                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout {
+                                    return (CacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), children_map), level - 1);
                                 }
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                                 let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level +1, new_discrepancy); // the function was called with level + 1 and level was given
@@ -343,7 +330,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                 if backtrack_level != level { // the function was called with level + 1 and level was used here
                                     // Or node is unsat
                                     self.restore();
-                                    return (SearchCacheEntry::new((F128!(0.0),
+                                    return (CacheEntry::new((F128!(0.0),
                                         F128!(maximum_probability)),
                                         usize::MAX,
                                         Some(distribution),
@@ -378,14 +365,14 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 self.restore();
                 child_id += 1;
             }
-            let cache_entry = SearchCacheEntry::new((p_in, p_out),
+            let cache_entry = CacheEntry::new((p_in, p_out),
                 discrepancy,
                 Some(distribution),
                 children_map,
             );
             (cache_entry, level - 1)
         } else {
-            (SearchCacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None, FxHashMap::default()), level - 1)
+            (CacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None, FxHashMap::default()), level - 1)
         }
     }
 }
@@ -423,13 +410,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut complete_ac = None;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
-                if self.start.elapsed().as_secs() < self.timeout || complete_sol.as_ref().is_none() {
+                if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     let epsilon = (solution.bounds().1/solution.bounds().0).sqrt()-1.0;
                     complete_ac = Some(self.build_ac(epsilon, &forced_by_propagation));
                     solution.print();
                     complete_sol = Some(solution);
                 }
-                if self.start.elapsed().as_secs() >= self.timeout || complete_sol.as_ref().unwrap().has_converged(self.epsilon) {
+                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) {
                     self.statistics.print();
                     complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
                     return complete_ac.unwrap();
@@ -572,30 +559,34 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct CacheChildren {
-    children_keys: Vec<CacheKey>,
-    forced_choices: Vec<DistributionChoice>,
-    unconstrained_distributions: Vec<UnconstrainedDistribution>,
+/// Parameters for the solving
+pub struct SolverParameters {
+    /// Memory limit for the solving, in megabytes. When reached, the cache is cleared. Note that
+    /// this parameter should not be used for compilation.
+    memory_limit: u64,
+    /// Approximation factor
+    epsilon: f64,
+    /// Time limit for the search
+    timeout: u64,
+    /// Time at which the solving started
+    start: Instant,
 }
 
-impl CacheChildren {
-    pub fn new(forced_choices: Vec<DistributionChoice>, unconstrained_distributions: Vec<UnconstrainedDistribution>) -> Self {
+impl SolverParameters {
+    pub fn new(memory_limit: u64, epsilon: f64, timeout: u64) -> Self {
         Self {
-            children_keys: vec![],
-            forced_choices,
-            unconstrained_distributions,
+            memory_limit,
+            epsilon,
+            timeout,
+            start: Instant::now(),
         }
     }
-
-    pub fn add_key(&mut self, key: CacheKey) {
-        self.children_keys.push(key);
-    }
 }
+
 /// An entry in the cache for the search. It contains the bounds computed when the sub-problem was
 /// explored as well as various informations used by the solvers.
 #[derive(Clone)]
-pub struct SearchCacheEntry {
+pub struct CacheEntry {
     /// The current bounds on the sub-problem
     bounds: Bounds,
     /// Maximum discrepancy used for that node
@@ -605,7 +596,7 @@ pub struct SearchCacheEntry {
     children: FxHashMap<VariableIndex, CacheChildren>,
 }
 
-impl SearchCacheEntry {
+impl CacheEntry {
 
     /// Returns a new cache entry
     pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>) -> Self {
@@ -654,5 +645,26 @@ impl SearchCacheEntry {
 
     pub fn child_keys(&self, variable: VariableIndex) -> Vec<CacheKey> {
         self.children.get(&variable).unwrap().children_keys.clone()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct CacheChildren {
+    children_keys: Vec<CacheKey>,
+    forced_choices: Vec<DistributionChoice>,
+    unconstrained_distributions: Vec<UnconstrainedDistribution>,
+}
+
+impl CacheChildren {
+    pub fn new(forced_choices: Vec<DistributionChoice>, unconstrained_distributions: Vec<UnconstrainedDistribution>) -> Self {
+        Self {
+            children_keys: vec![],
+            forced_choices,
+            unconstrained_distributions,
+        }
+    }
+
+    pub fn add_key(&mut self, key: CacheKey) {
+        self.children_keys.push(key);
     }
 }
