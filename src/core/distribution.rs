@@ -21,7 +21,7 @@
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
 use super::{problem::{ClauseIndex, VariableIndex}, sparse_set::SparseSet};
-use search_trail::{StateManager, ReversibleUsize, UsizeManager, ReversibleF64, F64Manager};
+use search_trail::{F64Manager, BoolManager, ReversibleBool, ReversibleF64, ReversibleUsize, StateManager, UsizeManager};
 use rustc_hash::FxHashMap;
 
 /// A distribution of the input problem
@@ -45,6 +45,7 @@ pub struct Distribution {
     branching_candidate: bool,
     /// Initial first variable of the distribution in the problem
     old_first: VariableIndex,
+    fixed: ReversibleBool,
 }
 
 impl Distribution {
@@ -59,6 +60,7 @@ impl Distribution {
             remaining: state.manage_f64(1.0),
             branching_candidate: true,
             old_first: first,
+            fixed: state.manage_bool(false),
         }
     }
 
@@ -148,6 +150,14 @@ impl Distribution {
 
     pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.clauses.clear(map, state);
+    }
+
+    pub fn set_fixed(&self, state: &mut StateManager) {
+        state.set_bool(self.fixed, true);
+    }
+
+    pub fn is_fixed(&self, state: &StateManager) -> bool {
+        state.get_bool(self.fixed)
     }
 
     // --- ITERATOR --- //
