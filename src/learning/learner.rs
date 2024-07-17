@@ -217,7 +217,7 @@ impl <const S: bool> Learner<S> {
                             // If the value of the child is 0, then the path value is simply 0
                             let mut val = F128!(0.0);
                             if self.train[query_id][child].value().to_f64() != 0.0 {
-                                val = path_val.clone() * &value / self.train[query_id][child].value().to_f64();
+                                val = path_val.clone() * value / self.train[query_id][child].value().to_f64();
                             }
                             self.train[query_id][child].add_to_path_value(val);
                         },

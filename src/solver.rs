@@ -119,7 +119,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if !is_lds {
             let sol = self.do_discrepancy_iteration(usize::MAX);
             self.statistics.print();
-            return sol
+            sol
         } else {
             let mut discrepancy = 1;
             let mut complete_sol = None;
@@ -408,7 +408,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let epsilon = (sol.bounds().1/sol.bounds().0).sqrt()-1.0;
             let mut ac = self.build_ac(epsilon, &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());
-            return ac
+            ac
         } else {
             let mut discrepancy = 1;
             let mut complete_sol = None;
@@ -431,7 +431,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }        
     }
 
-    pub fn build_ac<R: SemiRing>(&self, epsilon: f64, forced_by_propagation:&(Vec<(DistributionIndex, VariableIndex)>, Vec<(DistributionIndex, Vec<VariableIndex>)>)) -> Dac<R> {
+    pub fn build_ac<R: SemiRing>(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac<R> {
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {

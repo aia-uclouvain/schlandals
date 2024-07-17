@@ -154,10 +154,7 @@ fn main() {
            schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, unweighted);
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon, approx} => {
-            let e = match epsilon {
-                Some(v) => v,
-                None => 0.0,
-            };
+            let e = epsilon.unwrap_or(0.0);
             schlandals::compile(input, branching, fdac, dotfile, e, approx, timeout);
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 

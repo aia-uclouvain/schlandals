@@ -52,7 +52,7 @@ use peak_alloc::PeakAlloc;
 #[global_allocator]
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
-pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
+pub fn solve_from_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
     let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX }, epsilon, timeout);
     let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
     match solver {
@@ -101,14 +101,14 @@ fn _compile(compiler: GenericSolver, approx: ApproximateMethod, fdac: Option<Pat
     if let Some(f) = dotfile {
         let out = dac.as_graphviz();
         let mut outfile = File::create(f).unwrap();
-        match outfile.write(out.as_bytes()) {
+        match outfile.write_all(out.as_bytes()) {
             Ok(_) => (),
             Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
         }
     }
     if let Some(f) = fdac {
         let mut outfile = File::create(f).unwrap();
-        match outfile.write(format!("{}", dac).as_bytes()) {
+        match outfile.write_all(format!("{}", dac).as_bytes()) {
             Ok(_) => (),
             Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
         }
@@ -134,7 +134,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     solution.to_f64()
 }
 
-pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
+pub fn compile_from_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
     let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
     let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
     _compile(solver, approx, fdac, dotfile)
@@ -158,22 +158,22 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
-    let file = File::open(&trainfile).unwrap();
+    let file = File::open(trainfile).unwrap();
     let reader = BufReader::new(file);
     for line in reader.lines().skip(1) {
         let l = line.unwrap();
-        let mut split = l.split(",");
+        let mut split = l.split(',');
         inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
         expected.push(split.next().unwrap().parse::<f64>().unwrap());
     }
     let mut test_inputs = vec![];
     let mut test_expected: Vec<f64> = vec![];
     if let Some(testfile) = testfile {
-        let file = File::open(&testfile).unwrap();
+        let file = File::open(testfile).unwrap();
         let reader = BufReader::new(file);
         for line in reader.lines().skip(1) {
             let l = line.unwrap();
-            let mut split = l.split(",");
+            let mut split = l.split(',');
             test_inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
             test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
         }

@@ -33,12 +33,7 @@ impl<const B: bool> Logger<B> {
         let global_timestamp = chrono::Local::now();
 
         let outfile_train = if B{
-            let mut out_train = match outfolder {
-                Some(x) => {
-                    Some(File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
-                },
-                None => None,
-            };
+            let mut out_train = outfolder.map(|x| File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap());
             let mut output= "".to_string();
             output.push_str("epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
             for i in 0..ndacs_train {
@@ -54,12 +49,7 @@ impl<const B: bool> Logger<B> {
         };
 
         let outfile_test = if B && ndacs_test > 0 {
-            let mut out_test = match outfolder {
-                Some(x) => {
-                    Some(File::create(x.join(format!("test_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap())
-                },
-                None => None,
-            };
+            let mut out_test = outfolder.map(|x| File::create(x.join(format!("test_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap());
             let mut output= "".to_string();
             output.push_str("epsilon,avg_errror,"); //avg_distance,
             for i in 0..ndacs_test {
@@ -85,7 +75,7 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&Vec<f64>, lr: f64, epsilon:f64, predictions:&Vec<f64>) {
+    pub fn log_epoch(&mut self, loss:&[f64], lr: f64, epsilon:f64, predictions:&[f64]) {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
@@ -99,7 +89,8 @@ impl<const B: bool> Logger<B> {
             writeln!(self.outfile_train.as_mut().unwrap(), "{}", output).unwrap();
         }
     }
-    pub fn log_test(&mut self, loss:&Vec<f64>, epsilon:f64, predictions:&Vec<f64>) {
+
+    pub fn log_test(&mut self, loss:&[f64], epsilon:f64, predictions:&[f64]) {
         if B {
             let mut output = String::new();
             output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<f64>() / loss.len() as f64));
