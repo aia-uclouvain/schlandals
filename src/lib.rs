@@ -61,9 +61,9 @@ pub fn solve_from_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], br
     }
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) -> f64 {
+pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> f64 {
     let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX}, epsilon, timeout);
-    let solver = make_solver!(&input, branching, parameters, statistics, unweighted);
+    let solver = make_solver!(&input, branching, parameters, statistics);
     let solution = match approx {
         ApproximateMethod::Bounds => {
             match solver {
@@ -121,7 +121,7 @@ pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotf
     let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
     let solution = match type_of_input(&input) {
         FileType::CNF => {
-            let compiler = make_solver!(&input, branching, parameters, false, false);
+            let compiler = make_solver!(&input, branching, parameters, false);
             _compile(compiler, approx, fdac, dotfile)
         },
         FileType::FDAC => {
@@ -228,11 +228,11 @@ macro_rules! solver_from_problem {
 use solver_from_problem;
 
 macro_rules! make_solver {
-    ($i:expr, $b:expr, $p:expr, $s:expr, $u: expr) => {
+    ($i:expr, $b:expr, $p:expr, $s:expr) => {
         {
             let mut state = StateManager::default();
             let propagator = Propagator::new(&mut state);
-            let problem = problem_from_cnf($i, &mut state, false, $u);
+            let problem = problem_from_cnf($i, &mut state, false);
             let component_extractor = ComponentExtractor::new(&problem, &mut state);
             generic_solver(problem, state, component_extractor, $b, propagator, $p, $s)
         }

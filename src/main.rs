@@ -51,8 +51,6 @@ enum Command {
         /// If epsilon present, use the appropriate approximate method
         #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
         approx: ApproximateMethod,
-        #[clap(short, long, action)]
-        unweighted: bool,
     },
     /// Use the DPLL-search structure to produce an arithmetic circuit for the problem
     Compile {
@@ -150,8 +148,8 @@ fn main() {
         None => u64::MAX,
     };
     match app.command {
-        Command::Search { input, branching, statistics, memory , epsilon, approx, unweighted} => {
-           schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout, unweighted);
+        Command::Search { input, branching, statistics, memory , epsilon, approx} => {
+           schlandals::search(input, branching, statistics, memory, epsilon, approx, timeout);
         },
         Command::Compile { input, branching, fdac, dotfile, epsilon, approx} => {
             let e = epsilon.unwrap_or(0.0);

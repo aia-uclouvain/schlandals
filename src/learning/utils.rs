@@ -51,7 +51,7 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                 println!("Compiling {}", input.to_str().unwrap());
                 // The input is a CNF file, we need to compile it from scratch
                 let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
-                let compiler = make_solver!(&input, branching, parameters, false, false);
+                let compiler = make_solver!(&input, branching, parameters, false);
                 match approx {
                     ApproximateMethod::Bounds => {
                         match compiler {
