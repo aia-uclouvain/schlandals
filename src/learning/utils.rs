@@ -15,19 +15,19 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use rug::Float;
-use std::path::PathBuf;
 use rayon::prelude::*;
 use crate::Branching;
 use search_trail::StateManager;
 use crate::core::components::ComponentExtractor;
 use crate::propagator::Propagator;
-use crate::parser::*;
+use crate::parsers::*;
 use crate::common::F128;
 use crate::ac::ac::Dac;
 use crate::semiring::SemiRing;
 use crate::ApproximateMethod;
-use crate::{generic_solver, make_solver};
+use crate::generic_solver;
 use crate::solver::SolverParameters;
+use crate::CsvInput;
 
 /// Calculates the softmax (the normalized exponential) function, which is a generalization of the
 /// logistic function to multiple dimensions.
@@ -42,16 +42,19 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
-    inputs.par_iter().map(|input| {
+pub fn generate_dacs<R: SemiRing>(inputs: Vec<CsvInput>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+    inputs.par_iter().map(|(input, evidence)| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
         match type_of_input(input) {
-            FileType::CNF => {
-                println!("Compiling {}", input.to_str().unwrap());
+            FileType::Cnf | FileType::Uai => {
                 // The input is a CNF file, we need to compile it from scratch
                 let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
-                let compiler = make_solver!(&input, branching, parameters, false);
+                let mut state = StateManager::default();
+                let propagator = Propagator::new(&mut state);
+                let problem = problem_from_input(input, evidence, &mut state);
+                let component_extractor = ComponentExtractor::new(&problem, &mut state);
+                let compiler = generic_solver(problem, state, component_extractor, branching, propagator, parameters, false);
                 match approx {
                     ApproximateMethod::Bounds => {
                         match compiler {
@@ -68,11 +71,12 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                     
                 }
             },
-            FileType::FDAC => {
+            FileType::Ac => {
                 println!("Reading {}", input.to_str().unwrap());
                 // The query has already been compiled, we just read from the file.
                 Dac::from_file(input)
-            }
+            },
+            _ => panic!("Filetype not handled"),
         }
     }).collect::<Vec<_>>()
 }

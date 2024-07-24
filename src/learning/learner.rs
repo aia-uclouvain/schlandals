@@ -37,7 +37,7 @@ use std::time::{Instant, Duration};
 use crate::ac::ac::*;
 use crate::ac::node::NodeType;
 use super::logger::Logger;
-use crate::{parser::*, ApproximateMethod};
+use crate::{parsers::cnf::*, ApproximateMethod};
 use crate::Branching;
 use rayon::prelude::*;
 use super::Learning;
@@ -45,6 +45,7 @@ use crate::common::F128;
 use super::utils::*;
 use super::*;
 use rug::{Assign, Float};
+use crate::CsvInput;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -64,12 +65,12 @@ pub struct Learner<const S: bool> {
 impl <const S: bool> Learner<S> {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
+    pub fn new(inputs: Vec<CsvInput>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<CsvInput>, mut expected_test: Vec<f64>) -> Self {
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
         // Retrieves the distributions values and computes their unsoftmaxed values
         // and initializes the gradients to 0
-        let distributions = distributions_from_cnf(&inputs[0]);
+        let distributions = distributions_from_cnf(&inputs[0].0);
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
         for distribution in distributions.iter() {
@@ -78,7 +79,7 @@ impl <const S: bool> Learner<S> {
             grads.push(vec![F128!(0.0); distribution.len()]);
         }
         // Retrieves which distributions are learned
-        let learned_distributions = learned_distributions_from_cnf(&inputs[0]);
+        let learned_distributions = learned_distributions_from_cnf(&inputs[0].0);
 
         // Compiling the train and test queries into arithmetic circuits
         let mut train_dacs = generate_dacs(inputs, branching, epsilon, approx, compile_timeout);

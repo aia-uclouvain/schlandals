@@ -70,6 +70,7 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     preproc_out: Option<f64>,
     /// Parameters of the solving
     parameters: SolverParameters,
+    cache_keys: Vec<CacheKey>,
 }
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
@@ -92,6 +93,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             preproc_in: None,
             preproc_out: None,
             parameters,
+            cache_keys: vec![],
         }
     }
 
@@ -207,6 +209,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             None => {
                 self.statistics.cache_miss();
                 let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, None);
+                self.cache_keys.push(cache_key.clone());
                 self.cache.insert(cache_key, solution.clone());
                 (solution, backtrack_level)
             },

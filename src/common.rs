@@ -87,7 +87,7 @@ impl CacheKey {
     pub fn new(hash: u64, repr: Bitvec) -> Self {
         Self {
             hash,
-            repr
+            repr,
         }
     }
 }
