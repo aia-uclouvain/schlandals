@@ -14,9 +14,10 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::create_problem;
+use super::{create_problem, evidence_from_os_string};
 use crate::core::problem::Problem;
 use search_trail::StateManager;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -65,7 +66,7 @@ fn parent_values_from_domain(domains: Vec<usize>) -> Vec<Vec<usize>> {
     values
 }
 
-pub fn problem_from_uai(filepath: &PathBuf, evidence: &PathBuf, state: &mut StateManager) -> Problem {
+pub fn problem_from_uai(filepath: &PathBuf, evidence: &OsString, state: &mut StateManager) -> Problem {
     let file = File::open(filepath).unwrap();
     let reader = BufReader::new(&file);
     // Loading the content of the file. The file is loaded in a single String in which new line
@@ -172,9 +173,7 @@ pub fn problem_from_uai(filepath: &PathBuf, evidence: &PathBuf, state: &mut Stat
     }
     let mut clauses = clauses.iter().map(|c| c.to_cnf(variable_index - 1)).collect::<Vec<Vec<isize>>>();
 
-    let file = File::open(evidence).unwrap();
-    let reader = BufReader::new(&file);
-    let content = reader.lines().map(|l| l.unwrap()).collect::<Vec<String>>().join(" ");
+    let content = evidence_from_os_string(evidence);
     let content = content.split_whitespace().map(|x| x.parse::<usize>().unwrap()).collect::<Vec<usize>>();
     let number_evidence = content[0];
     let mut content_index = 1;

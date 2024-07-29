@@ -15,16 +15,14 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use schlandals::Args;
+use schlandals::Command;
 use clap::Parser;
 
 fn main() {
     let args = Args::parse();
-    if args.compile {
-        schlandals::compile(args);
-    } else if args.learn {
-        schlandals::learn(args);
-
-    } else {
-        schlandals::search(args);
-    }
+    match args.subcommand {
+        Some(Command::Compile { .. }) => { schlandals::compile(args); },
+        Some(Command::Learn { .. }) => { schlandals::learn(args); },
+        None => {schlandals::search(args); },
+    };
 }

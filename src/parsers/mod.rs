@@ -21,8 +21,9 @@ pub mod pg;
 use crate::core::problem::{Problem, VariableIndex};
 use crate::core::literal::Literal;
 use search_trail::StateManager;
+use std::ffi::OsString;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::io::{BufRead, BufReader};
 
 use cnf::problem_from_cnf;
@@ -59,12 +60,27 @@ pub fn type_of_input(filepath: &PathBuf) -> FileType {
     }
 }
 
-pub fn problem_from_input(filepath: &PathBuf, evidence: &Option<PathBuf>, state: &mut StateManager) -> Problem {
+pub fn problem_from_input(filepath: &PathBuf, evidence: &Option<OsString>, state: &mut StateManager) -> Problem {
     match type_of_input(filepath) {
         FileType::Cnf => problem_from_cnf(filepath, state),
         FileType::Uai => problem_from_uai(filepath, evidence.as_ref().unwrap(), state),
         FileType::Pg => problem_from_pg(filepath, evidence.as_ref().unwrap(), state),
         FileType::Ac => panic!("AC file type not handled as input"),
+    }
+}
+
+pub fn evidence_from_os_string(evidence: &OsString) -> String {
+    match Path::new(evidence).try_exists() {
+        Ok(v) => {
+            if v {
+                let file = File::open(evidence).unwrap();
+                let reader = BufReader::new(&file);
+                reader.lines().map(|l| l.unwrap()).collect::<Vec<String>>().join(" ")
+            } else {
+                evidence.to_str().unwrap().to_string()
+            }
+        },
+        Err(e) => panic!("Error while checking if evidence file exists or not: {}", e),
     }
 }
 

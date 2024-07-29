@@ -27,11 +27,12 @@ pub mod learning;
 pub mod ac;
 mod semiring;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Write, BufRead, BufReader};
 use rug::Float;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use learning::{Learning, learner::Learner, LearnParameters};
 use ac::ac::Dac;
@@ -59,8 +60,8 @@ pub struct Args {
     #[clap(short, long, value_parser)]
     input: PathBuf,
     /// Evidence file, containing the query
-    #[clap(long, value_parser)]
-    evidence: Option<PathBuf>,
+    #[clap(long)]
+    evidence: Option<OsString>,
     #[clap(long,short, default_value_t=u64::MAX)]
     timeout: u64,
     /// How to branch
@@ -78,69 +79,73 @@ pub struct Args {
     /// If epsilon present, use the appropriate approximate method
     #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
     approx: ApproximateMethod,
-    /// Should the probleme be compiled into an arithmetic circuit
-    #[clap(long, action)]
-    pub compile: bool,
-    /// If the problem is compiled, store it in this file
-    #[clap(long)]
-    fdac: Option<PathBuf>,
-    /// If the problem is compiled, store a DOT graphical representation in this file
-    #[clap(long)]
-    dotfile: Option<PathBuf>,
-    /// If present, the probabilities are learned using gradient descent.
-    #[clap(long, action)]
-    pub learn: bool,
-    /// The csv file containing the test filenames and the associated expected output
-    #[clap(long, value_parser, value_delimiter=' ')]
-    testfile: Option<PathBuf>,
-    /// If present, folder in which to store the output files of the learning
-    #[clap(long)]
-    outfolder: Option<PathBuf>,
-    /// Learning rate
-    #[clap(short, long, default_value_t=0.3)]
-    lr: f64,
-    /// Number of epochs
-    #[clap(long, default_value_t=6000)]
-    nepochs: usize,
-    /// If present, save a detailled csv of the training and use a codified output filename
-    #[clap(long, short, action)]
-    do_log: bool,
-    /// If present, define the learning timeout
-    #[clap(long, default_value_t=u64::MAX)]
-    ltimeout: u64,
-    /// Loss to use for the training, default is the MAE
-    /// Possible values: MAE, MSE
-    #[clap(long, default_value_t=Loss::MAE, value_enum)]
-    loss: Loss, 
-    /// Number of threads to use for the evaluation of the DACs
-    #[clap(long, default_value_t=1, short)]
-    jobs: usize,
-    /// The semiring on which to evaluate the circuits. If `tensor`, use torch
-    /// to compute the gradients. If `probability`, use custom efficient backpropagations
-    #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
-    semiring: Semiring,
-    /// The optimizer to use if `tensor` is selected as semiring
-    #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
-    optimizer: Optimizer,
-    /// The drop in the learning rate to apply at each step
-    #[clap(long, default_value_t=0.75)]
-    lr_drop: f64,
-    /// The number of epochs after which to drop the learning rate
-    /// (i.e. the learning rate is multiplied by `lr_drop`)
-    #[clap(long, default_value_t=100)]
-    epoch_drop: usize,
-    /// The stopping criterion for the training
-    /// (i.e. if the loss is below this value, stop the training)
-    #[clap(long, default_value_t=0.0001)]
-    early_stop_threshold: f64,
-    /// The minimum of improvement in the loss to consider that the training is still improving
-    /// (i.e. if the loss is below this value for a number of epochs, stop the training)
-    #[clap(long, default_value_t=0.00001)]
-    early_stop_delta: f64,
-    /// The number of epochs to wait before stopping the training if the loss is not improving
-    /// (i.e. if the loss is below this value for a number of epochs, stop the training)
-    #[clap(long, default_value_t=5)]
-    patience: usize,
+    #[clap(subcommand)]
+    pub subcommand: Option<Command>,
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    Compile {
+        /// If the problem is compiled, store it in this file
+        #[clap(long)]
+        fdac: Option<PathBuf>,
+        /// If the problem is compiled, store a DOT graphical representation in this file
+        #[clap(long)]
+        dotfile: Option<PathBuf>,
+    },
+    Learn {
+        /// The csv file containing the test filenames and the associated expected output
+        #[clap(long, value_parser, value_delimiter=' ')]
+        testfile: Option<PathBuf>,
+        /// If present, folder in which to store the output files of the learning
+        #[clap(long)]
+        outfolder: Option<PathBuf>,
+        /// Learning rate
+        #[clap(short, long, default_value_t=0.3)]
+        lr: f64,
+        /// Number of epochs
+        #[clap(long, default_value_t=6000)]
+        nepochs: usize,
+        /// If present, save a detailled csv of the training and use a codified output filename
+        #[clap(long, short, action)]
+        do_log: bool,
+        /// If present, define the learning timeout
+        #[clap(long, default_value_t=u64::MAX)]
+        ltimeout: u64,
+        /// Loss to use for the training, default is the MAE
+        /// Possible values: MAE, MSE
+        #[clap(long, default_value_t=Loss::MAE, value_enum)]
+        loss: Loss, 
+        /// Number of threads to use for the evaluation of the DACs
+        #[clap(long, default_value_t=1, short)]
+        jobs: usize,
+        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
+        /// to compute the gradients. If `probability`, use custom efficient backpropagations
+        #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
+        semiring: Semiring,
+        /// The optimizer to use if `tensor` is selected as semiring
+        #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
+        optimizer: Optimizer,
+        /// The drop in the learning rate to apply at each step
+        #[clap(long, default_value_t=0.75)]
+        lr_drop: f64,
+        /// The number of epochs after which to drop the learning rate
+        /// (i.e. the learning rate is multiplied by `lr_drop`)
+        #[clap(long, default_value_t=100)]
+        epoch_drop: usize,
+        /// The stopping criterion for the training
+        /// (i.e. if the loss is below this value, stop the training)
+        #[clap(long, default_value_t=0.0001)]
+        early_stop_threshold: f64,
+        /// The minimum of improvement in the loss to consider that the training is still improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=0.00001)]
+        early_stop_delta: f64,
+        /// The number of epochs to wait before stopping the training if the loss is not improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=5)]
+        patience: usize,
+    },
 }
 
 impl Args {
@@ -198,28 +203,30 @@ pub fn compile(args: Args) -> f64 {
             }
         },
     };
-    if let Some(f) = args.dotfile {
-        let out = ac.as_graphviz();
-        let mut outfile = File::create(f).unwrap();
-        match outfile.write_all(out.as_bytes()) {
-            Ok(_) => (),
-            Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+    if let Some(Command::Compile { fdac, dotfile }) = args.subcommand {
+        if let Some(f) = dotfile {
+            let out = ac.as_graphviz();
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write_all(out.as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+            }
         }
-    }
-    if let Some(f) = args.fdac {
-        let mut outfile = File::create(f).unwrap();
-        match outfile.write_all(format!("{}", ac).as_bytes()) {
-            Ok(_) => (),
-            Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+        if let Some(f) = fdac {
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write_all(format!("{}", ac).as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+            }
+            
         }
-        
     }
     let solution = ac.solution();
     solution.print();
     solution.to_f64()
 }
 
-pub type CsvInput = (PathBuf, Option<PathBuf>);
+pub type CsvInput = (PathBuf, Option<OsString>);
 
 pub fn make_learner(inputs: Vec<CsvInput>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<CsvInput>, test_expected:Vec<f64>) -> Box<dyn Learning> {
     match semiring {
@@ -242,7 +249,7 @@ fn parse_csv(filename: PathBuf) -> (Vec<CsvInput>, Vec<f64>) {
         let l = line.unwrap();
         let split = l.split(',').collect::<Vec<&str>>();
         if split.len() == 3 {
-            inputs.push((split[0].parse::<PathBuf>().unwrap(), Some(split[1].parse::<PathBuf>().unwrap())));
+            inputs.push((split[0].parse::<PathBuf>().unwrap(), Some(split[1].parse::<OsString>().unwrap())));
             expected.push(split[2].parse::<f64>().unwrap());
         } else {
             inputs.push((split[0].parse::<PathBuf>().unwrap(), None));
@@ -253,23 +260,39 @@ fn parse_csv(filename: PathBuf) -> (Vec<CsvInput>, Vec<f64>) {
 }
 
 pub fn learn(args: Args) {
-    let (inputs, expected) = parse_csv(args.input);
-    let (test_inputs, test_expected) = if let Some(testfile) = args.testfile { parse_csv(testfile) } else { (vec![], vec![]) };
-    let params = LearnParameters::new(
-        args.lr,
-        args.nepochs,
-        args.timeout,
-        args.ltimeout,
-        args.loss,
-        args.optimizer,
-        args.lr_drop,
-        args.epoch_drop,
-        args.early_stop_threshold,
-        args.early_stop_delta,
-        args.patience,
-    );
-    let mut learner = make_learner(inputs, expected, args.epsilon, args.approx, args.branching, args.outfolder, args.jobs, args.do_log, args.semiring, &params, test_inputs, test_expected);
-    learner.train(&params);
+    if let Some(Command::Learn { testfile,
+                    outfolder,
+                    lr,
+                    nepochs,
+                    do_log,
+                    ltimeout,
+                    loss,
+                    jobs,
+                    semiring,
+                    optimizer,
+                    lr_drop,
+                    epoch_drop,
+                    early_stop_threshold,
+                    early_stop_delta,
+                    patience, }) = args.subcommand {
+        let (inputs, expected) = parse_csv(args.input);
+        let (test_inputs, test_expected) = if let Some(testfile) = testfile { parse_csv(testfile) } else { (vec![], vec![]) };
+        let params = LearnParameters::new(
+            lr,
+            nepochs,
+            args.timeout,
+            ltimeout,
+            loss,
+            optimizer,
+            lr_drop,
+            epoch_drop,
+            early_stop_threshold,
+            early_stop_delta,
+            patience,
+        );
+        let mut learner = make_learner(inputs, expected, args.epsilon, args.approx, args.branching, outfolder, jobs, do_log, semiring, &params, test_inputs, test_expected);
+        learner.train(&params);
+    }
 }
 
 impl std::fmt::Display for Loss {
