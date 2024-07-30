@@ -34,7 +34,7 @@ use std::io::{Write, BufRead, BufReader};
 use rug::Float;
 use clap::{Parser, Subcommand};
 
-use learning::{Learning, learner::Learner, LearnParameters};
+use learning::{learner::Learner, LearnParameters};
 use ac::ac::Dac;
 use search_trail::StateManager;
 
@@ -60,7 +60,7 @@ pub struct Args {
     #[clap(short, long, value_parser)]
     input: PathBuf,
     /// Evidence file, containing the query
-    #[clap(long)]
+    #[clap(long, required=false)]
     evidence: Option<OsString>,
     #[clap(long,short, default_value_t=u64::MAX)]
     timeout: u64,
@@ -94,6 +94,8 @@ pub enum Command {
         dotfile: Option<PathBuf>,
     },
     Learn {
+        #[clap(long, value_parser, value_delimiter=' ')]
+        trainfile: PathBuf,
         /// The csv file containing the test filenames and the associated expected output
         #[clap(long, value_parser, value_delimiter=' ')]
         testfile: Option<PathBuf>,
@@ -159,7 +161,8 @@ pub fn search(args: Args) -> f64 {
     let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
-    let problem = problem_from_input(&args.input, &args.evidence, &mut state);
+    let parser = parser_from_input(args.input.clone(), args.evidence.clone());
+    let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
 
@@ -185,7 +188,8 @@ pub fn compile(args: Args) -> f64 {
     let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
-    let problem = problem_from_input(&args.input, &args.evidence, &mut state);
+    let parser = parser_from_input(args.input.clone(), args.evidence.clone());
+    let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
 
@@ -226,57 +230,35 @@ pub fn compile(args: Args) -> f64 {
     solution.to_f64()
 }
 
-pub type CsvInput = (PathBuf, Option<OsString>);
-
-pub fn make_learner(inputs: Vec<CsvInput>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<CsvInput>, test_expected:Vec<f64>) -> Box<dyn Learning> {
-    match semiring {
-        Semiring::Probability => {
-            if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
-            } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
-            }
-        },
-    }
-}
-
-fn parse_csv(filename: PathBuf) -> (Vec<CsvInput>, Vec<f64>) {
-    let mut inputs: Vec<CsvInput> = vec![];
-    let mut expected: Vec<f64> = vec![];
+pub fn parse_csv(filename: PathBuf) -> Vec<(OsString, f64)> {
+    let mut ret: Vec<(OsString, f64)> = vec![];
     let file = File::open(filename).unwrap();
     let reader = BufReader::new(file);
     for line in reader.lines().skip(1) {
         let l = line.unwrap();
         let split = l.split(',').collect::<Vec<&str>>();
-        if split.len() == 3 {
-            inputs.push((split[0].parse::<PathBuf>().unwrap(), Some(split[1].parse::<OsString>().unwrap())));
-            expected.push(split[2].parse::<f64>().unwrap());
-        } else {
-            inputs.push((split[0].parse::<PathBuf>().unwrap(), None));
-            expected.push(split[1].parse::<f64>().unwrap());
-        }
+        ret.push((split[0].parse::<OsString>().unwrap(), split[1].parse::<f64>().unwrap()));
     }
-    (inputs, expected)
+    ret
 }
 
 pub fn learn(args: Args) {
-    if let Some(Command::Learn { testfile,
-                    outfolder,
+    if let Some(Command::Learn { trainfile: _,
+                    testfile: _,
+                    outfolder: _,
                     lr,
                     nepochs,
                     do_log,
                     ltimeout,
                     loss,
-                    jobs,
-                    semiring,
+                    jobs: _,
+                    semiring: _,
                     optimizer,
                     lr_drop,
                     epoch_drop,
                     early_stop_threshold,
                     early_stop_delta,
                     patience, }) = args.subcommand {
-        let (inputs, expected) = parse_csv(args.input);
-        let (test_inputs, test_expected) = if let Some(testfile) = testfile { parse_csv(testfile) } else { (vec![], vec![]) };
         let params = LearnParameters::new(
             lr,
             nepochs,
@@ -290,8 +272,13 @@ pub fn learn(args: Args) {
             early_stop_delta,
             patience,
         );
-        let mut learner = make_learner(inputs, expected, args.epsilon, args.approx, args.branching, outfolder, jobs, do_log, semiring, &params, test_inputs, test_expected);
-        learner.train(&params);
+        if do_log {
+            let mut learner = Learner::<true>::new(args.input.clone(), args);
+            learner.train(&params);
+        } else {
+            let mut learner = Learner::<false>::new(args.input.clone(), args);
+            learner.train(&params);
+        };
     }
 }
 

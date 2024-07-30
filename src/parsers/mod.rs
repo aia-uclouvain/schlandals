@@ -26,21 +26,19 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::io::{BufRead, BufReader};
 
-use cnf::problem_from_cnf;
-use uai::problem_from_uai;
-use pg::problem_from_pg;
+use cnf::*;
+use uai::*;
+use pg::*;
 
-pub enum FileType {
-    Cnf,
-    Ac,
-    Uai,
-    Pg,
+pub trait Parser {
+    fn problem_from_file(&self, state: &mut StateManager) -> Problem;
+    fn distributions_from_file(&self) -> Vec<Vec<f64>>;
 }
 
-pub fn type_of_input(filepath: &PathBuf) -> FileType {
+pub fn parser_from_input(filepath: PathBuf, evidence: Option<OsString>) -> Box<dyn Parser + 'static > {
     let mut header = String::new();
     {
-        let file = File::open(filepath).unwrap();
+        let file = File::open(&filepath).unwrap();
         let mut reader = BufReader::new(&file);
         match reader.read_line(&mut header) {
             Ok(_) => {},
@@ -48,24 +46,13 @@ pub fn type_of_input(filepath: &PathBuf) -> FileType {
         };
     }
     if header.starts_with("p cnf") {
-        FileType::Cnf
-    } else if header.starts_with("outputs") {
-        FileType::Ac
+        Box::new(CnfParser::new(filepath, evidence.unwrap_or(OsString::default())))
     } else if header.starts_with("BAYES") {
-        FileType::Uai
+        Box::new(UaiParser::new(filepath, evidence.unwrap()))
     } else if header.starts_with("DIRECTED") || header.starts_with("UNDIRECTED") {
-        FileType::Pg
+        Box::new(PgParser::new(filepath, evidence.unwrap()))
     } else {
         panic!("Unexpected file format to read from. Header does not match .cnf or .fdac file: {}", header);
-    }
-}
-
-pub fn problem_from_input(filepath: &PathBuf, evidence: &Option<OsString>, state: &mut StateManager) -> Problem {
-    match type_of_input(filepath) {
-        FileType::Cnf => problem_from_cnf(filepath, state),
-        FileType::Uai => problem_from_uai(filepath, evidence.as_ref().unwrap(), state),
-        FileType::Pg => problem_from_pg(filepath, evidence.as_ref().unwrap(), state),
-        FileType::Ac => panic!("AC file type not handled as input"),
     }
 }
 

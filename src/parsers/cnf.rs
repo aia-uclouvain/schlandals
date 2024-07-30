@@ -42,80 +42,76 @@
 //!        variable appearing in the implicant must be negated.
 //!     2. The head of the implications can not be a probabilistic variable
 
-use super::create_problem;
+use super::*;
 use crate::core::problem::Problem;
 use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+pub struct CnfParser {
+    input: PathBuf,
+    evidence: OsString,
+}
 
-pub fn problem_from_cnf(
-    filepath: &PathBuf,
-    state: &mut StateManager,
-) -> Problem {
-    // First pass to get the distributions
-    let distributions = distributions_from_cnf(filepath);
-    // Second pass to parse the clauses
-    let mut clauses: Vec<Vec<isize>> = vec![];
-    let file = File::open(filepath).unwrap();
-    let reader = BufReader::new(file);
-    for l in reader.lines() {
-        match l {
-            Err(e) => panic!("Problem while reading file: {}", e),
-            Ok(line) => {
-                if !line.starts_with('c') && !line.starts_with('p') {
-                    // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
-                    for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
-                        clauses.push(clause.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect());
+impl CnfParser {
+
+    pub fn new(input: PathBuf, evidence: OsString) -> Self {
+        Self { input, evidence }
+    }
+}
+
+impl Parser for CnfParser {
+
+    fn problem_from_file(&self, state: &mut StateManager) -> Problem {
+        // First pass to get the distributions
+        let distributions = self.distributions_from_file();
+        // Second pass to parse the clauses
+        let mut clauses: Vec<Vec<isize>> = vec![];
+        let file = File::open(&self.input).unwrap();
+        let reader = BufReader::new(file);
+        for l in reader.lines() {
+            match l {
+                Err(e) => panic!("Problem while reading file: {}", e),
+                Ok(line) => {
+                    if !line.starts_with('c') && !line.starts_with('p') {
+                        // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
+                        for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                            clauses.push(clause.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect());
+                        }
                     }
                 }
             }
         }
-    }
-    create_problem(&distributions, &clauses, state)
-}
-
-pub fn distributions_from_cnf(filepath: &PathBuf) -> Vec<Vec<f64>> {
-    let mut distributions: Vec<Vec<f64>> = vec![];
-    let file = File::open(filepath).unwrap();
-    let reader = BufReader::new(&file);
-    for l in reader.lines() {
-        match l {
-            Err(e) => panic!("Problem while parsing the distributions: {}", e),
-            Ok(line) => {
-                if line.starts_with("c p distribution") {
-                    let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
-                    distributions.push(weights);
-                }
+        let content = evidence_from_os_string(&self.evidence);
+        let content = content.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect::<Vec<isize>>();
+        let mut clause: Vec<isize> = vec![];
+        for literal in content.iter().copied() {
+            if literal == 0 {
+                clauses.push(clause.clone());
+                clause.clear();
+            } else {
+                clause.push(literal);
             }
         }
+        create_problem(&distributions, &clauses, state)
     }
-    distributions
-}
 
-pub fn learned_distributions_from_cnf(filepath: &PathBuf) -> Vec<bool> {
-    let mut number_distributions = 0;
-    let mut learned_distributions: Vec<usize> = vec![];
-    let file = File::open(filepath).unwrap();
-    let reader = BufReader::new(&file);
-    for l in reader.lines() {
-        match l {
-            Err(e) => panic!("Problem while parsing the learned distributions: {}", e),
-            Ok(line) => {
-                if line.starts_with("c p distribution") {
-                    number_distributions += 1;
-                } else if line.starts_with("c p learn") {
-                    for d in line.split_whitespace().skip(3).map(|s| s.parse::<usize>().unwrap() - 1) {
-                        learned_distributions.push(d);
+    fn distributions_from_file(&self) -> Vec<Vec<f64>> {
+        let mut distributions: Vec<Vec<f64>> = vec![];
+        let file = File::open(&self.input).unwrap();
+        let reader = BufReader::new(&file);
+        for l in reader.lines() {
+            match l {
+                Err(e) => panic!("Problem while parsing the distributions: {}", e),
+                Ok(line) => {
+                    if line.starts_with("c p distribution") {
+                        let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
+                        distributions.push(weights);
                     }
                 }
             }
         }
+        distributions
     }
-    let mut flags = if learned_distributions.is_empty() {vec![true; number_distributions]} else {vec![false; number_distributions]};
-    for x in learned_distributions {
-        flags[x] = true;
-    }
-    flags
 }

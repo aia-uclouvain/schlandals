@@ -17,14 +17,7 @@
 use crate::{Loss, Optimizer};
 
 pub mod learner;
-#[cfg(feature = "tensor")]
-pub mod tensor_learner;
-mod utils;
 mod logger;
-
-pub trait Learning {
-    fn train(& mut self, params:&LearnParameters);
-}
 
 pub struct LearnParameters {
     /// The initial learning rate
