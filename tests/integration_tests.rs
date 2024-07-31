@@ -1,8 +1,5 @@
 #![allow(non_snake_case)]
 use schlandals::*;
-use schlandals::common::Branching::*;
-use schlandals::common::ApproximateMethod::*;
-use schlandals::ac::ac::Dac;
 
 use std::path::PathBuf;
 
@@ -13,15 +10,18 @@ macro_rules! test_input_with_branching {
         paste!{
             #[test]
             fn [<search_ $b _ $name>]() {
-                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = search(PathBuf::from(filename), $b, false, None, 0.0, Bounds, u64::MAX, false);
+                let mut args = Args::default();
+                args.input = PathBuf::from(format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name)));
+                let sol = search(args);
                 assert!(($value - sol).abs() < 0.000001);
             }
             
             #[test]
             fn [<compile_ $b _ $name>]() {
-                let filename = format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name));
-                let sol = compile(PathBuf::from(filename), $b, None, None, 0.0, Bounds, u64::MAX);
+                let mut args = Args::default();
+                args.input = PathBuf::from(format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name)));
+                args.subcommand = Some(Command::Compile{ fdac: None, dotfile: None });
+                let sol = compile(args);
                 assert!(($value - sol).abs() < 0.000001);
             }
 

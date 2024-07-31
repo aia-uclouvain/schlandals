@@ -58,29 +58,45 @@ pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 pub struct Args {
     /// The input file
     #[clap(short, long, value_parser)]
-    input: PathBuf,
+    pub input: PathBuf,
     /// Evidence file, containing the query
     #[clap(long, required=false)]
-    evidence: Option<OsString>,
+    pub evidence: Option<OsString>,
     #[clap(long,short, default_value_t=u64::MAX)]
-    timeout: u64,
+    pub timeout: u64,
     /// How to branch
     #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
-    branching: Branching,
+    pub branching: Branching,
     /// Collect stats during the search, default no
     #[clap(long, action)]
-    statistics: bool,
+    pub statistics: bool,
     /// The memory limit, in mega-bytes
     #[clap(short, long, default_value_t=u64::MAX)]
-    memory: u64,
+    pub memory: u64,
     /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
     #[clap(short, long, default_value_t=0.0)]
-    epsilon: f64,
+    pub epsilon: f64,
     /// If epsilon present, use the appropriate approximate method
     #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
-    approx: ApproximateMethod,
+    pub approx: ApproximateMethod,
     #[clap(subcommand)]
     pub subcommand: Option<Command>,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            input: PathBuf::default(),
+            evidence: None,
+            timeout: u64::MAX,
+            branching: Branching::MinInDegree,
+            statistics: false,
+            memory: u64::MAX,
+            epsilon: 0.0,
+            approx: ApproximateMethod::LDS,
+            subcommand: None,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -193,7 +209,7 @@ pub fn compile(args: Args) -> f64 {
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
 
-    let ac: Dac<Float> = match args.approx {
+    let mut ac: Dac<Float> = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
                 GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
@@ -207,6 +223,7 @@ pub fn compile(args: Args) -> f64 {
             }
         },
     };
+    ac.evaluate();
     if let Some(Command::Compile { fdac, dotfile }) = args.subcommand {
         if let Some(f) = dotfile {
             let out = ac.as_graphviz();
