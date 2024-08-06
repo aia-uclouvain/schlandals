@@ -8,7 +8,7 @@ Hence, the compilation mode should only be used if you actually need the compile
 The compilation can be run using the following command
 
 ```bash
-schlandals compile -i model.cnf
+schlandals compile -i model.cnf compile
 Estimated probability 1.3542085e-2 with bounds [1.3542085e-2 1.3542085e-2] found in 4 seconds
 ```
 This command executes the search, compile the arithmetic circuit from the cache, and evaluates it.
@@ -17,40 +17,12 @@ Notice that the compilation accepts the same arguments as the search, since it e
 ## Command Line Arguments
 ```bash
 schlandals compile --help
-Use the DPLL-search structure to produce an arithmetic circuit for the problem
-
-Usage: schlandals compile [OPTIONS] --input <INPUT>
+Usage: schlandals --input <INPUT> compile [OPTIONS]
 
 Options:
-  -i, --input <INPUT>
-          The input file
-
-  -b, --branching <BRANCHING>
-          How to branch
-
-          [default: min-in-degree]
-
-          Possible values:
-          - min-in-degree: Minimum In-degree of a clause in the implication-graph
-
-      --fdac <FDAC>
-          If present, store a textual representation of the compiled circuit
-
-      --dotfile <DOTFILE>
-          If present, store a DOT representation of the compiled circuit
-
-  -e, --epsilon <EPSILON>
-          Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
-
-  -a, --approx <APPROX>
-          If epsilon present, use the appropriate approximate method
-
-          [default: bounds]
-
-          Possible values:
-          - bounds: Bound-based pruning
-          - lds:    Limited Discrepancy Search
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --fdac <FDAC>        If the problem is compiled, store it in this file
+      --dotfile <DOTFILE>  If the problem is compiled, store a DOT graphical representation in this file
+  -h, --help               Print help
 ```
+
+**Note**: if you want to use general schlandals option, they must come **before** the `compile` sub-command (e.g. `schlandals -i model.cnf --epsilon 0.2 --approx lds compile --fdac ac.out`)

@@ -101,18 +101,13 @@ impl Parser for PgParser {
 
         let content = evidence_from_os_string(&self.evidence);
         let content = content.split_whitespace().collect::<Vec<&str>>();
-        let number_evidence = content[0].parse::<usize>().unwrap();
-        let mut content_index = 1;
-        for _ in 0..number_evidence {
-            let node = *map_node_to_id.get(&content[content_index]).unwrap_or_else(|| panic!("The node {} is in the evidence file but not in the problem file", content[content_index]));
-            let value = content[content_index + 1].parse::<usize>().unwrap();
-            if value == 0 {
-                clauses.push(vec![-(node + parameter_index - 1)]);
-            } else {
-                clauses.push(vec![node + parameter_index - 1]);
-            }
-            content_index += 2
+        if content.len() != 2 {
+            panic!("The evidence should be the source and target nodes (2 strings). Got: {}", content.join(" "));
         }
+        let source = *map_node_to_id.get(&content[0]).unwrap_or_else(|| panic!("Source node {} is not in the graph structure", content[0]));
+        let target = *map_node_to_id.get(&content[1]).unwrap_or_else(|| panic!("Target node {} is not in the graph structure", content[1]));
+        clauses.push(vec![source + parameter_index - 1]);
+        clauses.push(vec![-(target + parameter_index - 1)]);
         create_problem(&distributions, &clauses, state)
     }
 

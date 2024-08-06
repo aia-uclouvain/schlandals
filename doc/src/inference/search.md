@@ -11,13 +11,13 @@ However, due to the modelization choices made in Schlandals, there are few diffe
 An exact inference strategy can be launched with the following command
 
 ```bash
-[schlandals@schlandalspc]$ schlandals search -i model.cnf
+[schlandals@schlandalspc]$ schlandals -i model.cnf
 Estimated probability 1.1029004e-1 with bounds [1.1029004e-1 1.1029004e-1] found in 0 seconds
 ```
 
 The solver output bounds on the probability and the time needed to solve the problem. For larger problem, it is possible to add a timeout and the bounds might not be tight. For a complete description on how the bounds are computed, see [2].
 ```bash
-[schlandals@schlandalspc]$ schlandals --timeout 30 search -i large_model.cnf
+[schlandals@schlandalspc]$ schlandals -i large_model.cnf --timeout 30
 Estimated probability 0.353553 with bounds [0.25 0.5] found in 30 seconds
 ```
 
@@ -59,50 +59,6 @@ Estimated probability 1.3543849e-2 with bounds [1.3540853e-2 1.3546845e-2] found
 Estimated probability 1.3542610e-2 with bounds [1.3541749e-2 1.3543471e-2] found in 11 seconds
 Estimated probability 1.3542321e-2 with bounds [1.3541960e-2 1.3542683e-2] found in 13 seconds
 Estimated probability 1.3542321e-2 with bounds [1.3541960e-2 1.3542683e-2] found in 13 seconds
-```
-
-## Command line options
-
-```bash
-[schlandals@schlandalspc]$ schlandals search --help
-DPLL-style search based solver
-
-Usage: schlandals search [OPTIONS] --input <INPUT>
-
-Options:
-  -i, --input <INPUT>
-          The input file
-
-  -b, --branching <BRANCHING>
-          How to branch
-
-          [default: min-in-degree]
-
-          Possible values:
-          - min-in-degree: Minimum In-degree of a clause in the implication-graph
-
-  -s, --statistics
-          Collect stats during the search, default yes
-
-  -m, --memory <MEMORY>
-          The memory limit, in mega-bytes
-
-  -e, --epsilon <EPSILON>
-          Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
-
-          [default: 0]
-
-  -a, --approx <APPROX>
-          If epsilon present, use the appropriate approximate method
-
-          [default: bounds]
-
-          Possible values:
-          - bounds: Bound-based pruning
-          - lds:    Limited Discrepancy Search
-
-  -h, --help
-          Print help (see a summary with '-h')
 ```
 
 ## References
