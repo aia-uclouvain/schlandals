@@ -87,7 +87,7 @@ impl CacheKey {
     pub fn new(hash: u64, repr: Bitvec) -> Self {
         Self {
             hash,
-            repr
+            repr,
         }
     }
 }
@@ -159,6 +159,6 @@ impl Solution {
 
 impl std::fmt::Display for Solution {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Bounds on the probability [{:.8} {:.8}] found in {} seconds (epsilon {})", self.lower_bound, self.upper_bound, self.time_found, self.epsilon())
+        write!(f, "Estimated probability {:.8} with bounds [{:.8} {:.8}] (epsilon {}) found in {} seconds", (self.lower_bound.clone() * self.upper_bound.clone()).sqrt(), self.lower_bound, self.upper_bound, self.epsilon(), self.time_found)
     }
 }

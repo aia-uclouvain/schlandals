@@ -17,17 +17,10 @@
 use crate::{Loss, Optimizer};
 
 pub mod learner;
-#[cfg(feature = "tensor")]
-pub mod tensor_learner;
-mod utils;
 mod logger;
 use std::path::PathBuf;
 use crate::Branching;
 use crate::ApproximateMethod;
-
-pub trait Learning {
-    fn train(& mut self, params:&LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64);
-}
 
 pub struct LearnParameters {
     /// The initial learning rate

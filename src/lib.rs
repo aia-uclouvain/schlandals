@@ -14,19 +14,33 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Re-export the modules
+mod solver;
+mod statistics;
+pub mod common;
+mod branching;
+pub mod core;
+mod parsers;
+mod propagator;
+mod preprocess;
+pub mod learning;
+pub mod ac;
+mod semiring;
+
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Write, BufRead, BufReader};
 use rug::Float;
+use clap::{Parser, Subcommand};
 
-use learning::{Learning, learner::Learner, LearnParameters};
+use learning::{learner::Learner, LearnParameters};
 use ac::ac::Dac;
 use search_trail::StateManager;
 
 use core::components::ComponentExtractor;
-use common::Solution;
 use core::problem::Problem;
-use parser::*;
+use parsers::*;
 
 use propagator::Propagator;
 use common::*;
@@ -35,36 +49,149 @@ use branching::*;
 pub use solver::Solver;
 use solver::SolverParameters;
 
-// Re-export the modules
-mod solver;
-mod statistics;
-pub mod common;
-mod branching;
-pub mod core;
-mod parser;
-mod propagator;
-mod preprocess;
-pub mod learning;
-pub mod ac;
-mod semiring;
-
 use peak_alloc::PeakAlloc;
 #[global_allocator]
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
-pub fn solve_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, memory: Option<u64>, timeout: u64, statistics: bool) -> Solution {
-    let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX }, epsilon, timeout);
-    let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
-    match solver {
-        GenericSolver::SMinInDegree(mut solver) => solver.search(false),
-        GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+#[derive(Parser)]
+#[clap(name="Schlandals", version, author, about)]
+pub struct Args {
+    /// The input file
+    #[clap(short, long, value_parser)]
+    pub input: PathBuf,
+    /// Evidence file, containing the query
+    #[clap(long, required=false)]
+    pub evidence: Option<OsString>,
+    #[clap(long,short, default_value_t=u64::MAX)]
+    pub timeout: u64,
+    /// How to branch
+    #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
+    pub branching: Branching,
+    /// Collect stats during the search, default no
+    #[clap(long, action)]
+    pub statistics: bool,
+    /// The memory limit, in mega-bytes
+    #[clap(short, long, default_value_t=u64::MAX)]
+    pub memory: u64,
+    /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
+    #[clap(short, long, default_value_t=0.0)]
+    pub epsilon: f64,
+    /// If epsilon present, use the appropriate approximate method
+    #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
+    pub approx: ApproximateMethod,
+    #[clap(subcommand)]
+    pub subcommand: Option<Command>,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            input: PathBuf::default(),
+            evidence: None,
+            timeout: u64::MAX,
+            branching: Branching::MinInDegree,
+            statistics: false,
+            memory: u64::MAX,
+            epsilon: 0.0,
+            approx: ApproximateMethod::LDS,
+            subcommand: None,
+        }
     }
 }
 
-pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Option<u64>, epsilon: f64, approx: ApproximateMethod, timeout: u64, unweighted: bool) -> f64 {
-    let parameters = SolverParameters::new(if let Some(m) = memory { m } else { u64::MAX}, epsilon, timeout);
-    let solver = make_solver!(&input, branching, parameters, statistics, unweighted);
-    let solution = match approx {
+#[derive(Subcommand)]
+pub enum Command {
+    Compile {
+        /// If the problem is compiled, store it in this file
+        #[clap(long)]
+        fdac: Option<PathBuf>,
+        /// If the problem is compiled, store a DOT graphical representation in this file
+        #[clap(long)]
+        dotfile: Option<PathBuf>,
+    },
+    Learn {
+        #[clap(long, value_parser, value_delimiter=' ')]
+        trainfile: PathBuf,
+        /// The csv file containing the test filenames and the associated expected output
+        #[clap(long, value_parser, value_delimiter=' ')]
+        testfile: Option<PathBuf>,
+        /// If present, folder in which to store the output files of the learning
+        #[clap(long)]
+        outfolder: Option<PathBuf>,
+        /// Learning rate
+        #[clap(short, long, default_value_t=0.3)]
+        lr: f64,
+        /// Number of epochs
+        #[clap(long, default_value_t=6000)]
+        nepochs: usize,
+        /// If present, save a detailled csv of the training and use a codified output filename
+        #[clap(long, short, action)]
+        do_log: bool,
+        /// If present, define the learning timeout
+        #[clap(long, default_value_t=u64::MAX)]
+        ltimeout: u64,
+        /// Loss to use for the training, default is the MAE
+        /// Possible values: MAE, MSE
+        #[clap(long, default_value_t=Loss::MAE, value_enum)]
+        loss: Loss, 
+        /// Number of threads to use for the evaluation of the DACs
+        #[clap(long, default_value_t=1, short)]
+        jobs: usize,
+        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
+        /// to compute the gradients. If `probability`, use custom efficient backpropagations
+        #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
+        semiring: Semiring,
+        /// The optimizer to use if `tensor` is selected as semiring
+        #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
+        optimizer: Optimizer,
+        /// The drop in the learning rate to apply at each step
+        #[clap(long, default_value_t=0.75)]
+        lr_drop: f64,
+        /// The number of epochs after which to drop the learning rate
+        /// (i.e. the learning rate is multiplied by `lr_drop`)
+        #[clap(long, default_value_t=100)]
+        epoch_drop: usize,
+        /// The stopping criterion for the training
+        /// (i.e. if the loss is below this value, stop the training)
+        #[clap(long, default_value_t=0.0001)]
+        early_stop_threshold: f64,
+        /// The minimum of improvement in the loss to consider that the training is still improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=0.00001)]
+        early_stop_delta: f64,
+        /// The number of epochs to wait before stopping the training if the loss is not improving
+        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
+        #[clap(long, default_value_t=5)]
+        patience: usize,
+        /// If present, initialize the distribution weights as 1/|d|, |d| being the number of values for the distribution
+        #[clap(long, action)]
+        equal_init: bool,
+        /// If present, recompile the circuits at each epoch
+        #[clap(long, action)]
+        recompile: bool,
+        /// If present, weights the learning in function of the epsilon of each query
+        #[clap(long, action)]
+        e_weighted: bool,
+    },
+}
+
+impl Args {
+
+    fn solver_param(&self) -> SolverParameters {
+        SolverParameters::new(self.memory, self.epsilon, self.timeout)
+    }
+}
+
+pub fn search(args: Args) -> f64 {
+    let parameters = args.solver_param();
+    let mut state = StateManager::default();
+    let propagator = Propagator::new(&mut state);
+    let parser = parser_from_input(args.input.clone(), args.evidence.clone());
+    let problem = parser.problem_from_file(&mut state);
+    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+
+    let solution = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
                 GenericSolver::SMinInDegree(mut solver) => solver.search(false),
@@ -82,104 +209,110 @@ pub fn search(input: PathBuf, branching: Branching, statistics: bool, memory: Op
     solution.to_f64()
 }
 
-fn _compile(compiler: GenericSolver, approx: ApproximateMethod, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
-    let mut dac: Dac<Float> = match approx {
+pub fn compile(args: Args) -> f64 {
+    let parameters = args.solver_param();
+    let mut state = StateManager::default();
+    let propagator = Propagator::new(&mut state);
+    let parser = parser_from_input(args.input.clone(), args.evidence.clone());
+    let problem = parser.problem_from_file(&mut state);
+    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+
+    let mut ac: Dac<Float> = match args.approx {
         ApproximateMethod::Bounds => {
-            match compiler {
+            match solver {
                 GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
                 GenericSolver::QMinInDegree(mut solver) => solver.compile(false),
             }
         },
         ApproximateMethod::LDS => {
-            match compiler {
+            match solver {
                 GenericSolver::SMinInDegree(mut solver) => solver.compile(true),
                 GenericSolver::QMinInDegree(mut solver) => solver.compile(true),
             }
         },
     };
-    dac.evaluate();
-    if let Some(f) = dotfile {
-        let out = dac.as_graphviz();
-        let mut outfile = File::create(f).unwrap();
-        match outfile.write(out.as_bytes()) {
-            Ok(_) => (),
-            Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+    ac.evaluate();
+    if let Some(Command::Compile { fdac, dotfile }) = args.subcommand {
+        if let Some(f) = dotfile {
+            let out = ac.as_graphviz();
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write_all(out.as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
+            }
+        }
+        if let Some(f) = fdac {
+            let mut outfile = File::create(f).unwrap();
+            match outfile.write_all(format!("{}", ac).as_bytes()) {
+                Ok(_) => (),
+                Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
+            }
+            
         }
     }
-    if let Some(f) = fdac {
-        let mut outfile = File::create(f).unwrap();
-        match outfile.write(format!("{}", dac).as_bytes()) {
-            Ok(_) => (),
-            Err(e) => println!("Could not write the circuit into the fdac file: {:?}", e),
-        }
-        
-    }
-    dac.solution()
-}
-
-pub fn compile(input: PathBuf, branching: Branching, fdac: Option<PathBuf>, dotfile: Option<PathBuf>, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> f64 {
-    let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
-    let solution = match type_of_input(&input) {
-        FileType::CNF => {
-            let compiler = make_solver!(&input, branching, parameters, false, false);
-            _compile(compiler, approx, fdac, dotfile)
-        },
-        FileType::FDAC => {
-            let mut dac: Dac<Float> = Dac::<Float>::from_file(&input);
-            dac.evaluate();
-            dac.solution()
-        },
-    };
+    let solution = ac.solution();
     solution.print();
     solution.to_f64()
 }
 
-pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isize>>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, statistics: bool, fdac: Option<PathBuf>, dotfile: Option<PathBuf>) -> Solution {
-    let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
-    let solver = solver_from_problem!(distributions, clauses, branching, parameters, statistics);
-    _compile(solver, approx, fdac, dotfile)
-}
-
-
-pub fn make_learner(inputs: &Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, expected_test:Vec<f64>, equal_init: bool) -> Box<dyn Learning> {
-    match semiring {
-        Semiring::Probability => {
-            if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, expected_test, equal_init))
-            } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, expected_test, equal_init))
-            }
-        },
-    }
-}
-
-pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
-            log:bool, epsilon: f64, approx: ApproximateMethod, jobs: usize, semiring: Semiring, params: LearnParameters, equal_init: bool) {    
-    // Sets the number of threads for rayon
-    let mut inputs = vec![];
-    let mut expected: Vec<f64> = vec![];
-    let file = File::open(&trainfile).unwrap();
+pub fn parse_csv(filename: PathBuf) -> Vec<(OsString, f64)> {
+    let mut ret: Vec<(OsString, f64)> = vec![];
+    let file = File::open(filename).unwrap();
     let reader = BufReader::new(file);
     for line in reader.lines().skip(1) {
         let l = line.unwrap();
-        let mut split = l.split(",");
-        inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
-        expected.push(split.next().unwrap().parse::<f64>().unwrap());
+        let split = l.split(',').collect::<Vec<&str>>();
+        ret.push((split[0].parse::<OsString>().unwrap(), split[1].parse::<f64>().unwrap()));
     }
-    let mut test_inputs = vec![];
-    let mut test_expected: Vec<f64> = vec![];
-    if let Some(testfile) = testfile {
-        let file = File::open(&testfile).unwrap();
-        let reader = BufReader::new(file);
-        for line in reader.lines().skip(1) {
-            let l = line.unwrap();
-            let mut split = l.split(",");
-            test_inputs.push(split.next().unwrap().parse::<PathBuf>().unwrap());
-            test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
-        }
+    ret
+}
+
+pub fn learn(args: Args) {
+    if let Some(Command::Learn { trainfile: _,
+                    testfile: _,
+                    outfolder: _,
+                    lr,
+                    nepochs,
+                    do_log,
+                    ltimeout,
+                    loss,
+                    jobs: _,
+                    semiring: _,
+                    optimizer,
+                    lr_drop,
+                    epoch_drop,
+                    early_stop_threshold,
+                    early_stop_delta,
+                    patience, 
+                    equal_init: _,
+                    recompile,
+                    e_weighted}) = args.subcommand {
+        let params = LearnParameters::new(
+            lr,
+            nepochs,
+            args.timeout,
+            ltimeout,
+            loss,
+            optimizer,
+            lr_drop,
+            epoch_drop,
+            early_stop_threshold,
+            early_stop_delta,
+            patience,
+            recompile,
+            e_weighted,
+        );
+        let approx = args.approx;
+        let branching = args.branching;
+        if do_log {
+            let mut learner = Learner::<true>::new(args.input.clone(), args);
+            learner.train(&params, branching, approx);
+        } else {
+            let mut learner = Learner::<false>::new(args.input.clone(), args);
+            learner.train(&params, branching, approx);
+        };
     }
-    let mut learner = make_learner(&inputs, expected, epsilon, approx, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected, equal_init);
-    learner.train(&params, &inputs, branching, approx, params.compilation_timeout());
 }
 
 impl std::fmt::Display for Loss {
@@ -213,29 +346,3 @@ pub fn generic_solver(problem: Problem, state: StateManager, component_extractor
         }
     }
 }
-
-macro_rules! solver_from_problem {
-    ($d:expr, $c:expr, $b:expr, $p:expr, $s:expr) => {
-        {
-            let mut state = StateManager::default();
-            let problem = problem_from_problem($d, $c, &mut state);
-            let propagator = Propagator::new(&mut state);
-            let component_extractor = ComponentExtractor::new(&problem, &mut state);
-            generic_solver(problem, state, component_extractor, $b, propagator, $p, $s)
-        }
-    };
-}
-use solver_from_problem;
-
-macro_rules! make_solver {
-    ($i:expr, $b:expr, $p:expr, $s:expr, $u: expr) => {
-        {
-            let mut state = StateManager::default();
-            let propagator = Propagator::new(&mut state);
-            let problem = problem_from_cnf($i, &mut state, false, $u);
-            let component_extractor = ComponentExtractor::new(&problem, &mut state);
-            generic_solver(problem, state, component_extractor, $b, propagator, $p, $s)
-        }
-    };
-}
-pub(crate) use make_solver;
