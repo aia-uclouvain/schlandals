@@ -140,6 +140,15 @@ enum Command {
         /// If epsilon present, use the appropriate approximate method
         #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
         approx: ApproximateMethod,
+        /// If present, initialize the distribution weights as 1/|d|, |d| being the number of values for the distribution
+        #[clap(long, action)]
+        equal_init: bool,
+        /// If present, recompile the circuits at each epoch
+        #[clap(long, action)]
+        recompile: bool,
+        /// If present, weights the learning in function of the epsilon of each query
+        #[clap(long, action)]
+        e_weighted: bool,
     }
 }
 
@@ -162,7 +171,8 @@ fn main() {
         },
         Command::Learn { trainfile, testfile, branching, outfolder, lr, nepochs, 
             do_log , ltimeout, epsilon, loss, jobs, semiring, optimizer, lr_drop, 
-            epoch_drop, early_stop_threshold, early_stop_delta, patience, approx} => {
+            epoch_drop, early_stop_threshold, early_stop_delta, patience, approx, equal_init, 
+            recompile, e_weighted} => {
             let params = LearnParameters::new(
                 lr,
                 nepochs,
@@ -175,13 +185,15 @@ fn main() {
                 early_stop_threshold,
                 early_stop_delta,
                 patience,
+                recompile,
+                e_weighted,
             );
             if do_log && outfolder.is_none() {
                 eprintln!("Error: if do-log is set, then outfolder should be specified");
                 process::exit(1);
             }
             
-            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, approx, jobs, semiring, params);
+            schlandals::learn(trainfile, testfile, branching, outfolder, do_log, epsilon, approx, jobs, semiring, params, equal_init);
         }
     }
 }

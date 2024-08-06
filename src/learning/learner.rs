@@ -64,7 +64,9 @@ pub struct Learner<const S: bool> {
 impl <const S: bool> Learner<S> {
     /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
     /// solved, and the expected_outputs contains, for each query, its expected probability.
-    pub fn new(inputs: Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>) -> Self {
+    pub fn new(inputs: &Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, 
+               jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>, equal_init: bool) -> Self {
+        
         rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
         // Retrieves the distributions values and computes their unsoftmaxed values
@@ -72,9 +74,16 @@ impl <const S: bool> Learner<S> {
         let distributions = distributions_from_cnf(&inputs[0]);
         let mut grads: Vec<Vec<Float>> = vec![];
         let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
+        let mut eps = epsilon;
         for distribution in distributions.iter() {
-            let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
-            unsoftmaxed_distributions.push(unsoftmaxed_vector);
+            if !equal_init {
+                let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
+                unsoftmaxed_distributions.push(unsoftmaxed_vector);
+            }
+            else {
+                let unsoftmaxed_vector = distribution.iter().map(|_| (1.0/(distribution.len() as f64)).log(std::f64::consts::E)).collect::<Vec<f64>>();
+                unsoftmaxed_distributions.push(unsoftmaxed_vector);
+            }
             grads.push(vec![F128!(0.0); distribution.len()]);
         }
         // Retrieves which distributions are learned
@@ -83,22 +92,30 @@ impl <const S: bool> Learner<S> {
         // Compiling the train and test queries into arithmetic circuits
         let mut train_dacs = generate_dacs(inputs, branching, epsilon, approx, compile_timeout);
         if approx == ApproximateMethod::LDS {
-            let mut present_distributions = vec![false; distributions.len()];
+            eps = 0.0;
+            let mut present_distributions = vec![0; distributions.len()];
             let mut cnt_unfinished = 0;
             for dac in train_dacs.iter() {
-                if dac.is_complete() {
+                if !dac.is_complete() {
                     cnt_unfinished += 1;
                 }
                 for node in dac.iter() {
-                    if let NodeType::Distribution { d, .. } = dac[node].get_type() {
-                        present_distributions[d] = true;
+                    let start = dac[node].input_start();
+                    let end = start + dac[node].number_inputs();
+                    for i in start..end {
+                        if let NodeType::Distribution { d, .. } = dac[dac.input_at(i)].get_type() {
+                            present_distributions[d] += 1;
+                        }
                     }
                 }
+                eps += dac.epsilon();
             }
-            println!("Present distributions counted {}", present_distributions.iter().filter(|b| **b).count());
-            println!("Unfinished DACs: {}", cnt_unfinished);
+            println!("Present distributions counted {}/{}", present_distributions.iter().filter(|b| **b!=0).count(), present_distributions.len());
+            println!("Occurance of distributions {:?}", present_distributions);//.iter().filter(|b| **b!=0).collect::<Vec<&usize>>());
+            println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
+            println!("Epsilon: {}", eps);
         }
-        let mut test_dacs = generate_dacs(test_inputs, branching, epsilon, ApproximateMethod::Bounds, u64::MAX);
+        let mut test_dacs = generate_dacs(&test_inputs, branching, epsilon, ApproximateMethod::Bounds, u64::MAX);
         // Creating train and test datasets
         let mut train_data = vec![];
         let mut train_expected = vec![];
@@ -126,7 +143,7 @@ impl <const S: bool> Learner<S> {
             gradients: grads,
             log,
             learned_distributions,
-            epsilon,
+            epsilon: eps,
         }
     }
 
@@ -187,6 +204,18 @@ impl <const S: bool> Learner<S> {
             d.evaluate();
         });
         self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
+    }
+
+    fn recompile_dacs(&mut self, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
+        let mut train_dacs = generate_dacs(inputs, branching, self.epsilon, approx, compile_timeout);
+        let mut train_data = vec![];
+        let mut eps = 0.0;
+        while let Some(d) = train_dacs.pop() {
+            eps += d.epsilon();
+            train_data.push(d);
+        }
+        self.train.set_queries(train_data);
+        self.epsilon = eps;
     }
 
     // --- Gradient computation --- //
@@ -264,7 +293,7 @@ impl <const S: bool> Learner<S> {
 
 impl<const S: bool> Learning for Learner<S> {
     /// Training loop for the train dacs, using the given training parameters
-    fn train(&mut self, params: &LearnParameters) {
+    fn train(&mut self, params: &LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
         self.log.start();
@@ -282,10 +311,6 @@ impl<const S: bool> Learning for Learner<S> {
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
         for e in 0..params.nepochs() {
-            // Timeout
-            if start.elapsed() > to {
-                break;
-            }
             // Update the learning rate
             let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
             // Forward pass
@@ -294,6 +319,11 @@ impl<const S: bool> Learning for Learner<S> {
             for i in 0..predictions.len() {
                 train_loss[i] = params.loss().loss(predictions[i], self.train.expected(i).to_f64());
                 train_grad[i] = params.loss().gradient(predictions[i], self.train.expected(i).to_f64());
+                if params.e_weighted() && self.epsilon != 0.0 {
+                    //train_loss[i] *= 1.0 - self.train[i].epsilon()/self.epsilon;
+                    let l = self.train.len() as f64;
+                    train_grad[i] *= (1.0 - self.train[i].epsilon()/self.epsilon) * l / (l - 1.0);
+                }
             }
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
             self.compute_gradients(&train_grad);
@@ -307,6 +337,16 @@ impl<const S: bool> Learning for Learner<S> {
                 break;
             }
             prev_loss = avg_loss;
+
+            // Timeout
+            if start.elapsed() > to {
+                break;
+            }
+
+            if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
+                println!("Recompiling at epoch {}", e);
+                self.recompile_dacs(inputs, branching, approx, compile_timeout);
+            }
 
             // TODO: Add a verbosity command line argument
             /*

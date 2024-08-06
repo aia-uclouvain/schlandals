@@ -150,10 +150,15 @@ impl Solution {
     pub fn bounds(&self) -> (f64, f64) {
         (self.lower_bound.to_f64(), self.upper_bound.to_f64())
     }
+
+    pub fn epsilon(&self) -> f64 {
+
+        ((self.upper_bound.to_f64()/(self.lower_bound.to_f64()+FLOAT_CMP_THRESHOLD)).sqrt()-1.0 as f64).max(0.0)
+    }
 }
 
 impl std::fmt::Display for Solution {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Bounds on the probability [{:.8} {:.8}] found in {} seconds", self.lower_bound, self.upper_bound, self.time_found)
+        write!(f, "Bounds on the probability [{:.8} {:.8}] found in {} seconds (epsilon {})", self.lower_bound, self.upper_bound, self.time_found, self.epsilon())
     }
 }

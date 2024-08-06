@@ -141,20 +141,20 @@ pub fn compile_from_problem(distributions: &Vec<Vec<f64>>, clauses: &Vec<Vec<isi
 }
 
 
-pub fn make_learner(inputs: Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, test_expected:Vec<f64>) -> Box<dyn Learning> {
+pub fn make_learner(inputs: &Vec<PathBuf>, expected: Vec<f64>, epsilon: f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, jobs: usize, log: bool, semiring: Semiring, params: &LearnParameters, test_inputs:Vec<PathBuf>, expected_test:Vec<f64>, equal_init: bool) -> Box<dyn Learning> {
     match semiring {
         Semiring::Probability => {
             if log {
-                Box::new(Learner::<true>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<true>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, expected_test, equal_init))
             } else {
-                Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, test_expected))
+                Box::new(Learner::<false>::new(inputs, expected, epsilon, approx, branching, outfolder, jobs, params.compilation_timeout(), test_inputs, expected_test, equal_init))
             }
         },
     }
 }
 
 pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching, outfolder: Option<PathBuf>, 
-            log:bool, epsilon: f64, approx: ApproximateMethod, jobs: usize, semiring: Semiring, params: LearnParameters) {    
+            log:bool, epsilon: f64, approx: ApproximateMethod, jobs: usize, semiring: Semiring, params: LearnParameters, equal_init: bool) {    
     // Sets the number of threads for rayon
     let mut inputs = vec![];
     let mut expected: Vec<f64> = vec![];
@@ -178,8 +178,8 @@ pub fn learn(trainfile: PathBuf, testfile:Option<PathBuf>, branching: Branching,
             test_expected.push(split.next().unwrap().parse::<f64>().unwrap());
         }
     }
-    let mut learner = make_learner(inputs, expected, epsilon, approx, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected);
-    learner.train(&params);
+    let mut learner = make_learner(&inputs, expected, epsilon, approx, branching, outfolder, jobs, log, semiring, &params, test_inputs, test_expected, equal_init);
+    learner.train(&params, &inputs, branching, approx, params.compilation_timeout());
 }
 
 impl std::fmt::Display for Loss {

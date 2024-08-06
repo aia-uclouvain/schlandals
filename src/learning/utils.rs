@@ -42,7 +42,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+pub fn generate_dacs<R: SemiRing>(inputs: &Vec<PathBuf>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
     inputs.par_iter().map(|input| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -65,7 +65,6 @@ pub fn generate_dacs<R: SemiRing>(inputs: Vec<PathBuf>, branching: Branching, ep
                             crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
                         }
                     },
-                    
                 }
             },
             FileType::FDAC => {
@@ -127,6 +126,11 @@ impl<R> Dataset<R>
     /// Returns the expected output for the required query
     pub fn expected(&self, query_index: usize) -> &R {
         &self.expected[query_index]
+    }
+
+    /// Changes the queries set of the dataset
+    pub fn set_queries(&mut self, queries: Vec<Dac<R>>) {
+        self.queries = queries;
     }
 }
 

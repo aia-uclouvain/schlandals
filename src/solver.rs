@@ -386,7 +386,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         // Create the DAC and add elements from the preprocessing
         let forced_by_propagation = self.forced_from_propagation();
         self.restructure_after_preprocess();
-
         if preproc_result.is_some() {
             return Dac::default();
         }
@@ -405,8 +404,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 ac.set_compile_time(start.elapsed().as_secs());
                 return ac;
             }
-            let epsilon = (sol.bounds().1/sol.bounds().0).sqrt()-1.0;
-            let mut ac = self.build_ac(epsilon, &forced_by_propagation);
+            let mut ac = self.build_ac(sol.epsilon(), &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());
             return ac
         } else {
@@ -416,14 +414,14 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
-                    let epsilon = (solution.bounds().1/solution.bounds().0).sqrt()-1.0;
-                    complete_ac = Some(self.build_ac(epsilon, &forced_by_propagation));
-                    solution.print();
+                    complete_ac = Some(self.build_ac(solution.epsilon(), &forced_by_propagation));
+                    complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
+                    //solution.print();
                     complete_sol = Some(solution);
                 }
                 if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) {
                     self.statistics.print();
-                    complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
+                    complete_sol.unwrap().print();
                     return complete_ac.unwrap();
                 }
                 discrepancy += 1;

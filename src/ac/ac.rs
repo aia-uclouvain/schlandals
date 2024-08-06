@@ -201,6 +201,9 @@ impl<R> Dac<R>
 
     /// Resets the path value of each node
     pub fn zero_paths(&mut self) {
+        if self.is_empty() {
+            return;
+        }
         for node in (0..self.nodes.len()-1).map(NodeIndex) {
             self[node].set_path_value(F128!(0.0));
         }
