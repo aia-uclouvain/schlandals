@@ -126,7 +126,7 @@ impl Parser for UaiParser {
             content_index += 1;
 
             // Cache used to detect if multiple line in the CPT represent the same distribution
-            let mut distribution_cache: FxHashMap<String, Vec<Option<isize>>> = FxHashMap::default();
+            let mut distribution_cache: FxHashMap<String, Vec<isize>> = FxHashMap::default();
             // The domain size of the variable in the CPT
             let scope_variables_domain = cpt_scope.iter().map(|v| variables_domain_size[*v]).collect::<Vec<usize>>();
             // The size of the distributions is the domain size of the last variable in the scope of
@@ -142,48 +142,57 @@ impl Parser for UaiParser {
             for _ in 0..number_distribution {
                 let distribution = (0..distribution_size).map(|j| content[content_index + j].parse::<f64>().unwrap()).collect::<Vec<f64>>();
                 content_index += distribution_size;
-                let mut sorted_distribution = distribution.clone();
-                sorted_distribution.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let cache_key = sorted_distribution.iter().map(|f| format!("{}", f)).collect::<Vec<String>>().join(" ");
+
+                let distribution_no_zero = distribution.iter().copied().filter(|p| *p != 0.0).collect::<Vec<f64>>();
+                if distribution_no_zero.len() == 1 {
+                    for (i, p) in distribution.iter().copied().enumerate() {
+                        if p != 0.0 {
+                            let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx + i].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
+                            clauses.push(CPTConstraint::new(indicator_variables, None));
+                            break;
+                        }
+                    }
+                    choice_idx += distribution_size;
+                    continue;
+                }
+                let mut cache_key = distribution_no_zero.clone();
+                cache_key.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let cache_key = cache_key.iter().map(|p| format!("{}", p)).collect::<Vec<String>>().join(" ");
                 match distribution_cache.get(&cache_key) {
                     Some(v) => {
                         let mut sorted_proba = distribution.iter().copied().enumerate().collect::<Vec<(usize, f64)>>();
                         sorted_proba.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                        for (i, parameter_variable) in v.iter().copied().enumerate() {
-                            if sorted_proba[i].1 == 0.0 {
+                        let mut v_idx = 0;
+                        for (j, p) in sorted_proba.iter().copied() {
+                            if p == 0.0 {
                                 continue;
                             }
-                            let initial_index = sorted_proba[i].0;
-                            let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx + initial_index].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
-                            clauses.push(CPTConstraint::new(indicator_variables, parameter_variable));
+                            let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx + j].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
+                            clauses.push(CPTConstraint::new(indicator_variables, Some(v[v_idx])));
+                            v_idx += 1;
                         }
                         choice_idx += distribution_size;
                     },
                     None => {
-                        if !distribution.contains(&1.0) {
-                            distributions.push(distribution.clone());
-                        }
-                        let mut cache_entry: Vec<(f64, Option<isize>)> = vec![];
+                        distributions.push(distribution_no_zero);
+                        let mut cache_entry: Vec<(f64, isize)> = vec![];
                         for probability in distribution.iter().copied() {
                             if probability == 0.0 {
-                                cache_entry.push((0.0, None));
                                 choice_idx += 1;
                                 continue;
                             }
                             let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
                             choice_idx += 1;
-                            let pv = if probability == 1.0 { None } else { Some(variable_index) };
-                            clauses.push(CPTConstraint::new(indicator_variables,pv));
-                            cache_entry.push((probability, pv));
-                            if pv.is_some() {
-                                variable_index += 1;
-                            }
+                            clauses.push(CPTConstraint::new(indicator_variables,Some(variable_index)));
+                            cache_entry.push((probability, variable_index));
+                            variable_index += 1;
                         }
                         cache_entry.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                        let cache_entry = cache_entry.iter().map(|x| x.1).collect::<Vec<Option<isize>>>();
+                        let cache_entry = cache_entry.iter().map(|x| x.1).collect::<Vec<isize>>();
                         distribution_cache.insert(cache_key, cache_entry);
-                    },
-                }
+
+                    }
+                };
             }
         }
         let mut clauses = clauses.iter().map(|c| c.to_cnf(variable_index - 1)).collect::<Vec<Vec<isize>>>();
@@ -195,8 +204,9 @@ impl Parser for UaiParser {
         for _ in 0..number_evidence {
             let variable = content[content_index];
             let value = content[content_index + 1];
-            let clause = variables_indicators[variable].iter().copied().enumerate().filter(|(i, _)| *i != value).map(|(_, v)| -(v as isize + variable_index - 1)).collect::<Vec<isize>>();
-            clauses.push(clause);
+            for v in variables_indicators[variable].iter().copied().enumerate().filter(|(i, _)| *i != value).map(|(_, v)| -(v as isize + variable_index - 1)) {
+                clauses.push(vec![v]);
+            }
             content_index += 2
         }
         create_problem(&distributions, &clauses, state)
