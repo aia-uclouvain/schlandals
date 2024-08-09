@@ -111,8 +111,8 @@ impl Propagator {
     }
 
     /// Returns the propagation probability of the last call to propagate
-    pub fn get_propagation_prob(&self) -> &Float {
-        &self.propagation_prob
+    pub fn get_propagation_prob(&self) -> Float {
+        self.propagation_prob.clone()
     }
     
     /// Returns an iterator over the assignments made during the last propagation
