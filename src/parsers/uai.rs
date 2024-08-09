@@ -131,7 +131,7 @@ impl Parser for UaiParser {
             let scope_variables_domain = cpt_scope.iter().map(|v| variables_domain_size[*v]).collect::<Vec<usize>>();
             // The size of the distributions is the domain size of the last variable in the scope of
             // the factor
-            let distribution_size = variables_domain_size[*scope_variables_domain.last().unwrap()];
+            let distribution_size = *scope_variables_domain.last().unwrap();
             // How many distribution there are in the CPT
             let number_distribution = scope_variables_domain.iter().rev().skip(1).product::<usize>();
             // For each entry in the CPT, these are the value of the variables in the scope of the
@@ -141,6 +141,7 @@ impl Parser for UaiParser {
             let mut choice_idx = 0;
             for _ in 0..number_distribution {
                 let distribution = (0..distribution_size).map(|j| content[content_index + j].parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                //println!("Distribution parsed: {:?} {}", distribution, distribution_size);
                 content_index += distribution_size;
 
                 let distribution_no_zero = distribution.iter().copied().filter(|p| *p != 0.0).collect::<Vec<f64>>();
