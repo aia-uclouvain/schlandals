@@ -29,7 +29,6 @@ use crate::PEAK_ALLOC;
 use rug::Float;
 use std::time::Instant;
 
-type SearchResult = (CacheEntry, isize);
 type DistributionChoice = (DistributionIndex, VariableIndex);
 type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 
@@ -112,7 +111,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         self.restructure_after_preprocess();
 
-        //let (sol, _): (Solution, Option<Dac<Float>>) = self.pwmc(is_lds, false);
         if self.problem.number_clauses() == 0 {
             let lb = self.preproc_in.clone().unwrap();
             let ub = F128!(1.0 - self.preproc_out.unwrap());
@@ -190,71 +188,38 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
-        let (result,_) = self.get_bounds_from_cache(ComponentIndex(0), (1.0+self.parameters.epsilon).powf(2.0), 1, discrepancy);
-        let p_in = result.bounds().0.clone();
-        let p_out = result.bounds().1.clone();
+        let result = self.pwmc(ComponentIndex(0), 1, discrepancy);
+        let p_in = result.bounds.0.clone();
+        let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
-        let ub: Float =
-        1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
+        let ub: Float = 1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
-    /// Retrieves the bounds of a sub-problem from the cache. If the sub-problem has never been
-    /// explored or that the bounds, given the bounding factor, are not good enough, the
-    /// sub-problem is solved and the result is inserted in the cache.
-    fn get_bounds_from_cache(&mut self, component: ComponentIndex, bound_factor: f64, level: isize, discrepancy: usize) -> SearchResult {
-        self.statistics.cache_access();
-        let cache_key = self.component_extractor[component].get_cache_key();
-        match self.cache.get(&cache_key) {
-            None => {
-                self.statistics.cache_miss();
-                let (solution, backtrack_level) = self.branch(component, level, bound_factor, discrepancy, None);
-                self.cache_keys.push(cache_key.clone());
-                self.cache.insert(cache_key, solution.clone());
-                (solution, backtrack_level)
-            },
-            Some(cache_entry) => {
-                let (p_in, p_out) = cache_entry.bounds();
-                let max_proba = self.component_extractor[component].max_probability();
-                if cache_entry.discrepancy() >= discrepancy || ((p_in.to_f64() - (max_proba - p_out.to_f64())).abs() <= FLOAT_CMP_THRESHOLD) {
-                    (cache_entry.clone(), level - 1)
-                } else {
-                    let (new_solution, backtrack_level) = self.branch(
-                        component,
-                        level,
-                        bound_factor,
-                        discrepancy,
-                        cache_entry.distribution(),
-                    );
-                    self.cache.insert(cache_key, new_solution.clone());
-                    (new_solution, backtrack_level)
-                }
-            }
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize) -> SearchResult {
+        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
+            self.cache.clear();
         }
-    }
-
-    /// Choose a distribution on which to branch, in the sub-problem, and solves the sub-problems
-    /// resulting from the branching, recursively.
-    /// Returns the bounds of the sub-problem as well as the level to which the solver must
-    /// backtrack.
-    fn branch(&mut self, component: ComponentIndex, level: isize, bound_factor: f64, discrepancy: usize, choice: Option<DistributionIndex>) -> SearchResult {
-        let decision = if choice.is_some() {
-            choice
-        } else {
+        let cache_key = self.component_extractor[component].get_cache_key();
+        self.statistics.cache_access();
+        let mut cache_entry = self.cache.remove(&cache_key).unwrap_or_else(|| {
+            self.statistics.cache_miss();
+            let cache_key_index = self.cache_keys.len();
+            self.cache_keys.push(cache_key.clone());
+            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index)
+        });
+        if cache_entry.distribution.is_none() {
             self.statistics.or_node();
-            self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component)
-        };
-        if let Some(distribution) = decision {
-            let maximum_probability = self.component_extractor[component].max_probability();
-            // Stores the accumulated probability of the found models in the sub-problem
-            let mut p_in = F128!(0.0);
-            // Stores the accumulated probability of the found non-models in the sub-problem
-            let mut p_out = F128!(0.0);
-            // When a sub-problem is UNSAT, this is the factor that must be used for the
-            // computation of p_out
+            cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
+        }
+        let mut backtrack_level = level - 1;
+        let maximum_probability = self.component_extractor[component].max_probability();
+        if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(maximum_probability) {
+            let mut new_p_in = F128!(0.0);
+            let mut new_p_out = F128!(0.0);
+            let distribution = cache_entry.distribution.unwrap();
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
             let mut child_id = 0;
-            let mut children_map: FxHashMap<VariableIndex, CacheChildren> = FxHashMap::default();
             for variable in self.problem[distribution].iter_variables() {
                 if self.problem[variable].is_fixed(&self.state) {
                     continue;
@@ -265,118 +230,83 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let v_weight = self.problem[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err(backtrack_level) => {
+                    Err(bt) => {
                         self.statistics.unsat();
-                        // The assignment triggered an UNSAT, so the whole sub-problem is part of
-                        // the non-models.
-                        p_out += v_weight * unsat_factor;
-                        if backtrack_level != level {
-                            // The clause learning scheme tells us that we need to backtrack
-                            // non-chronologically. There are no models in this sub-problem
+                        new_p_out += v_weight * unsat_factor;
+                        if bt != level {
                             self.restore();
-                            return (CacheEntry::new((F128!(0.0), F128!(maximum_probability)), usize::MAX, Some(distribution), FxHashMap::default()), backtrack_level);
+                            backtrack_level = bt;
+                            new_p_out = F128!(maximum_probability);
+                            cache_entry.clear_children();
+                            break;
                         }
                     },
                     Ok(_) => {
-                        // No problem during propagation. Before exploring the sub-problems, we can
-                        // update the upper bound with the information stored in the propagator
-                        // (i.e., the probalistic variables that have been set to false during the
-                        // propagation).
-                        let p = self.propagator.get_propagation_prob().clone();
-                        let removed = unsat_factor
-                        - self
-                            .component_extractor
+                        let p = self.propagator.get_propagation_prob();
+                        let removed = unsat_factor - self.component_extractor
                             .component_distribution_iter(component)
                             .filter(|d| *d != distribution)
                             .map(|d| self.problem[d].remaining(&self.state))
                             .product::<f64>();
-                        p_out += removed * v_weight;
-                        let new_discrepancy = discrepancy - child_id;
-                        // Now that we've branched and applied the propagation, we split the
-                        // remaining problem into independent sub-components and solve them
-                        // independently.
-                        // Their bounds must be multiplied by each other, this is a product node.
+                        new_p_out += removed * v_weight;
+
+                        // Decomposing into independent components
                         let mut prod_p_in = F128!(1.0);
                         let mut prod_p_out = F128!(1.0);
-                        let mut prod_maximum_probability = F128!(1.0);
-
-                        if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
-                            self.cache.clear();
-                        }
-                        for child_distribution in self.component_extractor.component_distribution_iter(component) {
-                            if self.problem[child_distribution].is_constrained(&self.state) {
-                                prod_maximum_probability *= self.problem[child_distribution].remaining(&self.state);
-                            }
-                        }
+                        let prod_maximum_probability = self.component_extractor
+                            .component_distribution_iter(component)
+                            .filter(|d| self.problem[*d].is_constrained(&self.state))
+                            .map(|d| self.problem[d].remaining(&self.state))
+                            .product::<f64>();
                         let (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
-
                         self.state.save_state();
-                        // If there are no more component to explore (i.e. the sub-problem only contains
-                        // deterministic variables), then detect_components return false.
-                        let mut is_node_sat = true;
+                        let mut is_product_sat = true;
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             self.statistics.and_node();
-                            let number_components = self.component_extractor.number_components(&self.state);
-                            self.statistics.decomposition(number_components);
-                            let new_bound_factor = bound_factor.powf(1.0 / number_components as f64);
+                            self.statistics.decomposition(self.component_extractor.number_components(&self.state));
                             for sub_component in self.component_extractor.components_iter(&self.state) {
-                                // If the solver has no more time, assume that there are no solutions in the
-                                // remaining of the components. This way we always produce a valid lower/upper
-                                // bound.
-                                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout {
-                                    return (CacheEntry::new((p_in, p_out), usize::MAX, Some(distribution), children_map), level - 1);
-                                }
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
-                                let (sub_problem, backtrack_level) = self.get_bounds_from_cache(sub_component, new_bound_factor, level +1, new_discrepancy); // the function was called with level + 1 and level was given
-
-                                if backtrack_level != level { // the function was called with level + 1 and level was used here
-                                    // Or node is unsat
+                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id);
+                                if sub_solution.backtrack_level != level {
                                     self.restore();
-                                    return (CacheEntry::new((F128!(0.0),
-                                        F128!(maximum_probability)),
-                                        usize::MAX,
-                                        Some(distribution),
-                                        FxHashMap::default()), backtrack_level);
-                                }
-                                // If any of the component is not fully explored, then so is the node
-                                let (sub_p_in, sub_p_out) = sub_problem.bounds();
-                                prod_p_in *= sub_p_in;
-                                prod_p_out *= sub_maximum_probability - sub_p_out.clone();
-                                // In case prod_p_in is 0, it means that one of the component has
-                                // probability 0, hence we do not need to explore further.
-                                // Notice that we do not need to set prod_p_out to the maximum
-                                // probability. After the loop, we reassign prod_p_out using the
-                                // maximum probability of the product, an prod_p_out is 0 in this
-                                // case.
-                                if prod_p_in <= FLOAT_CMP_THRESHOLD {
-                                    is_node_sat = false;
+                                    is_product_sat = false;
+                                    backtrack_level = sub_solution.backtrack_level;
+                                    new_p_out = F128!(maximum_probability);
+                                    cache_entry.clear_children();
                                     break;
                                 }
-                                child_entry.add_key(self.component_extractor[sub_component].get_cache_key());
+                                prod_p_in *= &sub_solution.bounds.0;
+                                prod_p_out *= sub_maximum_probability - sub_solution.bounds.1.clone();
+                                if prod_p_in == 0.0 {
+                                    is_product_sat = false;
+                                    break;
+                                }
+                                child_entry.add_key(sub_solution.cache_index);
                             }
                         }
-                        if is_node_sat && prod_p_in > FLOAT_CMP_THRESHOLD {
-                            children_map.insert(variable, child_entry);
+                        if is_product_sat && prod_p_in > 0.0 {
+                            cache_entry.children.insert(variable, child_entry);
                         }
+                        prod_p_out = prod_maximum_probability - prod_p_out;
+                        new_p_in += prod_p_in * &p;
+                        new_p_out += prod_p_out * &p;
                         self.restore();
-                        prod_p_out = prod_maximum_probability.clone() - prod_p_out;
-                        p_in += prod_p_in * &p;
-                        p_out += prod_p_out * &p;
-                    }
+                    },
                 }
                 self.restore();
                 child_id += 1;
             }
-            let cache_entry = CacheEntry::new((p_in, p_out),
-                discrepancy,
-                Some(distribution),
-                children_map,
-            );
-            (cache_entry, level - 1)
-        } else {
-            (CacheEntry::new((F128!(1.0), F128!(0.0)), usize::MAX, None, FxHashMap::default()), level - 1)
+            cache_entry.discrepancy = discrepancy;
+            cache_entry.bounds = (new_p_in.clone(), new_p_out.clone());
         }
+        let result = SearchResult {
+            bounds: cache_entry.bounds.clone(),
+            backtrack_level,
+            cache_index: cache_entry.cache_key_index,
+        };
+        self.cache.insert(cache_key, cache_entry);
+        result
     }
 }
 
@@ -393,7 +323,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             return Dac::default();
         }
         // Perform the actual search that will fill the cache
-        //let (sol, d) = self.pwmc(is_lds, true);
         if self.problem.number_clauses() == 0 {
             let mut ac = self.build_ac(0.0, &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());
@@ -465,9 +394,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             child_id += 1;
         }
 
-        let mut map: FxHashMap<CacheKey, NodeIndex> = FxHashMap::default();
+        let mut map: FxHashMap<usize, NodeIndex> = FxHashMap::default();
         if has_node_search {
-            let node_search = self.explore_cache(&mut dac, self.component_extractor[ComponentIndex(0)].get_cache_key(), &mut map);
+            let node_search = self.explore_cache(&mut dac, 0, &mut map);
             dac.add_input(child_id, node_search);
         }
         let root = dac.add_node(root);
@@ -475,11 +404,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         dac
     }
 
-    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, component_key: CacheKey, c: &mut FxHashMap<CacheKey, NodeIndex>) -> NodeIndex {
-        if let Some(child_i) = c.get(&component_key) {
+    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>) -> NodeIndex {
+        if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
         }
-        let current = self.cache.get(&component_key).unwrap();
+        let current = self.cache.get(&self.cache_keys[cache_key_index]).unwrap();
         let sum_node_child = current.number_children();
         let sum_node = dac.sum_node(sum_node_child);
 
@@ -523,7 +452,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             sum_node_child += 1;
         }
         let sum_index = dac.add_node(sum_node);
-        c.insert(component_key, sum_index);
+        c.insert(cache_key_index, sum_index);
         sum_index
     }
 
@@ -600,32 +529,20 @@ pub struct CacheEntry {
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
     children: FxHashMap<VariableIndex, CacheChildren>,
+    cache_key_index: usize,
 }
 
 impl CacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>, cache_key_index: usize) -> Self {
         Self {
             bounds,
             discrepancy,
             distribution,
             children,
+            cache_key_index,
         }
-    }
-
-    /// Returns a reference to the bounds of this entry
-    pub fn bounds(&self) -> Bounds {
-        self.bounds.clone()
-    }
-
-    /// Returns the discrepancy of the node
-    pub fn discrepancy(&self) -> usize {
-        self.discrepancy
-    }
-
-    pub fn distribution(&self) -> Option<DistributionIndex> {
-        self.distribution
     }
 
     pub fn forced_choices(&self, variable: VariableIndex) -> &Vec<DistributionChoice> {
@@ -640,6 +557,10 @@ impl CacheEntry {
         self.children.len()
     }
 
+    pub fn clear_children(&mut self) {
+        self.children.clear();
+    }
+
     pub fn variable_number_children(&self, variable: VariableIndex) -> usize {
         let entry = self.children.get(&variable).unwrap();
         entry.children_keys.len() + entry.forced_choices.len() + entry.unconstrained_distributions.len()
@@ -649,14 +570,18 @@ impl CacheEntry {
         self.children.keys().copied().collect()
     }
 
-    pub fn child_keys(&self, variable: VariableIndex) -> Vec<CacheKey> {
+    pub fn child_keys(&self, variable: VariableIndex) -> Vec<usize> {
         self.children.get(&variable).unwrap().children_keys.clone()
+    }
+
+    fn are_bounds_tight(&self, maximum_probability: f64) -> bool {
+        (self.bounds.0.clone() + &self.bounds.1 - maximum_probability).abs() <= FLOAT_CMP_THRESHOLD
     }
 }
 
 #[derive(Default, Clone)]
 pub struct CacheChildren {
-    children_keys: Vec<CacheKey>,
+    children_keys: Vec<usize>,
     forced_choices: Vec<DistributionChoice>,
     unconstrained_distributions: Vec<UnconstrainedDistribution>,
 }
@@ -670,7 +595,13 @@ impl CacheChildren {
         }
     }
 
-    pub fn add_key(&mut self, key: CacheKey) {
+    pub fn add_key(&mut self, key: usize) {
         self.children_keys.push(key);
     }
+}
+
+struct SearchResult {
+    bounds: (Float, Float),
+    backtrack_level: isize,
+    cache_index: usize,
 }
