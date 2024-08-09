@@ -97,6 +97,39 @@ impl Parser for CnfParser {
         create_problem(&distributions, &clauses, state)
     }
 
+    fn clauses_from_file(&self) -> Vec<Vec<isize>> {
+        // Second pass to parse the clauses
+        let mut clauses: Vec<Vec<isize>> = vec![];
+        let file = File::open(&self.input).unwrap();
+        let reader = BufReader::new(file);
+        for l in reader.lines() {
+            match l {
+                Err(e) => panic!("Problem while reading file: {}", e),
+                Ok(line) => {
+                    if !line.starts_with('c') && !line.starts_with('p') {
+                        // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
+                        for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                            clauses.push(clause.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect());
+                        }
+                    }
+                }
+            }
+        }
+        let content = evidence_from_os_string(&self.evidence);
+        let content = content.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect::<Vec<isize>>();
+        let mut clause: Vec<isize> = vec![];
+        for literal in content.iter().copied() {
+            if literal == 0 {
+                clauses.push(clause.clone());
+                clause.clear();
+            } else {
+                clause.push(literal);
+            }
+        }
+        clauses
+    }
+
+    
     fn distributions_from_file(&self) -> Vec<Vec<f64>> {
         let mut distributions: Vec<Vec<f64>> = vec![];
         let file = File::open(&self.input).unwrap();

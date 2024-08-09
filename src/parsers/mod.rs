@@ -33,6 +33,7 @@ use pg::*;
 pub trait Parser {
     fn problem_from_file(&self, state: &mut StateManager) -> Problem;
     fn distributions_from_file(&self) -> Vec<Vec<f64>>;
+    fn clauses_from_file(&self) -> Vec<Vec<isize>>;
 }
 
 pub fn parser_from_input(filepath: PathBuf, evidence: Option<OsString>) -> Box<dyn Parser + 'static > {

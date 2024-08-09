@@ -18,9 +18,6 @@ use crate::{Loss, Optimizer};
 
 pub mod learner;
 mod logger;
-use std::path::PathBuf;
-use crate::Branching;
-use crate::ApproximateMethod;
 
 pub struct LearnParameters {
     /// The initial learning rate

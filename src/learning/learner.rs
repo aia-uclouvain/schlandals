@@ -59,88 +59,10 @@ pub struct Learner<const S: bool> {
     gradients: Vec<Vec<Float>>,
     log: Logger<S>,
     epsilon: f64,
-    input: PathBuf,
-    queries: Vec<(OsString, f64)>,
+    clauses: Vec<Vec<Vec<isize>>>,
 }
 
 impl <const S: bool> Learner<S> {
-    /// Creates a new learner for the given inputs. Each inputs represent a query that needs to be
-    /// solved, and the expected_outputs contains, for each query, its expected probability.
-    //pub fn new(inputs: &Vec<PathBuf>, mut expected_outputs:Vec<f64>, epsilon:f64, approx:ApproximateMethod, branching: Branching, outfolder: Option<PathBuf>, 
-    //           jobs:usize, compile_timeout: u64, test_inputs:Vec<PathBuf>, mut expected_test: Vec<f64>, equal_init: bool) -> Self {
-
-        // Retrieves the distributions values and computes their unsoftmaxed values
-        // and initializes the gradients to 0
-        //let distributions = distributions_from_cnf(&inputs[0]);
-        //let mut grads: Vec<Vec<Float>> = vec![];
-        //let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
-        //let mut eps = epsilon;
-        /* for distribution in distributions.iter() {
-            if !equal_init {
-                let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
-                unsoftmaxed_distributions.push(unsoftmaxed_vector);
-            }
-            else {
-                let unsoftmaxed_vector = distribution.iter().map(|_| (1.0/(distribution.len() as f64)).log(std::f64::consts::E)).collect::<Vec<f64>>();
-                unsoftmaxed_distributions.push(unsoftmaxed_vector);
-            }
-            grads.push(vec![F128!(0.0); distribution.len()]);
-        } */
-       // Compiling the train and test queries into arithmetic circuits
-       // let mut train_dacs = generate_dacs(inputs, branching, epsilon, approx, compile_timeout);
-        /* if approx == ApproximateMethod::LDS {
-            eps = 0.0;
-            let mut present_distributions = vec![0; distributions.len()];
-            let mut cnt_unfinished = 0;
-            for dac in train_dacs.iter() {
-                if !dac.is_complete() {
-                    cnt_unfinished += 1;
-                }
-                for node in dac.iter() {
-                    let start = dac[node].input_start();
-                    let end = start + dac[node].number_inputs();
-                    for i in start..end {
-                        if let NodeType::Distribution { d, .. } = dac[dac.input_at(i)].get_type() {
-                            present_distributions[d] += 1;
-                        }
-                    }
-                }
-                eps += dac.epsilon();
-            }
-            println!("Present distributions counted {}/{}", present_distributions.iter().filter(|b| **b!=0).count(), present_distributions.len());
-            println!("Occurance of distributions {:?}", present_distributions);//.iter().filter(|b| **b!=0).collect::<Vec<&usize>>());
-            println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
-            println!("Epsilon: {}", eps);
-        } */
-        //let mut test_dacs = generate_dacs(&test_inputs, branching, epsilon, ApproximateMethod::Bounds, u64::MAX);
-        // Creating train and test datasets
-        /* let mut train_data = vec![];
-        let mut train_expected = vec![];
-        let mut test_data = vec![];
-        let mut test_expected = vec![];
-        while let Some(d) = train_dacs.pop() {
-            let expected = expected_outputs.pop().unwrap();
-            train_data.push(d);
-            train_expected.push(F128!(expected));
-        }
-        while let Some(d) = test_dacs.pop() {
-            let expected = expected_test.pop().unwrap();
-            test_data.push(d);
-            test_expected.push(F128!(expected));
-        }
-        let train_dataset = Dataset::new(train_data, train_expected);
-        let test_dataset = Dataset::new(test_data, test_expected); */
-        // Initializing the logger
-        //let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
-        /* Self { 
-            train: train_dataset,
-            test: test_dataset,
-            unsoftmaxed_distributions, 
-            gradients: grads,
-            log,
-            learned_distributions,
-            epsilon: eps,
-        } */
     pub fn new(input: PathBuf, args: Args) -> Self {
         if let Command::Learn { trainfile,
                                 testfile,
@@ -164,9 +86,35 @@ impl <const S: bool> Learner<S> {
                                 } = args.subcommand.unwrap() {
             rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
+            // Parsing the input files to retrieve the problem and the queries
+            let parser = parser_from_input(input.clone(), Some(OsString::default()));
+            let mut train_queries = parse_csv(trainfile);
+            let mut test_queries = if let Some(file) = testfile { parse_csv(file) } else { vec![] };
+            let mut clauses = vec![];
+            let mut test_clauses = vec![];
+            for (query, _) in train_queries.iter() {
+                let q_parser = parser_from_input(input.clone(), Some(query.clone()));
+                /* let mut state = StateManager::default();
+                let problem = q_parser.problem_from_file(&mut state);
+                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
+                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
+                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
+                let c = q_parser.clauses_from_file();
+                clauses.push(c);
+            }
+            for (query, _) in test_queries.iter() {
+                let q_parser = parser_from_input(input.clone(), Some(query.clone()));
+                /* let mut state = StateManager::default();
+                let problem = q_parser.problem_from_file(&mut state);
+                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
+                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
+                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
+                let c = q_parser.clauses_from_file();
+                test_clauses.push(c);
+            }
+
             // Retrieves the distributions values and computes their unsoftmaxed values
             // and initializes the gradients to 0
-            let parser = parser_from_input(input.clone(), Some(OsString::default()));
             let distributions = parser.distributions_from_file();
             let mut grads: Vec<Vec<Float>> = vec![];
             let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
@@ -177,16 +125,14 @@ impl <const S: bool> Learner<S> {
                     unsoftmaxed_distributions.push(unsoftmaxed_vector);
                 }
                 else {
-                    let unsoftmaxed_vector = distribution.iter().map(|p| if *p!=0.0 && *p!=1.0 {(1.0/(distribution.len() as f64)).log(std::f64::consts::E)} else {*p}).collect::<Vec<f64>>();
+                    let unsoftmaxed_vector = distribution.iter().map(|_| 1.0/(distribution.len() as f64).log(std::f64::consts::E)).collect::<Vec<f64>>();
                     unsoftmaxed_distributions.push(unsoftmaxed_vector);
                 }
                 grads.push(vec![F128!(0.0); distribution.len()]);
             }
-            let mut train_queries = parse_csv(trainfile);
-            let mut test_queries = if let Some(file) = testfile { parse_csv(file) } else { vec![] };
 
             // Compiling the train and test queries into arithmetic circuits
-            let mut train_dacs = generate_dacs(&input, &train_queries, args.branching, args.epsilon, args.approx, args.timeout);
+            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
@@ -211,7 +157,7 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&input, &test_queries, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
+            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             while let Some(d) = train_dacs.pop() {
@@ -231,8 +177,7 @@ impl <const S: bool> Learner<S> {
                 gradients: grads,
                 log,
                 epsilon: eps,
-                input,
-                queries: train_queries,
+                clauses,
             }
         } else {
             panic!("learning procedure called with non-learn command line arguments");
@@ -299,7 +244,8 @@ impl <const S: bool> Learner<S> {
     }
 
     fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
-        let mut train_dacs = generate_dacs(&self.input, &self.queries, branching, self.epsilon, approx, compile_timeout);
+        let distributions = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
+        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -477,13 +423,12 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(input: &PathBuf, queries: &Vec<(OsString, f64)>, branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
-    queries.par_iter().map(|(query, _)| {
+pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+    queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
-        let parser = parser_from_input(input.clone(), Some(query.clone()));
         let mut state = StateManager::default();
-        let problem = parser.problem_from_file(&mut state);
+        let problem = create_problem(distributions, clauses, &mut state); //parser.problem_from_file(&mut state);
         let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
         let propagator = Propagator::new(&mut state);
         let component_extractor = ComponentExtractor::new(&problem, &mut state);
