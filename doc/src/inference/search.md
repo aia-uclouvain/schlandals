@@ -14,8 +14,13 @@ An exact inference strategy can be launched with the following command
 [schlandals@schlandalspc]$ schlandals -i model.cnf
 Estimated probability 1.1029004e-1 with bounds [1.1029004e-1 1.1029004e-1] found in 0 seconds
 ```
+The solver output bounds on the probability and the time needed to solve the problem. If the model is specified as a [UAI file format](../modelization/bn/uai.md), then an example of command is
+```bash
+[schlandals@schlandalspc]$ schlandals -i model.uai --evidence "1 6 0"
+Estimated probability 1.1029004e-1 with bounds [1.1029004e-1 1.1029004e-1] found in 0 seconds
+```
 
-The solver output bounds on the probability and the time needed to solve the problem. For larger problem, it is possible to add a timeout and the bounds might not be tight. For a complete description on how the bounds are computed, see [2].
+For larger problem, it is possible to add a timeout and the bounds might not be tight. For a complete description on how the bounds are computed, see [2].
 ```bash
 [schlandals@schlandalspc]$ schlandals -i large_model.cnf --timeout 30
 Estimated probability 0.353553 with bounds [0.25 0.5] found in 30 seconds
