@@ -3,6 +3,10 @@ use super::*;
 
 use schlandals::learning::LearnParameters;
 use schlandals::ApproximateMethod;
+use schlandals::Loss;
+use schlandals::Semiring;
+use schlandals::Optimizer;
+use schlandals::Command;
 
 #[pyclass]
 #[derive(Clone)]
@@ -78,7 +82,9 @@ fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
                          param.epoch_drop,
                          param.early_stop_threshold,
                          param.early_stop_delta,
-                         param.patience)
+                         param.patience,
+                         false,
+                         false)
 }
 
 // TODO: Find how to make the python binding to take into account that the tensors are a feature
@@ -87,13 +93,11 @@ fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
 #[derive(Clone)]
 pub enum PySemiring {
     Probability,
-    //Tensor,
 }
 
 fn get_semiring_from_pysemiring(semiring: PySemiring) -> Semiring {
     match semiring {
         PySemiring::Probability => Semiring::Probability,
-        //PySemiring::Tensor => Semiring::Tensor,
     }
 }
 
@@ -113,23 +117,13 @@ fn get_optimizer_from_pyoptimizer(optimizer: PyOptimizer) -> Optimizer {
 
 #[pyfunction]
 #[pyo3(name = "learn")]
-pub fn pylearn(train_file: String, param: PyLearnParameters, branching: Option<PyBranching>, semiring: Option<PySemiring>, log: Option<bool>, epsilon: Option<f64>, jobs: Option<usize>, test_file: Option<String>, outfolder: Option<PathBuf>) {
+pub fn pylearn(model: String, train_file: String, param: PyLearnParameters, branching: Option<PyBranching>, semiring: Option<PySemiring>, log: Option<bool>, epsilon: Option<f64>, jobs: Option<usize>, test_file: Option<String>, outfolder: Option<PathBuf>) {
+    let mut schlandals_arg = schlandals::Args::default();
+    schlandals_arg.branching = get_branching_from_pybranching(branching.unwrap_or(PyBranching::MinInDegree));
+    schlandals_arg.epsilon = epsilon.unwrap_or(0.0);
+    let mut cmd = Command::default_learn_args();
     let train = PathBuf::from(train_file);
-    let test = if test_file.is_none() {
-        None
-    } else {
-        Some(PathBuf::from(test_file.unwrap()))
-    };
-    schlandals::learn(train,
-                      test,
-                      get_branching_from_pybranching(if let Some(v) = branching { v } else { PyBranching::MinInDegree }),
-                      outfolder,
-                      if let Some(v) = log { v } else { false },
-                      if let Some(v) = epsilon { v } else { 0.0 },
-                      ApproximateMethod::Bounds,
-                      if let Some(v) = jobs { v } else { 1 },
-                      get_semiring_from_pysemiring(if let Some(v) = semiring { v } else { PySemiring::Probability }),
-                      get_param_from_pyparam(param))
+    schlandals::learn(schlandals_arg);
 }
 
 #[pymodule]

@@ -25,7 +25,7 @@ mod propagator;
 mod preprocess;
 pub mod learning;
 pub mod ac;
-mod semiring;
+pub mod semiring;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -43,7 +43,7 @@ use core::problem::Problem;
 use parsers::*;
 
 use propagator::Propagator;
-use common::*;
+pub use common::*;
 use branching::*;
 
 pub use solver::Solver;
@@ -179,6 +179,33 @@ impl Args {
 
     fn solver_param(&self) -> SolverParameters {
         SolverParameters::new(self.memory, self.epsilon, self.timeout)
+    }
+}
+
+impl Command {
+
+    pub fn default_learn_args() -> Self {
+        Self::Learn {
+            trainfile: PathBuf::default(),
+            testfile: None,
+            outfolder: None,
+            lr: 0.3,
+            nepochs: 6000,
+            do_log: false,
+            ltimeout: u64::MAX,
+            loss: Loss::MAE,
+            jobs: 1,
+            semiring: Semiring::Probability,
+            optimizer: Optimizer::Adam,
+            lr_drop: 0.75,
+            epoch_drop:100,
+            early_stop_threshold: 0.0001,
+            early_stop_delta: 0.00001,
+            patience: 5,
+            equal_init: false,
+            recompile: false,
+            e_weighted: false,
+        }
     }
 }
 
