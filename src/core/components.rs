@@ -28,10 +28,9 @@
 //! This module also exposes a special component extractor that do not detect any components.
 //! It should only be used for debugging purpose to isolate bugs
 
-use super::problem::{ClauseIndex, Problem, DistributionIndex};
+use super::problem::{ClauseIndex, VariableIndex, Problem, DistributionIndex};
 use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
-use crate::core::bitvec::Bitvec;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -92,8 +91,8 @@ pub struct Component {
     /// Maximum probability of the sub-problem represented by the component (i.e., all remaining
     /// valid interpretation are models)
     max_probability: f64,
-    /// Bitwise representation of the problem
-    bit_repr: Bitvec,
+    /// Representation of the component for hash
+    repr: String,
 }
 
 impl Component {
@@ -107,7 +106,7 @@ impl Component {
     }
 
     pub fn get_cache_key(&self) -> CacheKey {
-        CacheKey::new(self.hash, self.bit_repr.clone())
+        CacheKey::new(self.hash, self.repr.clone())
     }
 
     pub fn number_distribution(&self) -> usize {
@@ -122,7 +121,6 @@ impl ComponentExtractor {
         let clause_positions = (0..g.number_clauses()).collect();
         let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
         let distribution_positions = (0..g.number_distributions()).collect();
-        let bit_repr = Bitvec::ones(g.number_clauses_problem() + g.number_variables());
         let components = vec![Component {
             start: 0,
             size: g.number_clauses(),
@@ -130,7 +128,7 @@ impl ComponentExtractor {
             number_distribution: g.number_distributions(),
             hash: 0,
             max_probability: 1.0,
-            bit_repr,
+            repr: String::new(),
         }];
         Self {
             clauses: nodes,
@@ -180,14 +178,15 @@ impl ComponentExtractor {
         comp_number_distribution: &mut usize,
         hash: &mut u64,
         max_probability: &mut f64,
-        bit_repr: &mut Bitvec,
+        clauses: &mut Vec<ClauseIndex>,
+        variables: &mut Vec<VariableIndex>,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
             if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
                 if !g[clause].is_learned() {
                     *hash ^= g[clause].hash();
-                    bit_repr.set_bit(g[clause].bitword_index(), g[clause].bitmask());
+                    clauses.push(clause);
                 }
                 // The clause is swap with the clause at position comp_sart + comp_size
                 let current_pos = self.clause_positions[clause.0];
@@ -207,7 +206,7 @@ impl ComponentExtractor {
                     if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
                         self.seen_var[variable.0] = true;
                         *hash ^= g[variable].hash();
-                        bit_repr.set_bit(g[variable].bitword_index(), g[variable].bitmask());
+                        variables.push(variable);
                     }
                 }
 
@@ -286,7 +285,8 @@ impl ComponentExtractor {
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
                 let mut max_probability = 1.0;
-                let mut bit_repr = Bitvec::new(g.number_clauses_problem() + g.number_variables());
+                let mut clauses: Vec<ClauseIndex> = vec![];
+                let mut variables: Vec<VariableIndex> = vec![];
                 self.exploration_stack.push(clause);
                 self.explore_component(
                     g,
@@ -296,11 +296,21 @@ impl ComponentExtractor {
                     &mut number_distribution,
                     &mut hash,
                     &mut max_probability,
-                    &mut bit_repr,
+                    &mut clauses,
+                    &mut variables,
                     state,
                 );
                 if number_distribution > 0 {
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, bit_repr});
+                    clauses.sort();
+                    variables.sort();
+                    let mut repr = String::new();
+                    for c in clauses.iter().copied() {
+                        repr.push_str(&format!("c{}", c.0));
+                    }
+                    for v in clauses.iter().copied() {
+                        repr.push_str(&format!("v{}", v.0));
+                    }
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, repr});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -365,6 +375,13 @@ impl ComponentExtractor {
         self.distributions.shrink_to_fit();
         self.distribution_positions.truncate(number_distribution);
         self.distribution_positions.shrink_to_fit();
+        let mut repr = String::new();
+        for c in 0..number_clause {
+            repr.push_str(&format!("c{}", c));
+        }
+        for v in 0..number_variables {
+            repr.push_str(&format!("v{}", v));
+        }
         self.components[0] = Component {
             start: 0,
             size: self.clauses.len(),
@@ -372,7 +389,7 @@ impl ComponentExtractor {
             number_distribution: self.distributions.len(),
             hash: 0,
             max_probability,
-            bit_repr: Bitvec::ones(number_clause + number_variables),
+            repr,
         };
     }
 }
