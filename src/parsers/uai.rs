@@ -18,6 +18,7 @@ use super::*;
 use crate::core::problem::Problem;
 use search_trail::StateManager;
 use std::ffi::OsString;
+use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -82,12 +83,10 @@ impl UaiParser {
 impl Parser for UaiParser {
 
     fn problem_from_file(&self, state: &mut StateManager) -> Problem {
-        let file = File::open(&self.input).unwrap();
-        let reader = BufReader::new(&file);
         // Loading the content of the file. The file is loaded in a single String in which new line
         // have been removed. Then it is split by whitespace, giving only the numbers in the file.
-        let content = reader.lines().skip(1).map(|l| l.unwrap()).collect::<Vec<String>>().join(" ");
-        let content = content.split_whitespace().collect::<Vec<&str>>();
+        let content = fs::read_to_string(&self.input).expect("Unable to read UAI file");
+        let content = content.split_whitespace().skip(1).collect::<Vec<&str>>();
         // Parsing the preamble of the file containing the number of variables, their domain size, the
         // number of factor (must be equal to the number of variables), and their scope.
         let number_var = content[0].parse::<usize>().unwrap();
@@ -141,7 +140,6 @@ impl Parser for UaiParser {
             let mut choice_idx = 0;
             for _ in 0..number_distribution {
                 let distribution = (0..distribution_size).map(|j| content[content_index + j].parse::<f64>().unwrap()).collect::<Vec<f64>>();
-                //println!("Distribution parsed: {:?} {}", distribution, distribution_size);
                 content_index += distribution_size;
 
                 let distribution_no_zero = distribution.iter().copied().filter(|p| *p != 0.0).collect::<Vec<f64>>();
