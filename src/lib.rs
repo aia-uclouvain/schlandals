@@ -216,19 +216,23 @@ pub fn search(args: Args) -> f64 {
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
 
     let solution = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.search(false),
-                GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false),
+                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false),
+                GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
+                GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.search(true),
-                GenericSolver::QMinInDegree(mut solver) => solver.search(true),
+                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(true),
+                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(true),
+                GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
+                GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
             }
         },
     };
@@ -242,10 +246,12 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let propagator = Propagator::new(&mut state);
     let problem = create_problem(distributions, clauses, &mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
     let solution = match solver {
-        GenericSolver::SMinInDegree(mut solver) => solver.search(false),
-        GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+        GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false),
+        GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false),
+        GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
+        GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
     };
     solution.print();
     solution.bounds()
@@ -258,19 +264,23 @@ pub fn compile(args: Args) -> f64 {
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
 
     let mut ac: Dac<Float> = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(false),
+                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(false),
+                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(false),
+                GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
+                GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(true),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(true),
+                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(true),
+                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(true),
+                GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
+                GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
             }
         },
     };
@@ -367,24 +377,44 @@ impl std::fmt::Display for Loss {
 }
 
 pub enum GenericSolver {
-    SMinInDegree(Solver<MinInDegree, true>),
-    QMinInDegree(Solver<MinInDegree, false>),
+    SMinInDegreeSearch(Solver<MinInDegree, true, false>),
+    QMinInDegreeSearch(Solver<MinInDegree, false, false>),
+    SMinInDegreeCompile(Solver<MinInDegree, true, true>),
+    QMinInDegreeCompile(Solver<MinInDegree, false, true>),
 }
 
-pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool) -> GenericSolver {
-    if stat {
-        match branching {
-            Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
-                GenericSolver::SMinInDegree(solver)
-            },
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool, compile: bool) -> GenericSolver {
+    if compile {
+        if stat {
+            match branching {
+                Branching::MinInDegree => {
+                    let solver = Solver::<MinInDegree, true, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
+                    GenericSolver::SMinInDegreeCompile(solver)
+                },
+            }
+        } else {
+            match branching {
+                Branching::MinInDegree => {
+                    let solver = Solver::<MinInDegree, false, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
+                    GenericSolver::QMinInDegreeCompile(solver)
+                },
+            }
         }
     } else {
-        match branching {
-            Branching::MinInDegree => {
-                let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
-                GenericSolver::QMinInDegree(solver)
-            },
+        if stat {
+            match branching {
+                Branching::MinInDegree => {
+                    let solver = Solver::<MinInDegree, true, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
+                    GenericSolver::SMinInDegreeSearch(solver)
+                },
+            }
+        } else {
+            match branching {
+                Branching::MinInDegree => {
+                    let solver = Solver::<MinInDegree, false, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
+                    GenericSolver::QMinInDegreeSearch(solver)
+                },
+            }
         }
     }
 }

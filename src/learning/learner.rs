@@ -244,7 +244,7 @@ impl <const S: bool> Learner<S> {
     }
 
     fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
-        let distributions = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
+        let distributions: Vec<Vec<f64>> = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
         let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout);
         let mut train_data = vec![];
         let mut eps = 0.0;
@@ -423,7 +423,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<f64>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -432,18 +432,22 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
         let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
         let propagator = Propagator::new(&mut state);
         let component_extractor = ComponentExtractor::new(&problem, &mut state);
-        let compiler = generic_solver(problem, state, component_extractor, branching, propagator, parameters, false);
+        let compiler = generic_solver(problem, state, component_extractor, branching, propagator, parameters, false, true);
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false),
+                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(false),
+                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(false),
+                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
+                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(true),
+                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(true),
+                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
                 }
             },
             

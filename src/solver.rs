@@ -49,7 +49,7 @@ type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 /// Finally, the compiler is able to create an arithmetic circuit for any semi-ring. Currently
 /// implemented are the probability semi-ring (the default) and tensor semi-ring, which uses torch
 /// tensors (useful for automatic differentiation in learning).
-pub struct Solver<B: BranchingDecision, const S: bool> {
+pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     /// Implication problem of the (Horn) clauses in the input
     problem: Problem,
     /// Manages (save/restore) the states (e.g., reversible primitive types)
@@ -69,10 +69,12 @@ pub struct Solver<B: BranchingDecision, const S: bool> {
     preproc_out: Option<f64>,
     /// Parameters of the solving
     parameters: SolverParameters,
+    /// The caches present in the cache. Used during compilation to reconstruct the AC from the
+    /// cache (follow the children of a node)
     cache_keys: Vec<CacheKey>,
 }
 
-impl<B: BranchingDecision, const S: bool> Solver<B, S> {
+impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     pub fn new(
         problem: Problem,
         state: StateManager,
@@ -205,7 +207,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut cache_entry = self.cache.remove(&cache_key).unwrap_or_else(|| {
             self.statistics.cache_miss();
             let cache_key_index = self.cache_keys.len();
-            self.cache_keys.push(cache_key.clone());
+            if C {
+                self.cache_keys.push(cache_key.clone());
+            }
             CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index)
         });
         if cache_entry.distribution.is_none() {
@@ -282,7 +286,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                                     is_product_sat = false;
                                     break;
                                 }
-                                child_entry.add_key(sub_solution.cache_index);
+                                if C {
+                                    child_entry.add_key(sub_solution.cache_index);
+                                }
                             }
                         }
                         if is_product_sat && prod_p_in > 0.0 {
@@ -310,7 +316,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 }
 
-impl<B: BranchingDecision, const S: bool> Solver<B, S> {
+impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
     pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> {
         let start = Instant::now();
