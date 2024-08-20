@@ -23,4 +23,3 @@ mod clause;
 mod distribution;
 pub mod watched_vector;
 pub mod flags;
-pub mod bitvec;

@@ -56,8 +56,6 @@ pub struct Variable {
     is_implied: ReversibleBool,
     /// Random u64 associated to the variable, used for hash computation
     hash: u64,
-    bitmask: u128,
-    bitword_index: usize,
 }
 
 impl Variable {
@@ -77,8 +75,6 @@ impl Variable {
             reason: None,
             is_implied: state.manage_bool(false),
             hash: rand::random(),
-            bitmask: 0,
-            bitword_index: 0,
         }
     }
     
@@ -249,24 +245,6 @@ impl Variable {
             };
         }
         self.clauses_positive.len() + self.clauses_negative.len()
-    }
-
-    pub fn set_bitmask(&mut self, mask: u128) {
-        self.bitmask = mask;
-    }
-
-    pub fn set_bitword_index(&mut self, index: usize) {
-        self.bitword_index = index;
-    }
-
-    #[inline(always)]
-    pub fn bitmask(&self) -> u128 {
-        self.bitmask
-    }
-
-    #[inline(always)]
-    pub fn bitword_index(&self) -> usize {
-        self.bitword_index
     }
 }
 

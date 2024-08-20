@@ -16,7 +16,6 @@
 use clap::ValueEnum;
 use rug::Float;
 use std::hash::Hash;
-use crate::core::bitvec::Bitvec;
 
 macro_rules! F128 {
     ($v:expr) => {
@@ -92,11 +91,11 @@ impl std::fmt::Display for ApproximateMethod {
 #[derive(Default, Clone)]
 pub struct CacheKey {
     hash: u64,
-    repr: Bitvec,
+    repr: String,
 }
 
 impl CacheKey {
-    pub fn new(hash: u64, repr: Bitvec) -> Self {
+    pub fn new(hash: u64, repr: String) -> Self {
         Self {
             hash,
             repr,
