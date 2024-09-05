@@ -25,14 +25,13 @@ mod propagator;
 mod preprocess;
 pub mod learning;
 pub mod ac;
-pub mod semiring;
+pub mod ring;
+pub mod args;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Write, BufRead, BufReader};
-use rug::Float;
-use clap::{Parser, Subcommand};
 
 use learning::{learner::Learner, LearnParameters};
 use ac::ac::Dac;
@@ -49,165 +48,11 @@ use branching::*;
 pub use solver::Solver;
 use solver::SolverParameters;
 
+use args::*;
+
 use peak_alloc::PeakAlloc;
 #[global_allocator]
 pub static PEAK_ALLOC: PeakAlloc = PeakAlloc;
-
-#[derive(Parser)]
-#[clap(name="Schlandals", version, author, about)]
-pub struct Args {
-    /// The input file
-    #[clap(short, long, value_parser)]
-    pub input: PathBuf,
-    /// Evidence file, containing the query
-    #[clap(long, required=false)]
-    pub evidence: Option<OsString>,
-    #[clap(long,short, default_value_t=u64::MAX)]
-    pub timeout: u64,
-    /// How to branch
-    #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
-    pub branching: Branching,
-    /// Collect stats during the search, default no
-    #[clap(long, action)]
-    pub statistics: bool,
-    /// The memory limit, in mega-bytes
-    #[clap(short, long, default_value_t=u64::MAX)]
-    pub memory: u64,
-    /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
-    #[clap(short, long, default_value_t=0.0)]
-    pub epsilon: f64,
-    /// If epsilon present, use the appropriate approximate method
-    #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
-    pub approx: ApproximateMethod,
-    #[clap(subcommand)]
-    pub subcommand: Option<Command>,
-}
-
-impl Default for Args {
-    fn default() -> Self {
-        Self {
-            input: PathBuf::default(),
-            evidence: None,
-            timeout: u64::MAX,
-            branching: Branching::MinInDegree,
-            statistics: false,
-            memory: u64::MAX,
-            epsilon: 0.0,
-            approx: ApproximateMethod::LDS,
-            subcommand: None,
-        }
-    }
-}
-
-#[derive(Subcommand)]
-pub enum Command {
-    Compile {
-        /// If the problem is compiled, store it in this file
-        #[clap(long)]
-        fdac: Option<PathBuf>,
-        /// If the problem is compiled, store a DOT graphical representation in this file
-        #[clap(long)]
-        dotfile: Option<PathBuf>,
-    },
-    Learn {
-        #[clap(long, value_parser, value_delimiter=' ')]
-        trainfile: PathBuf,
-        /// The csv file containing the test filenames and the associated expected output
-        #[clap(long, value_parser, value_delimiter=' ')]
-        testfile: Option<PathBuf>,
-        /// If present, folder in which to store the output files of the learning
-        #[clap(long)]
-        outfolder: Option<PathBuf>,
-        /// Learning rate
-        #[clap(short, long, default_value_t=0.3)]
-        lr: f64,
-        /// Number of epochs
-        #[clap(long, default_value_t=6000)]
-        nepochs: usize,
-        /// If present, save a detailled csv of the training and use a codified output filename
-        #[clap(long, short, action)]
-        do_log: bool,
-        /// If present, define the learning timeout
-        #[clap(long, default_value_t=u64::MAX)]
-        ltimeout: u64,
-        /// Loss to use for the training, default is the MAE
-        /// Possible values: MAE, MSE
-        #[clap(long, default_value_t=Loss::MAE, value_enum)]
-        loss: Loss, 
-        /// Number of threads to use for the evaluation of the DACs
-        #[clap(long, default_value_t=1, short)]
-        jobs: usize,
-        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
-        /// to compute the gradients. If `probability`, use custom efficient backpropagations
-        #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
-        semiring: Semiring,
-        /// The optimizer to use if `tensor` is selected as semiring
-        #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
-        optimizer: Optimizer,
-        /// The drop in the learning rate to apply at each step
-        #[clap(long, default_value_t=0.75)]
-        lr_drop: f64,
-        /// The number of epochs after which to drop the learning rate
-        /// (i.e. the learning rate is multiplied by `lr_drop`)
-        #[clap(long, default_value_t=100)]
-        epoch_drop: usize,
-        /// The stopping criterion for the training
-        /// (i.e. if the loss is below this value, stop the training)
-        #[clap(long, default_value_t=0.0001)]
-        early_stop_threshold: f64,
-        /// The minimum of improvement in the loss to consider that the training is still improving
-        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
-        #[clap(long, default_value_t=0.00001)]
-        early_stop_delta: f64,
-        /// The number of epochs to wait before stopping the training if the loss is not improving
-        /// (i.e. if the loss is below this value for a number of epochs, stop the training)
-        #[clap(long, default_value_t=5)]
-        patience: usize,
-        /// If present, initialize the distribution weights as 1/|d|, |d| being the number of values for the distribution
-        #[clap(long, action)]
-        equal_init: bool,
-        /// If present, recompile the circuits at each epoch
-        #[clap(long, action)]
-        recompile: bool,
-        /// If present, weights the learning in function of the epsilon of each query
-        #[clap(long, action)]
-        e_weighted: bool,
-    },
-}
-
-impl Args {
-
-    fn solver_param(&self) -> SolverParameters {
-        SolverParameters::new(self.memory, self.epsilon, self.timeout)
-    }
-}
-
-impl Command {
-
-    pub fn default_learn_args() -> Self {
-        Self::Learn {
-            trainfile: PathBuf::default(),
-            testfile: None,
-            outfolder: None,
-            lr: 0.3,
-            nepochs: 6000,
-            do_log: false,
-            ltimeout: u64::MAX,
-            loss: Loss::MAE,
-            jobs: 1,
-            semiring: Semiring::Probability,
-            optimizer: Optimizer::Adam,
-            lr_drop: 0.75,
-            epoch_drop:100,
-            early_stop_threshold: 0.0001,
-            early_stop_delta: 0.00001,
-            patience: 5,
-            equal_init: false,
-            recompile: false,
-            e_weighted: false,
-        }
-    }
-}
 
 pub fn search(args: Args) -> f64 {
     let parameters = args.solver_param();
@@ -217,20 +62,21 @@ pub fn search(args: Args) -> f64 {
     let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
+    let ring = args.ring.to_type();
 
     let solution = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false),
-                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false),
+                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false, &ring),
+                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false, &ring),
                 GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
                 GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(true),
-                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(true),
+                GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(true, &ring),
+                GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(true, &ring),
                 GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
                 GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
             }
@@ -247,9 +93,10 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let problem = create_problem(distributions, clauses, &mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
+    let ring = args.ring.to_type();
     let solution = match solver {
-        GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false),
-        GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false),
+        GenericSolver::SMinInDegreeSearch(mut solver) => solver.search(false, &ring),
+        GenericSolver::QMinInDegreeSearch(mut solver) => solver.search(false, &ring),
         GenericSolver::SMinInDegreeCompile(_) => panic!("Non search solver used in search"),
         GenericSolver::QMinInDegreeCompile(_) => panic!("Non search solver used in search"),
     };
@@ -265,26 +112,27 @@ pub fn compile(args: Args) -> f64 {
     let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
+    let ring = args.ring.to_type();
 
-    let mut ac: Dac<Float> = match args.approx {
+    let mut ac: Dac = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(false),
-                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(false),
+                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(false, &ring),
+                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(false, &ring),
                 GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
                 GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(true),
-                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(true),
+                GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(true, &ring),
+                GenericSolver::QMinInDegreeCompile(mut solver) => solver.compile(true, &ring),
                 GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
                 GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used in compilation"),
             }
         },
     };
-    ac.evaluate();
+    ac.evaluate(&ring);
     if let Some(Command::Compile { fdac, dotfile }) = args.subcommand {
         if let Some(f) = dotfile {
             let out = ac.as_graphviz();
@@ -330,7 +178,6 @@ pub fn learn(args: Args) {
                     ltimeout,
                     loss,
                     jobs: _,
-                    semiring: _,
                     optimizer,
                     lr_drop,
                     epoch_drop,
@@ -345,7 +192,7 @@ pub fn learn(args: Args) {
             nepochs,
             args.timeout,
             ltimeout,
-            loss,
+            loss.to_type(),
             optimizer,
             lr_drop,
             epoch_drop,
@@ -354,14 +201,16 @@ pub fn learn(args: Args) {
             patience,
             recompile,
             e_weighted,
+            args.ring.to_type(),
         );
         let approx = args.approx;
         let branching = args.branching;
+        let ring = Box::new(args.ring.to_type());
         if do_log {
-            let mut learner = Learner::<true>::new(args.input.clone(), args);
+            let mut learner = Learner::<true>::new(args.input.clone(), &ring, args);
             learner.train(&params, branching, approx);
         } else {
-            let mut learner = Learner::<false>::new(args.input.clone(), args);
+            let mut learner = Learner::<false>::new(args.input.clone(), &ring, args);
             learner.train(&params, branching, approx);
         };
     }

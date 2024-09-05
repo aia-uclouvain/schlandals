@@ -45,7 +45,7 @@ use super::*;
 use rug::{Assign, Float};
 use std::ffi::OsString;
 use crate::parse_csv;
-use crate::semiring::SemiRing;
+use crate::ring::Ring;
 
 /// Abstraction used as a typesafe way of retrieving a `DAC` in the `Learner` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -53,8 +53,8 @@ pub struct DacIndex(pub usize);
 
 /// Structure used to learn the distribution parameters from a set of queries
 pub struct Learner<const S: bool> {
-    train: Dataset<Float>,
-    test: Dataset<Float>,
+    train: Dataset,
+    test: Dataset,
     unsoftmaxed_distributions: Vec<Vec<f64>>,
     gradients: Vec<Vec<Float>>,
     log: Logger<S>,
@@ -63,7 +63,8 @@ pub struct Learner<const S: bool> {
 }
 
 impl <const S: bool> Learner<S> {
-    pub fn new(input: PathBuf, args: Args) -> Self {
+
+    pub fn new(input: PathBuf, ring: &Box<dyn Ring>, args: Args) -> Self {
         if let Command::Learn { trainfile,
                                 testfile,
                                 outfolder,
@@ -73,7 +74,6 @@ impl <const S: bool> Learner<S> {
                                 ltimeout: _,
                                 loss: _,
                                 jobs,
-                                semiring: _,
                                 optimizer: _,
                                 lr_drop: _,
                                 epoch_drop: _,
@@ -94,21 +94,11 @@ impl <const S: bool> Learner<S> {
             let mut test_clauses = vec![];
             for (query, _) in train_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
                 clauses.push(c);
             }
             for (query, _) in test_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
                 test_clauses.push(c);
             }
@@ -132,7 +122,7 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
-            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout);
+            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, ring);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
@@ -157,9 +147,9 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
-            let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
-            let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
+            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX, ring);
+            let mut train_dataset = Dataset::new(vec![], vec![]);
+            let mut test_dataset = Dataset::new(vec![], vec![]);
             while let Some(d) = train_dacs.pop() {
                 let expected = train_queries.pop().unwrap().1;
                 train_dataset.add_query(d,expected);
@@ -220,32 +210,32 @@ impl <const S: bool> Learner<S> {
     // --- Evaluation --- //
 
     // Evaluate the different train DACs and return the results
-    pub fn evaluate(&mut self) -> Vec<f64> {
+    pub fn evaluate(&mut self, ring: &Box<dyn Ring>) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.train.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.train.get_queries_mut().par_iter_mut().for_each(|d| {
-            d.evaluate();
+            d.evaluate(ring);
         });
         self.train.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
     // Evaluate the different test DACs and return the results
-    pub fn test(&mut self) -> Vec<f64> {
+    pub fn test(&mut self, ring: &Box<dyn Ring>) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.test.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
         }
         self.test.get_queries_mut().par_iter_mut().for_each(|d| {
-            d.evaluate();
+            d.evaluate(ring);
         });
         self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
-    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
+    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, ring: &Box<dyn Ring>) {
         let distributions: Vec<Vec<f64>> = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
-        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout);
+        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, ring);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -337,7 +327,7 @@ impl <const S: bool> Learner<S> {
         
         // Evaluate the test set before training, if it exists
         if self.test.len() != 0 {
-            let predictions = self.test();
+            let predictions = self.test(params.ring());
             let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss().loss(prediction, self.test.expected(i))).collect::<Vec<f64>>();
             self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
@@ -349,7 +339,7 @@ impl <const S: bool> Learner<S> {
             // Update the learning rate
             let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
             // Forward pass
-            let predictions = self.evaluate();
+            let predictions = self.evaluate(params.ring());
             // Compute the loss and the gradients
             for i in 0..predictions.len() {
                 train_loss[i] = params.loss().loss(predictions[i], self.train.expected(i));
@@ -380,7 +370,7 @@ impl <const S: bool> Learner<S> {
 
             if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
                 println!("Recompiling at epoch {}", e);
-                self.recompile_dacs(branching, approx, params.compilation_timeout());
+                self.recompile_dacs(branching, approx, params.compilation_timeout(), params.ring());
             }
 
             // TODO: Add a verbosity command line argument
@@ -395,7 +385,7 @@ impl <const S: bool> Learner<S> {
         
         // Evaluate the test set after training, if it exists
         if self.test.len() != 0 {
-            let predictions = self.test();
+            let predictions = self.test(params.ring());
             let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss().loss(prediction, self.test.expected(i))).collect::<Vec<f64>>();
             self.log.log_test(&test_loss, self.epsilon, &predictions);
         }
@@ -403,7 +393,7 @@ impl <const S: bool> Learner<S> {
 }
 
 impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> {
-    type Output = Dac<Float>;
+    type Output = Dac;
 
     fn index(&self, index: DacIndex) -> &Self::Output {
         &self.train[index.0]
@@ -423,7 +413,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<f64>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<f64>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, ring: &Box<dyn Ring>) -> Vec<Dac> {
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -433,24 +423,15 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
         let propagator = Propagator::new(&mut state);
         let component_extractor = ComponentExtractor::new(&problem, &mut state);
         let compiler = generic_solver(problem, state, component_extractor, branching, propagator, parameters, false, true);
-        match approx {
-            ApproximateMethod::Bounds => {
-                match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                }
-            },
-            ApproximateMethod::LDS => {
-                match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                }
-            },
-            
+        let is_lds = match approx {
+            ApproximateMethod::LDS => true,
+            ApproximateMethod::Bounds => false,
+        };
+        match compiler {
+            crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(is_lds, ring),
+            crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(is_lds, ring),
+            crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+            crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
         }
     }).collect::<Vec<_>>()
 }
@@ -468,20 +449,16 @@ pub fn do_early_stopping(avg_loss:f64, prev_loss:f64, count:&mut usize, stopping
 
 /// Structure representing a dataset for the learners. A dataset is a set of queries (boolean
 /// formulas compiled into an arithmetic circuit) associated with an expected probability
-#[derive(Default)]
-pub struct Dataset<R> 
-    where R: SemiRing
-{
-    queries: Vec<Dac<R>>,
+//#[derive(Default)]
+pub struct Dataset {
+    queries: Vec<Dac>,
     expected: Vec<f64>,
 }
 
-impl<R> Dataset<R>
-    where R: SemiRing
-{
+impl Dataset {
 
     /// Creates a new dataset from the provided queries and expected probabilities
-    pub fn new(queries: Vec<Dac<R>>, expected: Vec<f64>) -> Self {
+    pub fn new(queries: Vec<Dac>, expected: Vec<f64>) -> Self {
         Self {
             queries,
             expected,
@@ -494,17 +471,17 @@ impl<R> Dataset<R>
     }
 
     /// Returns a reference to the queries of the dataset
-    pub fn get_queries(&self) -> &Vec<Dac<R>> {
+    pub fn get_queries(&self) -> &Vec<Dac> {
         &self.queries
     }
 
     /// Returns a mutable reference to the queries of the dataset
-    pub fn get_queries_mut(&mut self) -> &mut Vec<Dac<R>> {
+    pub fn get_queries_mut(&mut self) -> &mut Vec<Dac> {
         &mut self.queries
     }
 
     /// Adds a query to the dataset
-    pub fn add_query(&mut self, query: Dac<R>, expected: f64) {
+    pub fn add_query(&mut self, query: Dac, expected: f64) {
         self.queries.push(query);
         self.expected.push(expected);
     }
@@ -515,20 +492,20 @@ impl<R> Dataset<R>
     }
 
     /// Sets the queries of the dataset
-    pub fn set_queries(&mut self, queries: Vec<Dac<R>>) {
+    pub fn set_queries(&mut self, queries: Vec<Dac>) {
         self.queries = queries;
     }
 }
 
-impl<R: SemiRing + 'static> std::ops::Index<usize> for Dataset<R> {
-    type Output = Dac<R>;
+impl std::ops::Index<usize> for Dataset {
+    type Output = Dac;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.queries[index]
     }
 }
 
-impl<R: SemiRing + 'static> std::ops::IndexMut<usize> for Dataset<R> {
+impl std::ops::IndexMut<usize> for Dataset {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.queries[index]
     }

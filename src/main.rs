@@ -14,8 +14,8 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use schlandals::Args;
-use schlandals::Command;
+use schlandals::args::Args;
+use schlandals::args::Command;
 use clap::Parser;
 
 fn main() {

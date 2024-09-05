@@ -22,12 +22,12 @@ use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
 use crate::ac::ac::{NodeIndex, Dac};
-use crate::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
 use rug::Float;
 use std::time::Instant;
+use crate::ring::Ring;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);
 type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
@@ -46,9 +46,8 @@ type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 /// approximation iff
 ///     p / (1 + epsilon) <= p' <= p*(1 + epsilon)
 ///
-/// Finally, the compiler is able to create an arithmetic circuit for any semi-ring. Currently
-/// implemented are the probability semi-ring (the default) and tensor semi-ring, which uses torch
-/// tensors (useful for automatic differentiation in learning).
+/// Finally, the compiler is able to create an arithmetic circuit for any semi-ring. Currently the
+/// only implemented one is the probability semi-ring.
 pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     /// Implication problem of the (Horn) clauses in the input
     problem: Problem,
@@ -105,7 +104,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     }
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self, is_lds: bool) -> Solution {
+    pub fn search(&mut self, is_lds: bool, ring: &Box<dyn Ring>) -> Solution {
         self.parameters.start = Instant::now();
         self.state.save_state();
         if let Some(sol) = self.preprocess() {
@@ -119,14 +118,14 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
         }
         if !is_lds {
-            let sol = self.do_discrepancy_iteration(usize::MAX);
+            let sol = self.do_discrepancy_iteration(usize::MAX, ring);
             self.statistics.print();
             sol
         } else {
             let mut discrepancy = 1;
             let mut complete_sol = None;
             loop {
-                let solution = self.do_discrepancy_iteration(discrepancy);
+                let solution = self.do_discrepancy_iteration(discrepancy, ring);
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     solution.print();
                     complete_sol = Some(solution);
@@ -189,8 +188,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         self.branching_heuristic.init(&self.problem, &self.state);
     }
 
-    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
-        let result = self.pwmc(ComponentIndex(0), 1, discrepancy);
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, ring: &Box<dyn Ring>) -> Solution {
+        let result = self.pwmc(ComponentIndex(0), 1, discrepancy, ring);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
@@ -198,7 +197,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
-    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize) -> SearchResult {
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, ring: &Box<dyn Ring>) -> SearchResult {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
@@ -271,7 +270,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                             self.statistics.decomposition(self.component_extractor.number_components(&self.state));
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
-                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id);
+                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id, ring);
                                 if sub_solution.backtrack_level != level {
                                     self.restore();
                                     is_product_sat = false;
@@ -318,7 +317,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
 impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
-    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> {
+    pub fn compile(&mut self, is_lds: bool, ring: &Box<dyn Ring>) -> Dac {
         let start = Instant::now();
         self.state.save_state();
         let preproc_result = self.preprocess();
@@ -330,19 +329,19 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }
         // Perform the actual search that will fill the cache
         if self.problem.number_clauses() == 0 {
-            let mut ac = self.build_ac(0.0, &forced_by_propagation);
+            let mut ac = self.build_ac(0.0, &forced_by_propagation, ring);
             ac.set_compile_time(start.elapsed().as_secs());
             return ac
         }
         if !is_lds {
-            let sol = self.do_discrepancy_iteration(usize::MAX);
+            let sol = self.do_discrepancy_iteration(usize::MAX, ring);
             self.statistics.print();
             if sol.has_converged(0.0) && sol.bounds().0 < FLOAT_CMP_THRESHOLD {
                 let mut ac = Dac::default();
                 ac.set_compile_time(start.elapsed().as_secs());
                 return ac;
             }
-            let mut ac = self.build_ac(sol.epsilon(), &forced_by_propagation);
+            let mut ac = self.build_ac(sol.epsilon(), &forced_by_propagation, ring);
             ac.set_compile_time(start.elapsed().as_secs());
             ac
         } else {
@@ -350,9 +349,9 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             let mut complete_sol = None;
             let mut complete_ac = None;
             loop {
-                let solution = self.do_discrepancy_iteration(discrepancy);
+                let solution = self.do_discrepancy_iteration(discrepancy, ring);
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
-                    complete_ac = Some(self.build_ac(solution.epsilon(), &forced_by_propagation));
+                    complete_ac = Some(self.build_ac(solution.epsilon(), &forced_by_propagation, ring));
                     complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
                     //solution.print();
                     complete_sol = Some(solution);
@@ -367,7 +366,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }        
     }
 
-    pub fn build_ac<R: SemiRing>(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac<R> {
+    pub fn build_ac(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>), ring: &Box<dyn Ring>) -> Dac {
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
@@ -379,7 +378,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         let mut has_node_search = false;
         let mut root_number_children = if self.cache.contains_key(&self.component_extractor[ComponentIndex(0)].get_cache_key()) { has_node_search = true; 1 } else { 0 };
         root_number_children += forced_by_propagation.0.len() + forced_by_propagation.1.len();
-        let root = dac.prod_node(root_number_children);
+        let root = dac.prod_node(root_number_children, ring);
         let mut child_id = root.input_start();
 
         // Forced variables from the propagation
@@ -390,7 +389,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }
         // Unconstrained distribution variables
         for (d, values) in forced_by_propagation.1.iter() {
-            let sum_node = dac.sum_node(values.len());
+            let sum_node = dac.sum_node(values.len(), ring);
             for (i, v) in values.iter().copied().enumerate() {
                 let distribution_node = dac.distribution_value_node(&self.problem, *d, v);
                 dac.add_input(sum_node.input_start() + i, distribution_node);
@@ -402,7 +401,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
         let mut map: FxHashMap<usize, NodeIndex> = FxHashMap::default();
         if has_node_search {
-            let node_search = self.explore_cache(&mut dac, 0, &mut map);
+            let node_search = self.explore_cache(&mut dac, 0, &mut map, ring);
             dac.add_input(child_id, node_search);
         }
         let root = dac.add_node(root);
@@ -410,13 +409,13 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         dac
     }
 
-    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>) -> NodeIndex {
+    pub fn explore_cache(&self, dac: &mut Dac, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, ring: &Box<dyn Ring>) -> NodeIndex {
         if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
         }
         let current = self.cache.get(&self.cache_keys[cache_key_index]).unwrap();
         let sum_node_child = current.number_children();
-        let sum_node = dac.sum_node(sum_node_child);
+        let sum_node = dac.sum_node(sum_node_child, ring);
 
         let mut sum_node_child = 0;
         // Iterate on the variables the distribution with the associated cache key
@@ -425,7 +424,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             if number_children == 0 {
                 continue;
             }
-            let prod_node = dac.prod_node(number_children);
+            let prod_node = dac.prod_node(number_children, ring);
 
             let mut child_id = prod_node.input_start();
             // Adding to the new product node all the propagated variables, including the distribution value we branch on
@@ -438,7 +437,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
             // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
             for (d, values) in current.unconstrained_distribution_variables_of(variable) {
-                let sum_node_unconstrained = dac.sum_node(values.len());
+                let sum_node_unconstrained = dac.sum_node(values.len(), ring);
                 for (i, v) in values.iter().copied().enumerate() {
                     let distribution_unconstrained = dac.distribution_value_node( &self.problem, *d, v);
                     dac.add_input(sum_node_unconstrained.input_start() + i, distribution_unconstrained);
@@ -449,7 +448,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             }
             // Recursively build the DAC for each sub-component
             for cache_key in current.child_keys(variable) {
-                let id = self.explore_cache(dac, cache_key, c);
+                let id = self.explore_cache(dac, cache_key, c, ring);
                 dac.add_input(child_id, id);
                 child_id += 1;
             }

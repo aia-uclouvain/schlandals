@@ -13,7 +13,6 @@
 //
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
-use clap::ValueEnum;
 use rug::Float;
 use std::hash::Hash;
 
@@ -28,45 +27,6 @@ pub const FLOAT_CMP_THRESHOLD: f64 = 0.000001;
 
 pub type Bounds = (Float, Float);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Branching {
-    /// Minimum In-degree of a clause in the implication-graph
-    MinInDegree,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Loss {
-    MAE,
-    MSE,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Semiring {
-    Probability,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Optimizer {
-    Adam,
-    SGD,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum ApproximateMethod {
-    /// Bound-based pruning
-    Bounds,
-    /// Limited Discrepancy Search
-    LDS,
-}
-
-impl std::fmt::Display for ApproximateMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ApproximateMethod::Bounds => write!(f, "bounds"),
-            ApproximateMethod::LDS => write!(f, "lds"),
-        }
-    }
-}
 
 /// A key of the cache. It is composed of
 ///     1. A hash representing the sub-problem being solved

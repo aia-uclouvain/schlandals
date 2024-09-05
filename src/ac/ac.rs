@@ -35,10 +35,10 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use rustc_hash::FxHashMap;
-use crate::common::*;
+use crate::common::{FLOAT_CMP_THRESHOLD, F128};
 
 use crate::core::problem::{Problem, DistributionIndex, VariableIndex};
-use crate::semiring::*;
+use crate::ring::*;
 use crate::common::Solution;
 
 use super::node::*;
@@ -48,11 +48,9 @@ use rug::Float;
 pub struct NodeIndex(pub usize);
 
 /// Structure representing the arithmetic circuit.
-pub struct Dac<R>
-    where R: SemiRing
-{
+pub struct Dac {
     /// Internal nodes of the circuit
-    nodes: Vec<Node<R>>,
+    nodes: Vec<Node>,
     /// Each node has a reference (two usizes) to a slice of this vector to store the index of
     /// their inputs in the circuit
     inputs: Vec<NodeIndex>,
@@ -68,9 +66,7 @@ pub struct Dac<R>
     epsilon: f64,
 }
 
-impl<R> Dac<R>
-    where R: SemiRing
-{
+impl Dac {
 
     /// Creates a new empty DAC. An input node is created for each distribution in the problem.
     pub fn new(epsilon: f64) -> Self {
@@ -95,7 +91,7 @@ impl<R> Dac<R>
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.nodes.len() == 0
     }
 
     pub fn epsilon(&self) -> f64 {
@@ -107,8 +103,8 @@ impl<R> Dac<R>
     }
 
     /// Adds a prod node to the circuit. Returns its index.
-    pub fn prod_node(&mut self, number_children: usize) -> Node<R> {
-        let mut node = Node::product();
+    pub fn prod_node(&mut self, number_children: usize, ring: &Box<dyn Ring>) -> Node {
+        let mut node = Node::product(ring);
         node.set_input_start(self.inputs.len());
         node.set_number_inputs(number_children);
         for _ in 0..number_children {
@@ -118,8 +114,8 @@ impl<R> Dac<R>
     }
     
     /// Adds a sum node to the circuit. Returns its index.
-    pub fn sum_node(&mut self, number_children: usize) -> Node<R> {
-        let mut node = Node::sum();
+pub fn sum_node(&mut self, number_children: usize, ring: &Box<dyn Ring>) -> Node {
+    let mut node = Node::sum(ring);
         node.set_input_start(self.inputs.len());
         node.set_number_inputs(number_children);
         for _ in 0..number_children {
@@ -128,7 +124,7 @@ impl<R> Dac<R>
         node
     }
 
-    pub fn add_node(&mut self, node: Node<R>) -> NodeIndex {
+    pub fn add_node(&mut self, node: Node) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(node);
         id
@@ -170,31 +166,28 @@ impl<R> Dac<R>
 
 // --- CIRCUIT EVALUATION ---
 
-impl<R> Dac<R>
-    where R: SemiRing
-{
+impl Dac {
     /// Returns the probability of the circuit. If the circuit has not been evaluated,
     /// 1.0 is returned if the root is a multiplication node, and 0.0 if the root is a
     /// sum node
-    pub fn circuit_probability(&self) -> R {
-        if self.is_empty() {
-            return R::zero();
+    pub fn circuit_probability(&self) -> Float {
+        if self.nodes.is_empty() {
+            return F128!(0.0);
         }
         self.nodes.last().unwrap().value().clone()
     }
 
     pub fn solution(&self) -> Solution {
-        let p = if !self.is_empty() {self.nodes.last().unwrap().value().to_f64()} else {0.0};
+        let p = if !self.nodes.is_empty() {self.nodes.last().unwrap().value().to_f64()} else {0.0};
         Solution::new(F128!(p), F128!(p), self.compile_time)
     }
 
     /// Updates the values of the distributions to the given values
-    pub fn reset_distributions(&mut self, distributions: &[Vec<R>]) {
+    pub fn reset_distributions(&mut self, distributions: &[Vec<Float>]) {
         // TODO: Stop after the last distribution
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let NodeType::Distribution { d, v } = self[node].get_type() {
-                let value = R::copy(&distributions[d][v]);
-                self[node].set_value(value);
+                self[node].set_value(distributions[d][v].clone());
             }
         }
     }
@@ -211,24 +204,38 @@ impl<R> Dac<R>
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self) -> R {
+    pub fn evaluate(&mut self, ring: &Box<dyn Ring>) -> Float {
         if self.is_empty() {
-            return R::zero();
+            return F128!(0.0);
         }
         for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
             let start = self.nodes[node.0].input_start();
             let end = start + self.nodes[node.0].number_inputs();
             if self[node].is_product() {
-                let value = if start != end { R::mul_children((start..end).map(|idx| {
-                    let child = self.inputs[idx];
-                    self[child].value()
-                })) } else { R::zero() };
+                let value = if start != end {
+                    let mut value = F128!(1.0);
+                    for i in start..end {
+                        let child = self.inputs[i];
+                        let child_value = self[child].value();
+                        value = ring.times(&value, child_value);
+                    }
+                    value
+                } else {
+                    F128!(0.0)
+                };
                 self[node].set_value(value);
             } else if self[node].is_sum() {
-                let value = if start != end { R::sum_children((start..end).map(|idx| {
-                    let child = self.inputs[idx];
-                    self[child].value()
-                })) } else { R::one() };
+                let value = if start != end {
+                    let mut value = F128!(0.0);
+                    for i in start..end {
+                        let child = self.inputs[i];
+                        let child_value = self[child].value();
+                        value = ring.plus(&value, child_value);
+                    }
+                    value
+                } else {
+                    F128!(1.0)
+                };
                 self[node].set_value(value);
             }
         }
@@ -241,9 +248,7 @@ impl<R> Dac<R>
 
 // --- ITERATOR ---
 
-impl<R> Dac<R>
-where R: SemiRing
-{
+impl Dac {
     pub fn iter(&self) -> impl Iterator<Item = NodeIndex> {
         (0..self.nodes.len()).map(NodeIndex)
     }
@@ -256,19 +261,15 @@ where R: SemiRing
 
 // --- Indexing the circuit --- 
 
-impl<R> std::ops::Index<NodeIndex> for Dac<R>
-where R: SemiRing
-{
-    type Output = Node<R>;
+impl std::ops::Index<NodeIndex> for Dac {
+    type Output = Node;
 
     fn index(&self, index: NodeIndex) -> &Self::Output {
         &self.nodes[index.0]
     }
 }
 
-impl<R> std::ops::IndexMut<NodeIndex> for Dac<R>
-where R: SemiRing
-{
+impl std::ops::IndexMut<NodeIndex> for Dac {
     fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
         &mut self.nodes[index.0]
     }
@@ -277,9 +278,7 @@ where R: SemiRing
 // Various methods for dumping the compiled circuits, including standardized format and problemviz (inspired from https://github.com/xgillard/ddo )
 
 // Visualization as problemviz DOT file
-impl<R> Dac<R>
-where R: SemiRing
-{
+impl Dac {
 
     /// Returns a DOT representation of the circuit
     pub fn as_graphviz(&self) -> String {
@@ -333,9 +332,7 @@ where R: SemiRing
 
 // Custom text format for the network
 
-impl<R> fmt::Display for Dac<R>
-where R: SemiRing
-{
+impl fmt::Display for Dac {
     /// Formats the circuit in the following formats
     ///     1. The first line starts with "input" followed by the indexes in the inputs vector,
     ///        separated by a space
@@ -363,9 +360,7 @@ where R: SemiRing
     }
 }
 
-impl<R> Dac<R>
-where R: SemiRing
-{
+impl Dac {
     /// Dump the structure of the DAC in the given file
     pub fn to_file(&self, filepath: &PathBuf) {
         let mut output = File::create(filepath).unwrap();
@@ -373,7 +368,7 @@ where R: SemiRing
     }
 
     /// Reads the structure of the dac from the given file
-    pub fn from_file(filepath: &PathBuf) -> Self {
+    pub fn from_file(filepath: &PathBuf, ring: &Box<dyn Ring>) -> Self {
         let mut dac = Self {
             nodes: vec![],
             inputs: vec![],
@@ -400,7 +395,7 @@ where R: SemiRing
                     propagation.push((var, value));
                     i += 2;
                 }
-                let mut node = if l.starts_with('x') { Node::product() } else { Node::sum() };
+                let mut node = if l.starts_with('x') { Node::product(ring) } else { Node::sum(ring) };
                 node.set_input_start(values[2]);
                 node.set_number_inputs(values[3]);
                 dac.nodes.push(node);
@@ -408,7 +403,7 @@ where R: SemiRing
                 let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
                 let d = values[0];
                 let v = values[1];
-                let mut node: Node<Float> = Node::distribution(d, v, 0.5);
+                let mut node: Node = Node::distribution(d, v, 0.5);
                 node.set_input_start(values[4]);
                 node.set_number_inputs(values[5]);
                 dac.distribution_mapping.insert((d, v), NodeIndex(dac.nodes.len()-1));
@@ -421,9 +416,7 @@ where R: SemiRing
     }
 }
 
-impl<R> Default for Dac<R>
-    where R: SemiRing
-{
+impl Default for Dac {
     fn default() -> Self {
         Self::new(0.0)
     }

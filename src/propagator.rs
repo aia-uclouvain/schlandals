@@ -201,7 +201,6 @@ impl Propagator {
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
                 let head = learned_clause.iter().copied().find(|l| l.is_positive());
                 let _ = g.add_clause(learned_clause, head, state, true);
-                //extractor.add_clause_to_component(component, clause);
                 return PropagationResult::Err(backjump);
             }
             g[variable].set_assignment_position(self.assignments.len(), state);

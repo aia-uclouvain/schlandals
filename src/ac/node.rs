@@ -17,9 +17,9 @@
 //! This module provide an implementation of a node in an arithmetic circuits.
 //! The node is generic over a semiring R
 
-use rug::Float;
-use crate::semiring::*;
-use crate::common::*;
+use rug::{Float, Assign};
+use crate::ring::*;
+use crate::common::F128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// Types of node in an AC
@@ -42,12 +42,10 @@ macro_rules! is_node_type {
 }
 
 /// A node structure that represents both internal and distribution nodes.
-pub struct Node<R>
-    where R: SemiRing
-{
+pub struct Node {
     /// Value of the node. Initialized at 1.0 for product, at 0.0 for sum and at a specific value for distribution nodes.
     /// For product and sum nodes, after the evaluation it is equal to the product (sum) of its input values.
-    value: R,
+    value: Float,
     /// Type of node
     nodetype: NodeType,
     /// Start of the inputs in the vector of inputs
@@ -59,13 +57,11 @@ pub struct Node<R>
     path_value: Float,
 }
 
-impl<R> Node<R>
-    where R: SemiRing
-{
+impl Node {
     /// Returns a new product node
-    pub fn product() -> Self {
+    pub fn product(ring: &Box<dyn Ring>) -> Self {
         Node {
-            value: R::one(),
+            value: ring.one(),
             nodetype: NodeType::Product,
             input_start: 0,
             number_inputs: 0,
@@ -74,9 +70,9 @@ impl<R> Node<R>
     }
 
     /// Returns a new sum node
-    pub fn sum() -> Self {
+    pub fn sum(ring: &Box<dyn Ring>) -> Self {
         Node {
-            value: R::zero(),
+            value: ring.zero(),
             nodetype: NodeType::Sum,
             input_start: 0,
             number_inputs: 0,
@@ -87,7 +83,7 @@ impl<R> Node<R>
     /// Returns a new distribution node with P[distribution = value] = probability
     pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
         Node {
-            value: R::from_f64(probability),
+            value: F128!(probability),
             nodetype: NodeType::Distribution {d: distribution, v: value},
             input_start: 0,
             number_inputs: 0,
@@ -111,12 +107,12 @@ impl<R> Node<R>
     }
 
     /// Returns a reference to the value stored in the node
-    pub fn value(&self) -> &R {
+    pub fn value(&self) -> &Float {
         &self.value
     }
 
     /// Returns a mutable reference to the value stored in the node
-    pub fn value_mut(&mut self) -> &mut R {
+    pub fn value_mut(&mut self) -> &mut Float {
         &mut self.value
     }
 
@@ -145,12 +141,12 @@ impl<R> Node<R>
     // --- Setters --- /
 
     /// Sets the value of the node to the given float
-    pub fn set_value(&mut self, value: R){
+    pub fn set_value(&mut self, value: Float){
         self.value = value
     }
 
-    pub fn assign(&mut self, value: &R) {
-        self.value.set_value(value);
+    pub fn assign(&mut self, value: &Float) {
+        self.value.assign(value);
     }
 
     /// Sets the path value of the node to the given float

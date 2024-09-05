@@ -14,7 +14,7 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{Loss, Optimizer};
+use crate::{ring::Ring, Optimizer};
 
 pub mod learner;
 mod logger;
@@ -29,7 +29,7 @@ pub struct LearnParameters {
     /// The timeout used for the training loop, in seconds
     learn_timeout: u64,
     /// The loss function
-    loss: Loss,
+    loss: Box<dyn LossFunctions>,
     /// The optimizer
     optimizer: Optimizer,
     /// The learning rate decay
@@ -46,14 +46,40 @@ pub struct LearnParameters {
     recompile: bool,
     /// Whether to weight the learning with the epsilon value
     e_weighted: bool,
+    ring: Box<dyn Ring>,
 }
 
 impl LearnParameters {
     
-    pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, 
-               early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool) -> Self {
-        Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, 
-              patience, recompile, e_weighted}
+    pub fn new(lr: f64,
+            nepochs: usize,
+            compilation_timeout: u64,
+            learn_timeout: u64,
+            loss: Box<dyn LossFunctions>,
+            optimizer: Optimizer,
+            lr_drop: f64,
+            epoch_drop: usize,
+            early_stop_threshold: f64,
+            early_stop_delta: f64,
+            patience: usize,
+            recompile:bool,
+            e_weighted:bool,
+            ring: Box<dyn Ring>) -> Self {
+        Self {lr,
+            nepochs,
+            compilation_timeout,
+            learn_timeout,
+            loss,
+            optimizer,
+            lr_drop,
+            epoch_drop,
+            early_stop_threshold,
+            early_stop_delta,
+            patience,
+            recompile,
+            e_weighted,
+            ring,
+        }
     }
 
     /// Returns the learning rate
@@ -77,8 +103,8 @@ impl LearnParameters {
     }
 
     /// Return the loss
-    pub fn loss(&self) -> Loss {
-        self.loss
+    pub fn loss(&self) -> &Box<dyn LossFunctions> {
+        &self.loss
     }
 
     /// Return the optimizer
@@ -122,6 +148,10 @@ impl LearnParameters {
     pub fn e_weighted(&self) -> bool {
         self.e_weighted
     }
+
+    pub fn ring(&self) -> &Box<dyn Ring> {
+        &self.ring
+    }
 }
 
 /// This trait provide multiple functions to use on loss functions. In particular, every loss
@@ -135,27 +165,36 @@ pub trait LossFunctions {
     fn gradient(&self, predicted: f64, expected: f64) -> f64;
 }
 
-impl LossFunctions for Loss {
+#[derive(Copy, Clone, Default)]
+pub struct MAE;
+
+impl LossFunctions for MAE {
 
     fn loss(&self, predicted: f64, expected: f64) -> f64 {
-        match self {
-            Loss::MSE => (predicted - expected).powi(2),
-            Loss::MAE => (predicted - expected).abs(),
-        }
+        (predicted - expected).abs()
     }
 
     fn gradient(&self, predicted: f64, expected: f64) -> f64 {
-        match self {
-            Loss::MSE => 2.0 * (predicted - expected),
-            Loss::MAE => {
-                if predicted == expected {
-                    0.0
-                } else if predicted > expected {
-                    1.0
-                } else {
-                    -1.0
-                }
-            },
+        if predicted == expected {
+            0.0
+        } else if predicted > expected {
+            1.0
+        } else {
+            -1.0
         }
+    }
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct MSE;
+
+impl LossFunctions for MSE {
+
+    fn loss(&self, predicted: f64, expected: f64) -> f64 {
+        (predicted - expected).powi(2)
+    }
+
+    fn gradient(&self, predicted: f64, expected: f64) -> f64 {
+        2.0 * (predicted - expected)
     }
 }
