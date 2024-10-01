@@ -26,15 +26,16 @@ use crate::common::F128;
 
 /// Trait that defines the behavior of a semiring.
 pub trait Ring: Sync {
-
     /// Returns the neutral element for the multiplication
     fn one(&self) -> Float;
     /// Returns the neutral element for the addition
     fn zero(&self) -> Float;
-    /// Apply the + operator between two elements of the ring
-    fn plus(&self, a: &Float, b: &Float) -> Float;
-    /// App the x operator between two elements of the ring
-    fn times(&self, a: &Float, b: &Float) -> Float;
+    /// Apply the + operator between two elements of the ring and asigns it to the first argument
+    fn plus(&self, a: &mut Float, b: &Float);
+    /// App the x operator between two elements of the ring and assigns it to the first argument
+    fn times(&self, a: &mut Float, b: &Float);
+    /// Returns true if the ring is a counting one
+    fn is_counting(&self)-> bool;
 }
 
 #[derive(Copy, Clone, Default)]
@@ -53,13 +54,18 @@ impl Ring for AddMulRing {
     }
 
     #[inline(always)]
-    fn plus(&self, a: &Float, b: &Float) -> Float {
-        a.clone() + b
+    fn plus(&self, a: &mut Float, b: &Float) {
+        *a += b;
     }
 
     #[inline(always)]
-    fn times(&self, a: &Float, b: &Float) -> Float {
-        a.clone() * b
+    fn times(&self, a: &mut Float, b: &Float) {
+        *a *= b;
+    }
+
+    #[inline(always)]
+    fn is_counting(&self) -> bool {
+        true
     }
 }
 
@@ -79,12 +85,16 @@ impl Ring for MaxMulRing {
     }
 
     #[inline(always)]
-    fn plus(&self, a: &Float, b: &Float) -> Float {
-        a.clone().max(b)
+    fn plus(&self, a: &mut Float, b: &Float) {
+        *a = a.clone().max(b);
     }
 
     #[inline(always)]
-    fn times(&self, a: &Float, b: &Float) -> Float {
-        a.clone() * b
+    fn times(&self, a: &mut Float, b: &Float) {
+        *a *= b;
+    }
+
+    fn is_counting(&self) -> bool {
+        false
     }
 }

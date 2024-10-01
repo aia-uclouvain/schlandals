@@ -103,8 +103,8 @@ impl LearnParameters {
     }
 
     /// Return the loss
-    pub fn loss(&self) -> &Box<dyn LossFunctions> {
-        &self.loss
+    pub fn loss(&self) -> &dyn LossFunctions {
+        self.loss.as_ref()
     }
 
     /// Return the optimizer
@@ -149,8 +149,8 @@ impl LearnParameters {
         self.e_weighted
     }
 
-    pub fn ring(&self) -> &Box<dyn Ring> {
-        &self.ring
+    pub fn ring(&self) -> &dyn Ring {
+        self.ring.as_ref()
     }
 }
 

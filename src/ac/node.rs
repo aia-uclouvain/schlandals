@@ -59,7 +59,7 @@ pub struct Node {
 
 impl Node {
     /// Returns a new product node
-    pub fn product(ring: &Box<dyn Ring>) -> Self {
+    pub fn product(ring: &dyn Ring) -> Self {
         Node {
             value: ring.one(),
             nodetype: NodeType::Product,
@@ -70,7 +70,7 @@ impl Node {
     }
 
     /// Returns a new sum node
-    pub fn sum(ring: &Box<dyn Ring>) -> Self {
+    pub fn sum(ring: &dyn Ring) -> Self {
         Node {
             value: ring.zero(),
             nodetype: NodeType::Sum,

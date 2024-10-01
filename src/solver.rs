@@ -104,7 +104,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     }
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self, is_lds: bool, ring: &Box<dyn Ring>) -> Solution {
+    pub fn search(&mut self, is_lds: bool, ring: &dyn Ring) -> Solution {
         self.parameters.start = Instant::now();
         self.state.save_state();
         if let Some(sol) = self.preprocess() {
@@ -188,7 +188,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         self.branching_heuristic.init(&self.problem, &self.state);
     }
 
-    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, ring: &Box<dyn Ring>) -> Solution {
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, ring: &dyn Ring) -> Solution {
         let result = self.pwmc(ComponentIndex(0), 1, discrepancy, ring);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
@@ -197,7 +197,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
-    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, ring: &Box<dyn Ring>) -> SearchResult {
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, ring: &dyn Ring) -> SearchResult {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
@@ -279,8 +279,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                                     cache_entry.clear_children();
                                     break;
                                 }
-                                prod_p_in *= &sub_solution.bounds.0;
-                                prod_p_out *= sub_maximum_probability - sub_solution.bounds.1.clone();
+                                ring.times(&mut prod_p_in, &sub_solution.bounds.0);
+                                ring.times(&mut prod_p_out, &(sub_maximum_probability - sub_solution.bounds.1.clone()));
                                 if prod_p_in == 0.0 {
                                     is_product_sat = false;
                                     break;
@@ -294,8 +294,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                             cache_entry.children.insert(variable, child_entry);
                         }
                         prod_p_out = prod_maximum_probability - prod_p_out;
-                        new_p_in += prod_p_in * &p;
-                        new_p_out += prod_p_out * &p;
+                        ring.plus(&mut new_p_in, &(prod_p_in * &p));
+                        ring.plus(&mut new_p_out, &(prod_p_out * &p));
                         self.restore();
                     },
                 }
@@ -317,7 +317,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
 impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
-    pub fn compile(&mut self, is_lds: bool, ring: &Box<dyn Ring>) -> Dac {
+    pub fn compile(&mut self, is_lds: bool, ring: &dyn Ring) -> Dac {
         let start = Instant::now();
         self.state.save_state();
         let preproc_result = self.preprocess();
@@ -366,7 +366,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }        
     }
 
-    pub fn build_ac(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>), ring: &Box<dyn Ring>) -> Dac {
+    pub fn build_ac(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>), ring: &dyn Ring) -> Dac {
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
@@ -409,7 +409,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         dac
     }
 
-    pub fn explore_cache(&self, dac: &mut Dac, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, ring: &Box<dyn Ring>) -> NodeIndex {
+    pub fn explore_cache(&self, dac: &mut Dac, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, ring: &dyn Ring) -> NodeIndex {
         if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
         }

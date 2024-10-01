@@ -103,7 +103,7 @@ impl Dac {
     }
 
     /// Adds a prod node to the circuit. Returns its index.
-    pub fn prod_node(&mut self, number_children: usize, ring: &Box<dyn Ring>) -> Node {
+    pub fn prod_node(&mut self, number_children: usize, ring: &dyn Ring) -> Node {
         let mut node = Node::product(ring);
         node.set_input_start(self.inputs.len());
         node.set_number_inputs(number_children);
@@ -114,7 +114,7 @@ impl Dac {
     }
     
     /// Adds a sum node to the circuit. Returns its index.
-pub fn sum_node(&mut self, number_children: usize, ring: &Box<dyn Ring>) -> Node {
+pub fn sum_node(&mut self, number_children: usize, ring: &dyn Ring) -> Node {
     let mut node = Node::sum(ring);
         node.set_input_start(self.inputs.len());
         node.set_number_inputs(number_children);
@@ -204,7 +204,7 @@ impl Dac {
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
-    pub fn evaluate(&mut self, ring: &Box<dyn Ring>) -> Float {
+    pub fn evaluate(&mut self, ring: &dyn Ring) -> Float {
         if self.is_empty() {
             return F128!(0.0);
         }
@@ -217,7 +217,7 @@ impl Dac {
                     for i in start..end {
                         let child = self.inputs[i];
                         let child_value = self[child].value();
-                        value = ring.times(&value, child_value);
+                        ring.times(&mut value, child_value);
                     }
                     value
                 } else {
@@ -230,7 +230,7 @@ impl Dac {
                     for i in start..end {
                         let child = self.inputs[i];
                         let child_value = self[child].value();
-                        value = ring.plus(&value, child_value);
+                        ring.plus(&mut value, child_value);
                     }
                     value
                 } else {
@@ -368,7 +368,7 @@ impl Dac {
     }
 
     /// Reads the structure of the dac from the given file
-    pub fn from_file(filepath: &PathBuf, ring: &Box<dyn Ring>) -> Self {
+    pub fn from_file(filepath: &PathBuf, ring: &dyn Ring) -> Self {
         let mut dac = Self {
             nodes: vec![],
             inputs: vec![],

@@ -64,7 +64,7 @@ pub struct Learner<const S: bool> {
 
 impl <const S: bool> Learner<S> {
 
-    pub fn new(input: PathBuf, ring: &Box<dyn Ring>, args: Args) -> Self {
+    pub fn new(input: PathBuf, ring: &dyn Ring, args: Args) -> Self {
         if let Command::Learn { trainfile,
                                 testfile,
                                 outfolder,
@@ -210,7 +210,7 @@ impl <const S: bool> Learner<S> {
     // --- Evaluation --- //
 
     // Evaluate the different train DACs and return the results
-    pub fn evaluate(&mut self, ring: &Box<dyn Ring>) -> Vec<f64> {
+    pub fn evaluate(&mut self, ring: &dyn Ring) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.train.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
@@ -222,7 +222,7 @@ impl <const S: bool> Learner<S> {
     }
 
     // Evaluate the different test DACs and return the results
-    pub fn test(&mut self, ring: &Box<dyn Ring>) -> Vec<f64> {
+    pub fn test(&mut self, ring: &dyn Ring) -> Vec<f64> {
         let softmaxed = self.get_softmaxed_array();
         for dac in self.test.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
@@ -233,7 +233,7 @@ impl <const S: bool> Learner<S> {
         self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
-    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, ring: &Box<dyn Ring>) {
+    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, ring: &dyn Ring) {
         let distributions: Vec<Vec<f64>> = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
         let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, ring);
         let mut train_data = vec![];
@@ -413,7 +413,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<f64>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, ring: &Box<dyn Ring>) -> Vec<Dac> {
+pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<f64>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, ring: &dyn Ring) -> Vec<Dac> {
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it

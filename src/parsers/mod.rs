@@ -47,7 +47,7 @@ pub fn parser_from_input(filepath: PathBuf, evidence: Option<OsString>) -> Box<d
         };
     }
     if header.starts_with("p cnf") {
-        Box::new(CnfParser::new(filepath, evidence.unwrap_or(OsString::default())))
+        Box::new(CnfParser::new(filepath, evidence.unwrap_or_default()))
     } else if header.starts_with("BAYES") {
         Box::new(UaiParser::new(filepath, evidence.unwrap()))
     } else if header.starts_with("DIRECTED") || header.starts_with("UNDIRECTED") {
