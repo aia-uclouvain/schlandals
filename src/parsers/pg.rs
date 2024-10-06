@@ -52,7 +52,7 @@ impl PgParser {
 
 impl Parser for PgParser {
 
-    fn problem_from_file(&self, state: &mut StateManager) -> Problem {
+    fn problem_from_file(&self, state: &mut StateManager, transform_log: bool) -> Problem {
         let file = File::open(&self.input).unwrap();
         let reader = BufReader::new(&file);
         // Loading the content of the file. The file is loaded in a single String in which new line
@@ -108,7 +108,7 @@ impl Parser for PgParser {
         let target = *map_node_to_id.get(&content[1]).unwrap_or_else(|| panic!("Target node {} is not in the graph structure", content[1]));
         clauses.push(vec![source + parameter_index - 1]);
         clauses.push(vec![-(target + parameter_index - 1)]);
-        create_problem(&distributions, &clauses, state)
+        create_problem(&distributions, &clauses, transform_log, state)
     }
 
     fn clauses_from_file(&self) -> Vec<Vec<isize>> {

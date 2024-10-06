@@ -59,7 +59,7 @@ pub fn search(args: Args) -> f64 {
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
-    let problem = parser.problem_from_file(&mut state);
+    let problem = parser.problem_from_file(&mut state, args.log);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
     let ring = args.ring.to_type();
@@ -90,7 +90,7 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
-    let problem = create_problem(distributions, clauses, &mut state);
+    let problem = create_problem(distributions, clauses, false, &mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
     let ring = args.ring.to_type();
@@ -109,7 +109,7 @@ pub fn compile(args: Args) -> f64 {
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
-    let problem = parser.problem_from_file(&mut state);
+    let problem = parser.problem_from_file(&mut state, args.log);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
     let ring = args.ring.to_type();

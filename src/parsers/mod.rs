@@ -31,7 +31,7 @@ use uai::*;
 use pg::*;
 
 pub trait Parser {
-    fn problem_from_file(&self, state: &mut StateManager) -> Problem;
+    fn problem_from_file(&self, state: &mut StateManager, transform_log: bool) -> Problem;
     fn distributions_from_file(&self) -> Vec<Vec<f64>>;
     fn clauses_from_file(&self) -> Vec<Vec<isize>>;
 }
@@ -72,13 +72,13 @@ pub fn evidence_from_os_string(evidence: &OsString) -> String {
     }
 }
 
-pub fn create_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], state: &mut StateManager) -> Problem {
+pub fn create_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], transform_log: bool, state: &mut StateManager) -> Problem {
     let mut number_var = 0;
     for clause in clauses.iter() {
         number_var = number_var.max(clause.iter().map(|l| l.unsigned_abs()).max().unwrap());
     }
     let mut problem = Problem::new(state, number_var, clauses.len());
-    let variable_mapping = problem.add_distributions(distributions, state);
+    let variable_mapping = problem.add_distributions(distributions, transform_log, state);
     for clause in clauses.iter() {
         let mut literals: Vec<Literal> = vec![];
         let mut head: Option<Literal> = None;

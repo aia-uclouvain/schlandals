@@ -82,7 +82,7 @@ impl UaiParser {
 
 impl Parser for UaiParser {
 
-    fn problem_from_file(&self, state: &mut StateManager) -> Problem {
+    fn problem_from_file(&self, state: &mut StateManager, transform_log: bool) -> Problem {
         // Loading the content of the file. The file is loaded in a single String in which new line
         // have been removed. Then it is split by whitespace, giving only the numbers in the file.
         let content = fs::read_to_string(&self.input).expect("Unable to read UAI file");
@@ -208,7 +208,7 @@ impl Parser for UaiParser {
             }
             content_index += 2
         }
-        create_problem(&distributions, &clauses, state)
+        create_problem(&distributions, &clauses, transform_log, state)
     }
 
     fn clauses_from_file(&self) -> Vec<Vec<isize>> {

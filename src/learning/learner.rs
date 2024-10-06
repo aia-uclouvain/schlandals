@@ -418,7 +418,7 @@ pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Ve
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
         let mut state = StateManager::default();
-        let problem = create_problem(distributions, clauses, &mut state); //parser.problem_from_file(&mut state);
+        let problem = create_problem(distributions, clauses, false, &mut state); //parser.problem_from_file(&mut state);
         let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
         let propagator = Propagator::new(&mut state);
         let component_extractor = ComponentExtractor::new(&problem, &mut state);

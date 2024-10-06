@@ -85,7 +85,7 @@ impl Problem {
     /// Moreover, the variables are stored by decreasing probability. The mapping from the old
     /// variables index (the ones used in the encoding) and the new one (in the vector) is
     /// returned.
-    pub fn add_distributions(&mut self, distributions: &[Vec<f64>], state: &mut StateManager) -> FxHashMap<usize, usize> {
+    pub fn add_distributions(&mut self, distributions: &[Vec<f64>], transform_log: bool, state: &mut StateManager) -> FxHashMap<usize, usize> {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
@@ -101,7 +101,7 @@ impl Problem {
                 let new_index = current_start + j;
                 let initial_index = current_start + i;
                 self.variables[new_index].set_distribution(distribution_id);
-                self.variables[new_index].set_weight(w);
+                self.variables[new_index].set_weight(if transform_log { w.log10() } else { w });
                 self.variables[new_index].set_distribution_index(i);
                 mapping.insert(initial_index + 1, new_index + 1);
             }

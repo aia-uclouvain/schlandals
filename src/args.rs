@@ -34,6 +34,9 @@ pub struct Args {
     #[clap(long,short, default_value_t=u64::MAX)]
     pub timeout: u64,
     /// How to branch
+    /// If present, transform the probabilities in log space
+    #[clap(long, action)]
+    pub log: bool,
     #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
     pub branching: Branching,
     /// Collect stats during the search, default no
@@ -60,6 +63,7 @@ impl Default for Args {
             input: PathBuf::default(),
             evidence: None,
             timeout: u64::MAX,
+            log: false,
             branching: Branching::MinInDegree,
             statistics: false,
             memory: u64::MAX,

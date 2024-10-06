@@ -63,7 +63,7 @@ impl CnfParser {
 
 impl Parser for CnfParser {
 
-    fn problem_from_file(&self, state: &mut StateManager) -> Problem {
+    fn problem_from_file(&self, state: &mut StateManager, transform_log: bool) -> Problem {
         // First pass to get the distributions
         let distributions = self.distributions_from_file();
         // Second pass to parse the clauses
@@ -94,7 +94,7 @@ impl Parser for CnfParser {
                 clause.push(literal);
             }
         }
-        create_problem(&distributions, &clauses, state)
+        create_problem(&distributions, &clauses, transform_log, state)
     }
 
     fn clauses_from_file(&self) -> Vec<Vec<isize>> {

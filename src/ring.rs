@@ -36,6 +36,7 @@ pub trait Ring: Sync {
     fn times(&self, a: &mut Float, b: &Float);
     /// Returns true if the ring is a counting one
     fn is_counting(&self)-> bool;
+    fn is_log(&self) -> bool;
 }
 
 #[derive(Copy, Clone, Default)]
@@ -67,6 +68,51 @@ impl Ring for AddMulRing {
     fn is_counting(&self) -> bool {
         true
     }
+
+    #[inline(always)]
+    fn is_log(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct LogAddMulRing;
+
+impl Ring for LogAddMulRing {
+
+    #[inline(always)]
+    fn one(&self) -> Float {
+        F128!(0.0)
+    }
+
+    #[inline(always)]
+    fn zero(&self) -> Float {
+        F128!(-f64::INFINITY)
+    }
+
+    #[inline(always)]
+    fn plus(&self, a: &mut Float, b: &Float) {
+        if *a > *b {
+            *a += (b.clone() - a.clone()).exp10().log10_1p();
+        } else {
+            *a += (a.clone() - b.clone()).exp10().log10_1p();
+        }
+    }
+
+    #[inline(always)]
+    fn times(&self, a: &mut Float, b: &Float) {
+        *a += b;
+    }
+
+    #[inline(always)]
+    fn is_counting(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn is_log(&self) -> bool {
+        true 
+    }
 }
 
 #[derive(Copy, Clone, Default)]
@@ -96,5 +142,9 @@ impl Ring for MaxMulRing {
 
     fn is_counting(&self) -> bool {
         false
+    }
+
+    fn is_log(&self) -> bool {
+        true
     }
 }
