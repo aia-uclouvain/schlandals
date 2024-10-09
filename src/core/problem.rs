@@ -150,33 +150,37 @@ impl Problem {
         }
         
         let mut clause = Clause::new(cid.0, literal_vector, head, is_learned, state);
-        // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
         for literal in clause.iter().collect::<Vec<Literal>>() {
             let variable = literal.to_variable();
-            if is_learned {
-                self[variable].add_learned_clause(cid);
-            }
             if literal.is_positive() {
                 self[variable].add_clause_positive_occurence(cid);
-                if !is_learned {
-                    for child in self[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
+            } else {
+                self[variable].add_clause_negative_occurence(cid);
+            }
+            if let Some(distribution) = self[literal.to_variable()].distribution() {
+                self[distribution].add_clause(cid, state);
+            }
+        }
+        // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
+        if !is_learned {
+            for literal in clause.iter().collect::<Vec<Literal>>() {
+                let variable = literal.to_variable();
+                if is_learned {
+                    self[variable].add_learned_clause(cid);
+                }
+                if literal.is_positive() {
+                    for child in self[variable].iter_clauses_negative_occurence().filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);
                         self[child].add_parent(cid, state);
                         self[child].increment_in_degree();
                     }
-                }
-            } else {
-                self[variable].add_clause_negative_occurence(cid);
-                if !is_learned {
-                    for parent in self[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                } else {
+                    for parent in self[variable].iter_clauses_positive_occurence().filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_parent(parent, state);
                         self[parent].add_child(cid, state);
                         clause.increment_in_degree();
                     }
                 }
-            }
-            if let Some(distribution) = self[literal.to_variable()].distribution() {
-                self[distribution].add_clause(cid, state);
             }
         }
         self.clauses.push(clause);
