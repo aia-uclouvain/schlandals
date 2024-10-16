@@ -1,5 +1,4 @@
 ![Rust](https://github.com/AlexandreDubray/schlandals/actions/workflows/rust.yml/badge.svg)
-[![codecov](https://codecov.io/gh/AlexandreDubray/schlandals/branch/main/graph/badge.svg?token=J4J2I9Q9KX)](https://codecov.io/gh/AlexandreDubray/schlandals)
 
 Schlandals is a state-of-the-art _Projected Weighted Model Counter_ specialized for probabilistic inference over discrete probability distributions.
 Currently, there are known modelization for the following problems

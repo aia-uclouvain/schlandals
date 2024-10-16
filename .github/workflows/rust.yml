@@ -21,10 +21,3 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
-    - name: Run cargo-tarpaulin
-      uses: actions-rs/tarpaulin@v0.1
-      with:
-        version: '0.22.0'
-        args: --ignore-tests --engine llvm --exclude-files lib.rs main.rs mod.rs
-    - name: Upload coverage reports to Codecov with GitHub Action
-      uses: codecov/codecov-action@v3
