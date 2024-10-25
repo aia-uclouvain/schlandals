@@ -76,6 +76,10 @@ impl Distribution {
         self.clauses.len(state) != 0
     }
 
+    pub fn number_constraints(&self, state: &StateManager) -> usize {
+        self.clauses.len(state)
+    }
+
     pub fn set_unconstrained(&self, state: &mut StateManager) {
         self.clauses.remove_all(state);
     }

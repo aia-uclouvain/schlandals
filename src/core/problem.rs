@@ -214,7 +214,7 @@ impl Problem {
         let mut distributions_map: FxHashMap<DistributionIndex, DistributionIndex> = FxHashMap::default();
         let mut new_distribution_index = 0;
         for (i, distribution) in self.distributions_iter().enumerate() {
-            if self[distribution].is_constrained(state) || self[distribution].number_unfixed(state) <= 1 {
+            if !self[distribution].is_fixed(state) {
                 let new_size = self[distribution].number_unfixed(state);
                 self[distribution].set_size(new_size);
                 distributions_map.insert(distribution, DistributionIndex(new_distribution_index));

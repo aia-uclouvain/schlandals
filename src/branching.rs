@@ -59,3 +59,83 @@ impl BranchingDecision for MinInDegree {
     fn init(&mut self, _g: &Problem, _state: &StateManager) {}
     
 }
+
+/// This heuristic selects the distribution being the least constrained. In case of tie, it selects the distribution
+/// for which the highest probability of a possible value can be found.
+#[derive(Default)]
+pub struct MinConstrained {}
+
+impl BranchingDecision for MinConstrained {
+    fn branch_on(
+        &mut self,
+        g: &Problem,
+        state: &mut StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut selected : Option<DistributionIndex> = None;
+        let mut best_score = usize::MAX;
+        let mut best_tie = f64::MAX;
+        for distri in component_extractor.component_distribution_iter(component){
+            if g[distri].is_constrained(state){
+                let score = g[distri].number_constraints(state);
+                let mut max = 0.0;
+                for v in g[distri].iter_variables(){
+                    if g[v].weight().unwrap() > max{
+                        max = g[v].weight().unwrap();
+                    }
+                }
+                let tie = 1.0 - max;
+                if score < best_score || (score == best_score && tie < best_tie) {
+                    selected = Some(distri);
+                    best_score = score;
+                    best_tie = tie;
+                }
+            }
+        }
+        selected
+    }
+    
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
+    
+}
+
+/// This heuristic selects the distribution being the most constrained. In case of tie, it selects the distribution
+/// for which the highest probability of a possible value can be found.
+#[derive(Default)]
+pub struct MaxConstrained {}
+
+impl BranchingDecision for MaxConstrained {
+    fn branch_on(
+        &mut self,
+        g: &Problem,
+        state: &mut StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut selected : Option<DistributionIndex> = None;
+        let mut best_score = 0;
+        let mut best_tie = f64::MAX;
+        for distri in component_extractor.component_distribution_iter(component){
+            if g[distri].is_constrained(state){
+                let score = g[distri].number_constraints(state);
+                let mut max = 0.0;
+                for v in g[distri].iter_variables(){
+                    if g[v].weight().unwrap() > max{
+                        max = g[v].weight().unwrap();
+                    }
+                }
+                let tie = 1.0 - max;
+                if score > best_score || (score == best_score && tie < best_tie) {
+                    selected = Some(distri);
+                    best_score = score;
+                    best_tie = tie;
+                }
+            }
+        }
+        selected
+    }
+    
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
+    
+}

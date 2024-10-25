@@ -108,6 +108,9 @@ pub enum Command {
         /// If the problem is compiled, store a DOT graphical representation in this file
         #[clap(long)]
         dotfile: Option<PathBuf>,
+        /// Compile the non-models
+        #[clap(long, short, action)]
+        non_models: bool,
     },
     Learn {
         #[clap(long, value_parser, value_delimiter=' ')]
@@ -194,14 +197,23 @@ pub fn search(args: Args) -> f64 {
     let solution = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.search(false),
+                GenericSolver::SMinInDegree(mut solver) => solver.search(false,),
                 GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+                GenericSolver::SMinConstrained(mut solver) => solver.search(false),
+                GenericSolver::QMinConstrained(mut solver) => solver.search(false),
+                GenericSolver::SMaxConstrained(mut solver) => solver.search(false),
+                GenericSolver::QMaxConstrained(mut solver) => solver.search(false),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
                 GenericSolver::SMinInDegree(mut solver) => solver.search(true),
                 GenericSolver::QMinInDegree(mut solver) => solver.search(true),
+                GenericSolver::SMinConstrained(mut solver) => solver.search(true),
+                GenericSolver::QMinConstrained(mut solver) => solver.search(true),
+                GenericSolver::SMaxConstrained(mut solver) => solver.search(true),
+                GenericSolver::QMaxConstrained(mut solver) => solver.search(true),
+                
             }
         },
     };
@@ -219,6 +231,10 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let solution = match solver {
         GenericSolver::SMinInDegree(mut solver) => solver.search(false),
         GenericSolver::QMinInDegree(mut solver) => solver.search(false),
+        GenericSolver::SMinConstrained(mut solver) => solver.search(false),
+        GenericSolver::QMinConstrained(mut solver) => solver.search(false),
+        GenericSolver::SMaxConstrained(mut solver) => solver.search(false),
+        GenericSolver::QMaxConstrained(mut solver) => solver.search(false),
     };
     solution.print();
     solution.bounds()
@@ -232,23 +248,35 @@ pub fn compile(args: Args) -> f64 {
     let problem = parser.problem_from_file(&mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
-
+    let mut sat_compile = true;
+    if let Command::Compile { fdac: _, dotfile: _, non_models } = args.subcommand.as_ref().unwrap() {
+        sat_compile = !non_models;
+    }
     let mut ac: Dac<Float> = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(false),
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(false, sat_compile),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(false, sat_compile),
+                GenericSolver::SMinConstrained(mut solver) => solver.compile(false, sat_compile),
+                GenericSolver::QMinConstrained(mut solver) => solver.compile(false, sat_compile),
+                GenericSolver::SMaxConstrained(mut solver) => solver.compile(false, sat_compile),
+                GenericSolver::QMaxConstrained(mut solver) => solver.compile(false, sat_compile),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(true),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(true),
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(true, sat_compile),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(true, sat_compile),
+                GenericSolver::SMinConstrained(mut solver) => solver.compile(true, sat_compile),
+                GenericSolver::QMinConstrained(mut solver) => solver.compile(true, sat_compile),
+                GenericSolver::SMaxConstrained(mut solver) => solver.compile(true, sat_compile),
+                GenericSolver::QMaxConstrained(mut solver) => solver.compile(true, sat_compile),
             }
         },
     };
     ac.evaluate();
-    if let Some(Command::Compile { fdac, dotfile }) = args.subcommand {
+    println!("dac\n{}", ac.as_graphviz());
+    if let Some(Command::Compile { fdac, dotfile , non_models: _}) = args.subcommand {
         if let Some(f) = dotfile {
             let out = ac.as_graphviz();
             let mut outfile = File::create(f).unwrap();
@@ -342,6 +370,10 @@ impl std::fmt::Display for Loss {
 pub enum GenericSolver {
     SMinInDegree(Solver<MinInDegree, true>),
     QMinInDegree(Solver<MinInDegree, false>),
+    SMinConstrained(Solver<MinConstrained, true>),
+    QMinConstrained(Solver<MinConstrained, false>),
+    SMaxConstrained(Solver<MaxConstrained, true>),
+    QMaxConstrained(Solver<MaxConstrained, false>),
 }
 
 pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool) -> GenericSolver {
@@ -351,12 +383,28 @@ pub fn generic_solver(problem: Problem, state: StateManager, component_extractor
                 let solver = Solver::<MinInDegree, true>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
                 GenericSolver::SMinInDegree(solver)
             },
+            Branching::MinConstrained => {
+                let solver = Solver::<MinConstrained, true>::new(problem, state, component_extractor, Box::<MinConstrained>::default(), propagator, parameters);
+                GenericSolver::SMinConstrained(solver)
+            },
+            Branching::MaxConstrained => {
+                let solver = Solver::<MaxConstrained, true>::new(problem, state, component_extractor, Box::<MaxConstrained>::default(), propagator, parameters);
+                GenericSolver::SMaxConstrained(solver)
+            },
         }
     } else {
         match branching {
             Branching::MinInDegree => {
                 let solver = Solver::<MinInDegree, false>::new(problem, state, component_extractor, Box::<MinInDegree>::default(), propagator, parameters);
                 GenericSolver::QMinInDegree(solver)
+            },
+            Branching::MinConstrained => {
+                let solver = Solver::<MinConstrained, false>::new(problem, state, component_extractor, Box::<MinConstrained>::default(), propagator, parameters);
+                GenericSolver::QMinConstrained(solver)
+            },
+            Branching::MaxConstrained => {
+                let solver = Solver::<MaxConstrained, false>::new(problem, state, component_extractor, Box::<MaxConstrained>::default(), propagator, parameters);
+                GenericSolver::QMaxConstrained(solver)
             },
         }
     }
