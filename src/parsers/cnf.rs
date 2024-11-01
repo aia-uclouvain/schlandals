@@ -76,7 +76,7 @@ impl Parser for CnfParser {
                 Ok(line) => {
                     if !line.starts_with('c') && !line.starts_with('p') {
                         // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
-                        for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                        for clause in line.trim_end().split(" 0").filter(|cl| !cl.is_empty()) {
                             clauses.push(clause.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect());
                         }
                     }
@@ -108,7 +108,7 @@ impl Parser for CnfParser {
                 Ok(line) => {
                     if !line.starts_with('c') && !line.starts_with('p') {
                         // Note: the space before the 0 is important so that clauses like "1 -10 0" are correctly splitted
-                        for clause in line.split(" 0").filter(|cl| !cl.is_empty()) {
+                        for clause in line.trim_end().split(" 0").filter(|cl| !cl.is_empty()) {
                             clauses.push(clause.split_whitespace().map(|x| x.parse::<isize>().unwrap()).collect());
                         }
                     }
