@@ -30,6 +30,8 @@ pub enum NodeType {
     Sum,
     /// Distribution node. Send the value P[d = v] as output and act as input of the circuit
     Distribution {d: usize, v: usize},
+    /// Opposite node. Send the opposite of its input value x, i.e. -x.
+    Opposite,
 }
 
 macro_rules! is_node_type {
@@ -95,6 +97,17 @@ impl<R> Node<R>
         }
     }
 
+    /// Returns a new opposite node
+    pub fn opposite() -> Self {
+        Node {
+            value: R::zero(),
+            nodetype: NodeType::Opposite,
+            input_start: 0,
+            number_inputs: 0,
+            path_value: F128!(1.0)
+        }
+    }
+
     /// Returns true iff the node is a distribution node
     pub fn is_distribution(&self) -> bool {
         is_node_type!(self.nodetype, NodeType::Distribution)
@@ -108,6 +121,11 @@ impl<R> Node<R>
     /// Returns true iff the node is a sum node
     pub fn is_sum(&self) -> bool {
         is_node_type!(self.nodetype, NodeType::Sum)
+    }
+
+    /// Returns true iff the node is an opposite node
+    pub fn is_opposite(&self) -> bool {
+        is_node_type!(self.nodetype, NodeType::Opposite)
     }
 
     /// Returns a reference to the value stored in the node

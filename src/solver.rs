@@ -28,7 +28,6 @@ use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
 use rug::Float;
 use std::time::Instant;
-use itertools::Itertools;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);
 type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
@@ -112,6 +111,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         self.restructure_after_preprocess();
         if self.problem.number_clauses() == 0 {
+            println!("no clauses");
             let lb = self.preproc_in.clone().unwrap();
             let ub = F128!(1.0 - self.preproc_out.unwrap());
             return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
@@ -381,8 +381,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             cache_index: cache_entry.cache_key_index,
         };
         println!("cache entry bounds {:?}, peut être probleme ici aussi!", cache_entry.bounds);
-        if cache_entry.bounds.0 != 0.0 {
+        if cache_entry.bounds.0 != 0.0 && cache_entry.are_bounds_tight(maximum_probability) {
             println!("inserting cache_entry {}", cache_entry.cache_key_index);
+            let new_key = cache_key.clone();
             self.cache.insert(cache_key, cache_entry);
         }
         result
@@ -398,29 +399,59 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let preproc_result = self.preprocess();
         // Create the DAC and add elements from the preprocessing
         let forced_by_propagation = self.forced_from_propagation(DistributionIndex(usize::MAX), true);
+        println!("forced by propagation {:?}", forced_by_propagation);
+        // Remove the distributions' values from the excluded ones that had a weight of 0 or 1 and keep the old indexes of the others to be able to add them to the dac correctly
         let mut clean_excluded = vec![];
         let mut remaining = vec![];
         for (d, values) in forced_by_propagation.2.iter() {
             let mut new_val = vec![];
             for v in values.iter() {
                 if self.problem[*v].weight().unwrap() != 1.0 && self.problem[*v].weight().unwrap() != 0.0 {
-                    new_val.push((self.problem[*v].old_index(), self.problem[*v].weight().unwrap()));
-                    println!("excluded distribution d {} v {}, weight {}", d.0, v.0, self.problem[*v].weight().unwrap());
+                    new_val.push((self.problem[*v].index_in_distribution().unwrap(), self.problem[*v].weight().unwrap()));
+                    println!("excluded distribution d {} v {}, weight {}", self.problem[*d].old_index(), self.problem[*v].index_in_distribution().unwrap(), self.problem[*v].weight().unwrap());
                 }
             }
             if new_val.len() > 0 {
                 let mut rem_val = vec![];
                 for val in self.problem[*d].iter_variables() {
-                    if !new_val.iter().any(|(v, _)| *v == self.problem[val].old_index()) {
-                        rem_val.push((self.problem[val].old_index(), self.problem[val].weight().unwrap()));
+                    if !new_val.iter().any(|(v, _)| *v == self.problem[val].index_in_distribution().unwrap()) {
+                        rem_val.push((self.problem[val].index_in_distribution().unwrap(), self.problem[val].weight().unwrap()));
                     }
                 }
                 clean_excluded.push((self.problem[*d].old_index(), new_val));
                 remaining.push((self.problem[*d].old_index(), rem_val));
             }
+            /* else if !self.problem[*d].is_fixed(&self.state) {
+                let mut rem_val = vec![];
+                let mut total = 0;
+                for val in self.problem[*d].iter_variables() {
+                    if self.problem[val].weight().unwrap() != 1.0 && self.problem[val].weight().unwrap() != 0.0 {
+                        rem_val.push((self.problem[val].index_in_distribution().unwrap(), self.problem[val].weight().unwrap()));
+                        total += self.problem[val].weight().unwrap();
+                    }
+                }
+                if
+                remaining.push((self.problem[*d].old_index(), rem_val));
+            } */
         }
-
-        let forced_by_propagation = (forced_by_propagation.0, forced_by_propagation.1, clean_excluded, remaining);
+        println!("clean excluded {:?}", clean_excluded);
+        // Similarly, keep the old indexes of the forced distributions' values to be able to add them to the dac correctly
+        let mut clean_forced = vec![];
+        for (d, v) in forced_by_propagation.0.iter() {
+            clean_forced.push((self.problem[*d].old_index(), (self.problem[*v].index_in_distribution().unwrap(), self.problem[*v].weight().unwrap())));
+        }
+        println!("clean forced {:?}", clean_forced);
+        // In the same way, keep the old indexes of the unconstrained distributions' values to be able to add them to the dac correctly
+        let mut clean_unconstrained = vec![];
+        for (d, values) in forced_by_propagation.1.iter() {
+            let mut new_val = vec![];
+            for v in values.iter() {
+                new_val.push((self.problem[*v].index_in_distribution().unwrap(), self.problem[*v].weight().unwrap()));
+            }
+            clean_unconstrained.push((self.problem[*d].old_index(), new_val));
+        }
+        println!("clean unconstrained {:?}", clean_unconstrained);
+        let forced_by_propagation = (clean_forced, clean_unconstrained, clean_excluded, remaining);
         self.restructure_after_preprocess();
 
         if preproc_result.is_some() {
@@ -465,7 +496,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
     }
 
-    pub fn build_ac<R: SemiRing>(&mut self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>), sat_compile:bool) -> Dac<R> {
+    pub fn build_ac<R: SemiRing>(&mut self, epsilon: f64, forced_by_propagation:&(Vec<(usize, (usize, f64))>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>), sat_compile:bool) -> Dac<R> {
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
@@ -481,6 +512,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         println!("\nroot number children {}", root_number_children);
         println!("has node search {}", has_node_search);
 
+        // The super root is used in case we have some excluded interpretations that will be added to the classical dac found from the cache exploration.
+        // In such cases, the root variable below will be a child of the super root including the sum of the excluded interpretations
         let mut super_root = None;
 
         let excluded_interpretations = self.compute_excluded_interpretations_at_preprocessing(&forced_by_propagation.2, &forced_by_propagation.3);
@@ -522,47 +555,20 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             super_root = Some(super_sum_node);
         }
 
-        /* if !sat_compile && forced_by_propagation.2.len() > 0 {
-            let super_nb_children = if has_node_search { 2 } else { 1 };
-            println!("super nb children {}", super_nb_children);
-            let super_sum_node = dac.sum_node(super_nb_children);
-            let excluded_preproc = dac.prod_node(forced_by_propagation.2.len());
-            for (i, (d, values)) in forced_by_propagation.2.iter().enumerate() {
-                let sum_node = dac.sum_node(values.len());
-                for (j, v) in values.iter().copied().enumerate() {
-                    let distribution_node = dac.distribution_value_node(&self.problem, *d, v);
-                    println!("excluded distribution d {} v {}", d.0, v.0);
-                    dac.add_input(sum_node.input_start() + j, distribution_node);
-                }
-                let sum_id = dac.add_node(sum_node);
-                dac.add_input(excluded_preproc.input_start() + i, sum_id);
-            }
-            let excluded_preproc_id = dac.add_node(excluded_preproc);
-            dac.add_input(super_sum_node.input_start(), excluded_preproc_id);
-
-            if !has_node_search {
-                println!("no node search");
-                let root = dac.add_node(super_sum_node);
-                dac.set_root(root);
-                return dac;
-            }
-            super_root = Some(super_sum_node);
-        } */
-
         let root = dac.prod_node(root_number_children);
         let mut child_id = root.input_start();
         println!("has node search {}", has_node_search);
         // Forced variables from the propagation
-        for (d, variable) in forced_by_propagation.0.iter().copied() {
-            let distribution_node = dac.distribution_value_node(&self.problem, d, variable);
+        for (d, (variable, w)) in forced_by_propagation.0.iter().copied() {
+            let distribution_node = dac.old_distribution_old_value_node(d, variable, w);
             dac.add_input(child_id, distribution_node);
             child_id += 1;
         }
         // Unconstrained distribution variables
         for (d, values) in forced_by_propagation.1.iter() {
             let sum_node = dac.sum_node(values.len());
-            for (i, v) in values.iter().copied().enumerate() {
-                let distribution_node = dac.distribution_value_node(&self.problem, *d, v);
+            for (i, (v, w)) in values.iter().copied().enumerate() {
+                let distribution_node = dac.old_distribution_old_value_node(*d, v, w);
                 dac.add_input(sum_node.input_start() + i, distribution_node);
             }
             let sum_id = dac.add_node(sum_node);
@@ -776,162 +782,21 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         sum_index
     }
 
-    pub fn _old_explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, sat_compile: bool) -> NodeIndex {
-        println!("\nexplore cache key index {}", cache_key_index);
-        if let Some(child_i) = c.get(&cache_key_index) {
-            return *child_i;
-        }
-        let current = self.cache.get(&self.cache_keys[cache_key_index]).unwrap();
-        let sum_node_child = current.number_children(sat_compile);
-        let sum_node = dac.sum_node(sum_node_child);
-
-        println!("sum node child size {}, sat_compile {}", sum_node_child, sat_compile);
-        println!("children variables {:?}", current.children_variables(true));
-        println!("unsat children {:?}", current.children_variables(false));
-
-        let mut sum_node_child = 0;
-        // Iterate on the variables the distribution with the associated cache key for the sat children
-        for variable in current.children_variables(true) {
-            println!("SAT PART");
-            println!("explore variable {}", variable.0);
-            let number_children = current.variable_number_children(variable, sat_compile);
-            println!("number children {}", number_children);
-            if number_children == 0 {
-                continue;
-            }
-            let prod_node = dac.prod_node(number_children);
-
-            let mut child_id = prod_node.input_start();
-            // Adding to the new product node all the propagated variables, including the distribution value we branch on
-            for (d, v) in current.forced_choices(variable, true).iter().copied() {
-                if sat_compile || (!sat_compile && d == current.distribution.unwrap()) {
-                    println!("forced distr d {} v {}", d.0, v.0);
-                    let distribution_prop = dac.distribution_value_node(&self.problem, d, v);
-                    dac.add_input(child_id, distribution_prop);
-                    child_id += 1;
-                }
-
-            }
-
-            // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
-            //if !sat_compile {
-                for (d, values) in current.unconstrained_distribution_variables_of(variable, true).iter() {
-                    let sum_node_unconstrained = dac.sum_node(values.len());
-                    for (i, v) in values.iter().copied().enumerate() {
-                        println!("unconstrained distr {} value {}", d.0, v.0);
-                        let distribution_unconstrained = dac.distribution_value_node( &self.problem, *d, v);
-                        dac.add_input(sum_node_unconstrained.input_start() + i, distribution_unconstrained);
-                    }
-                    let id = dac.add_node(sum_node_unconstrained);
-                    dac.add_input(child_id, id);
-                    child_id += 1;
-                }
-            //}
-
-            // Adding to the new product node sum nodes for all the excluded distribution if unsat mode
-            if !sat_compile {
-                for (d, values) in current.excluded_distribution_variables_of(variable, true).iter() {
-                    let sum_node_excluded = dac.sum_node(values.len());
-                    for (i, v) in values.iter().copied().enumerate() {
-                        println!("excluded distr {} value {}", d.0, v.0);
-                        let distribution_excluded = dac.distribution_value_node(&self.problem, *d, v);
-                        dac.add_input(sum_node_excluded.input_start() + i, distribution_excluded);
-                    }
-                    let id = dac.add_node(sum_node_excluded);
-                    dac.add_input(child_id, id);
-                    child_id += 1;
-                }
-            }
-
-            // Recursively build the DAC for each sub-component
-            for cache_key in current.child_keys(variable, true) {
-                let id = self.explore_cache(dac, cache_key, c, sat_compile);
-                dac.add_input(child_id, id);
-                child_id += 1;
-            }
-            let id = dac.add_node(prod_node);
-            dac.add_input(sum_node.input_start() + sum_node_child, id);
-            sum_node_child += 1;
-        }
-        // Iterate on the variables the distribution with the associated cache key for the unsat children in case of an unsat compilation
-        if !sat_compile {
-            println!("UNSAT PART");
-            for variable in current.children_variables(false) {
-                println!("explore variable {}", variable.0);
-                let number_children = current.variable_unsat_number_children(variable, sat_compile);
-                if number_children == 0 {
-                    continue;
-                }
-                let prod_node = dac.prod_node(number_children);
-
-                let mut child_id = prod_node.input_start();
-                // Adding to the new product node all the propagated variables, including the distribution value we branch on
-                for (d, v) in current.forced_choices(variable, false).iter().copied() {
-                    println!("forced distr d {} v {}", d.0, v.0);
-                    let distribution_prop = dac.distribution_value_node(&self.problem, d, v);
-                    dac.add_input(child_id, distribution_prop);
-                    child_id += 1;
-
-                }
-
-                // Adding to the new product node sum nodes for all the unconstrained distribution not summing to 1
-                for (d, values) in current.unconstrained_distribution_variables_of(variable, false).iter() {
-                    let sum_node_unconstrained = dac.sum_node(values.len());
-                    for (i, v) in values.iter().copied().enumerate() {
-                        println!("unconstrained distr {} value {}", d.0, v.0);
-                        let distribution_unconstrained = dac.distribution_value_node( &self.problem, *d, v);
-                        dac.add_input(sum_node_unconstrained.input_start() + i, distribution_unconstrained);
-                    }
-                    let id = dac.add_node(sum_node_unconstrained);
-                    dac.add_input(child_id, id);
-                    child_id += 1;
-                }
-
-                // Adding to the new product node sum nodes for all the excluded distribution if unsat mode
-                if !sat_compile {
-                    for (d, values) in current.excluded_distribution_variables_of(variable, false).iter() {
-                        let sum_node_excluded = dac.sum_node(values.len());
-                        for (i, v) in values.iter().copied().enumerate() {
-                            println!("excluded distr {} value {}", d.0, v.0);
-                            let distribution_excluded = dac.distribution_value_node(&self.problem, *d, v);
-                            dac.add_input(sum_node_excluded.input_start() + i, distribution_excluded);
-                        }
-                        let id = dac.add_node(sum_node_excluded);
-                        dac.add_input(child_id, id);
-                        child_id += 1;
-                    }
-                }
-                // Recursively build the DAC for each sub-component
-                for cache_key in current.child_keys(variable, sat_compile) {
-                    let id = self.explore_cache(dac, cache_key, c, false);
-                    dac.add_input(child_id, id);
-                    child_id += 1;
-                }
-                let id = dac.add_node(prod_node);
-                dac.add_input(sum_node.input_start() + sum_node_child, id);
-                sum_node_child += 1;
-            }
-        }
-        let sum_index = dac.add_node(sum_node);
-        c.insert(cache_key_index, sum_index);
-        sum_index
-    }
-
     fn compute_excluded_interpretations_at_preprocessing(&mut self, excluded_distributions: &Vec<(usize, Vec<(usize, f64)>)>, distributions_remaining_vals: &Vec<(usize, Vec<(usize, f64)>)>) -> Vec<Vec<(usize, Vec<(usize, f64)>)>> {
         let mut excluded_interpretations = vec![];
-        let distributions = excluded_distributions.iter().map(|(d, _)| *d).collect::<Vec<usize>>();
-        //let flat_variables = variables.into_iter().flatten().collect::<Vec<VariableIndex>>();
-        for (i, (d, values)) in excluded_distributions.iter().enumerate() {
+        let excl_d = excluded_distributions.iter().map(|(d, _)| *d).collect::<Vec<usize>>();
+        let mut seen_d = vec![];
+        for (d, values) in excluded_distributions.iter() {
             let mut interpretations = vec![];
+            println!("excluded distribution d {} values {:?}", d, values);
             interpretations.push((*d, values.clone()));
-            for j in 0..i {
-                let values = distributions_remaining_vals[j].1.clone();
-                println!("j {}, distributions {:?}, distribution {:?}", j, distributions, distributions[j]);
-                if !values.is_empty() {
-                    interpretations.push((distributions[j], values));
+            for (r_d, r_values) in distributions_remaining_vals.iter() {
+                if !values.is_empty() && *r_d != *d && (!excl_d.contains(r_d) || seen_d.contains(r_d)) {
+                    interpretations.push((*r_d, r_values.clone()));
                 }
             }
             excluded_interpretations.push(interpretations);
+            seen_d.push(*d);
         }
         excluded_interpretations
     }
@@ -991,58 +856,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         excluded_interpretations
     }
-
-    fn _old_compute_excluded_interpretations(&mut self, excluded_distributions: &Vec<UnconstrainedDistribution>, component: ComponentIndex) -> Vec<Vec<UnconstrainedDistribution>> {
-        let excl_indices = (0..excluded_distributions.len()).collect::<Vec<usize>>();
-        println!("excl indices {:?}", excl_indices);
-        let mut excluded_interpretations = vec![];
-        for combination_size in 1..excluded_distributions.len()+1 {
-            println!("combination size {}", combination_size);
-            let comb = excl_indices.iter().combinations(combination_size);
-            for c in comb {
-                println!("combination {:?}", c);
-                let mut interpretations = vec![];
-                let mut comb_dist = vec![];
-                for i in c {
-                    let (d, values) = &excluded_distributions[*i];
-                    interpretations.push((*d, values.clone()));
-                    comb_dist.push(*d);
-                }
-                let mut added = false;
-                for dist in self.component_extractor.component_distribution_iter(component) {
-                    if !comb_dist.contains(&dist) && self.problem[dist].is_constrained(&self.state) {
-                        let mut values = vec![];
-                        let mut total = 0.0;
-                        for v in self.problem[dist].iter_variables() {
-                            if !self.problem[v].is_fixed(&self.state) {
-                                added = true;
-                                values.push(v);
-                                total += self.problem[v].weight().unwrap();
-                            }
-                        }
-                        if !values.is_empty() && total != 1.0 {
-                            interpretations.push((dist, values));
-                        }
-                    }
-                }
-                println!("resulting interpretation {:?}, anything added {}", interpretations, added);
-                if added {
-                    excluded_interpretations.push(interpretations);
-                }
-            }
-        }
-        if excluded_interpretations.is_empty() {
-            println!("A VERIFIER! pas eu l'occasion de tester");
-            /* for (d, values) in excluded_distributions.iter() {
-                let mut interpretations = vec![];
-                interpretations.push((*d, values.clone()));
-                excluded_interpretations.push(interpretations);
-            } */
-            excluded_interpretations.push(excluded_distributions.clone());
-        }
-        excluded_interpretations
-    }
-
     
     /// Returns the choices (i.e., assignments to the distributions) made during the propagation as
     /// well as the distributions that are not constrained anymore.
@@ -1068,7 +881,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     forced_distribution_variables.push((distribution, variable));
                     //println!("forced sat")
                 }
-                else if self.problem[variable].is_probabilitic() && literal.is_positive() && !is_sat {
+                /* else if self.problem[variable].is_probabilitic() && literal.is_positive() && !is_sat {
                     let distribution = self.problem[variable].distribution().unwrap();
                     let position = excluded_distribution_variables.iter().position(|(d, _)| *d == distribution);
                     if let Some(i) = position {
@@ -1078,7 +891,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         excluded_distribution_variables.push((distribution, vec![variable]));
                     }
                     //println!("forced unsat")
-                }
+                } */
                 else if self.problem[variable].is_probabilitic() && !literal.is_positive() && self.problem[variable].distribution().unwrap() != current_distribution {
                     let distribution = self.problem[variable].distribution().unwrap();
                     let position = excluded_distribution_variables.iter().position(|(d, _)| *d == distribution);

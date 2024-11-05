@@ -53,6 +53,8 @@ pub trait SemiRing: AddAssign + MulAssign + Send + Sized + Clone + std::fmt::Dis
     /// Create a new element on the semiring by multiplying all the elements given in the iterator
     fn mul_children<'a>(children: impl Iterator <Item = &'a Self>) -> Self
         where Self: 'a;
+    fn opposite_child<'a>(child: &'a Self) -> Self
+        where Self: 'a;
 }
 
 impl SemiRing for Float {
@@ -86,6 +88,12 @@ impl SemiRing for Float {
         for child in children {
             v *= child;
         }
+        v
+    }
+
+    fn opposite_child<'a>(child: &'a Self) -> Self where  Self: 'a {
+        let mut v = Self::zero();
+        v -= child;
         v
     }
 }

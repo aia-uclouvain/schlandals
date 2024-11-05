@@ -62,6 +62,16 @@ pub enum ApproximateMethod {
     LDS,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum CompilationMethod {
+    /// Compiles the models of the probailistic problem
+    Models,
+    /// Compiles the non-models of the probailistic problem
+    NonModels,
+    /// Compiles both the models and the non-models of the probailistic problem
+    Both,
+}
+
 impl std::fmt::Display for ApproximateMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

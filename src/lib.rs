@@ -113,6 +113,7 @@ pub enum Command {
         non_models: bool,
     },
     Learn {
+        /// The csv file containing the train filenames and the associated expected output
         #[clap(long, value_parser, value_delimiter=' ')]
         trainfile: PathBuf,
         /// The csv file containing the test filenames and the associated expected output
@@ -141,7 +142,7 @@ pub enum Command {
         #[clap(long, default_value_t=1, short)]
         jobs: usize,
         /// The semiring on which to evaluate the circuits. If `tensor`, use torch
-        /// to compute the gradients. If `probability`, use custom efficient backpropagations
+        /// to compute the gradients. If `probability`, use custom efficient backpropagations which is the default option
         #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
         semiring: Semiring,
         /// The optimizer to use if `tensor` is selected as semiring
@@ -175,6 +176,9 @@ pub enum Command {
         /// If present, weights the learning in function of the epsilon of each query
         #[clap(long, action)]
         e_weighted: bool,
+        /// Indicate whether to use only the sat compilation ("models", default), or only the non-models compilation ("nonmodels") or both ("both")
+        #[clap(long, default_value_t=CompilationMethod::Models, value_enum)]
+        compilation_m: CompilationMethod,
     },
 }
 
@@ -276,6 +280,7 @@ pub fn compile(args: Args) -> f64 {
     };
     ac.evaluate();
     println!("dac\n{}", ac.as_graphviz());
+    println!("Final circuit size: {}", ac.number_nodes());
     if let Some(Command::Compile { fdac, dotfile , non_models: _}) = args.subcommand {
         if let Some(f) = dotfile {
             let out = ac.as_graphviz();
@@ -330,7 +335,8 @@ pub fn learn(args: Args) {
                     patience, 
                     equal_init: _,
                     recompile,
-                    e_weighted}) = args.subcommand {
+                    e_weighted,
+                    compilation_m,}) = args.subcommand {
         let params = LearnParameters::new(
             lr,
             nepochs,

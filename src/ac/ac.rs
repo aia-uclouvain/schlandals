@@ -128,6 +128,17 @@ impl<R> Dac<R>
         node
     }
 
+    /// Adds an opposite node to the circuit. Returns its index.
+    pub fn opposite_node(&mut self, number_children:usize) -> Node<R> {
+        let mut node = Node::opposite();
+        node.set_input_start(self.inputs.len());
+        node.set_number_inputs(number_children);
+        for _ in 0..number_children {
+            self.inputs.push(NodeIndex(0));
+        }
+        node
+    }
+
     pub fn add_node(&mut self, node: Node<R>) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(node);
@@ -163,6 +174,17 @@ impl<R> Dac<R>
         } else {
             self.nodes.push(Node::distribution(distribution_index, value_index, weight));
             self.distribution_mapping.insert((distribution_index, value_index), NodeIndex(self.nodes.len()-1));
+            NodeIndex(self.nodes.len()-1)
+        }
+    }
+
+    /// Returns, for a given distribution index and its value, the corresponding node index in the dac
+    pub fn old_distribution_old_value_node(&mut self, distribution: usize, variable: usize, weight: f64) -> NodeIndex {
+        if let Some(x) = self.distribution_mapping.get(&(distribution, variable)) {
+            *x
+        } else {
+            self.nodes.push(Node::distribution(distribution, variable, weight));
+            self.distribution_mapping.insert((distribution, variable), NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
         }
     }
@@ -230,6 +252,9 @@ impl<R> Dac<R>
                     self[child].value()
                 })) } else { R::one() };
                 self[node].set_value(value);
+            } else if self[node].is_opposite() {
+                let value = if start != end { R::opposite_child(self[self.inputs[start]].value())} else { R::zero() };
+                self[node].set_value(value);
             }
         }
         // Last node is the root since it has the higher layer
@@ -287,6 +312,7 @@ where R: SemiRing
         let dist_node_attributes = String::from("shape=doublecircle,style=filled");
         let prod_node_attributes = String::from("shape=square,style=filled");
         let sum_node_attributes = String::from("shape=circle,style=filled");
+        let opposite_node_attributes = String::from("shape=triangle,style=filled");
 
         let mut out = String::new();
         out.push_str("digraph {\ntranksep = 3;\n\n");
@@ -311,6 +337,11 @@ where R: SemiRing
                     let label = format!("D {} (d{} v{})", value, d, v);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
+                NodeType::Opposite => {
+                    let attributes = &opposite_node_attributes;
+                    let label = format!("- {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                }
             }
         }
 
@@ -356,6 +387,7 @@ where R: SemiRing
                 NodeType::Product => write!(f, "x")?,
                 NodeType::Sum => write!(f, "+")?,
                 NodeType::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
+                NodeType::Opposite => write!(f, "-")?,
             }
             writeln!(f, " {} {}", node.input_start(), node.number_inputs())?;
         }

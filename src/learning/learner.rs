@@ -83,7 +83,8 @@ impl <const S: bool> Learner<S> {
                                 equal_init,
                                 recompile: _,
                                 e_weighted: _,
-                                } = args.subcommand.unwrap() {
+                                compilation_m,
+                            } = args.subcommand.unwrap() {
             rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
             // Parsing the input files to retrieve the problem and the queries
@@ -132,7 +133,8 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
-            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout);
+            println!("TODO SAT COMPILATION");
+            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, true);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
@@ -157,7 +159,7 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
+            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, true);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             while let Some(d) = train_dacs.pop() {
@@ -245,7 +247,8 @@ impl <const S: bool> Learner<S> {
 
     fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
         let distributions = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
-        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout);
+        println!("TODO SAT COMPILATION");
+        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, true);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -293,6 +296,10 @@ impl <const S: bool> Learner<S> {
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
                         NodeType::Distribution { .. } => {},
+                        NodeType::Opposite => {
+                            // If it is an opposite node, we need to negate the path value
+                            self.train[query_id][child].add_to_path_value(-path_val.clone());
+                        },
                     }
                     if let NodeType::Distribution { d, v } = self.train[query_id][child].get_type() {
                         // Compute the gradient for children that are leaf distributions
@@ -423,7 +430,7 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac<R>> {
+pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, sat_compile: bool) -> Vec<Dac<R>> {
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -436,14 +443,22 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(false, sat_compile),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true, sat_compile),
                 }
             },
             

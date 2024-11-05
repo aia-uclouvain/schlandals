@@ -20,7 +20,7 @@ macro_rules! test_input_with_branching {
             fn [<compile_ $b _ $name>]() {
                 let mut args = Args::default();
                 args.input = PathBuf::from(format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name)));
-                args.subcommand = Some(Command::Compile{ fdac: None, dotfile: None });
+                args.subcommand = Some(Command::Compile{ fdac: None, dotfile: None, non_models: false });
                 let sol = compile(args);
                 assert!(($value - sol).abs() < 0.000001);
             }
