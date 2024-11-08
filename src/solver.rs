@@ -169,6 +169,12 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     fn restructure_after_preprocess(&mut self) {
         self.problem.clear_after_preprocess(&mut self.state);
         self.state.restore_state();
+        for distribution in self.problem.distributions_iter() {
+            let sum = self.problem[distribution].iter_variables().map(|v| {
+                self.problem[v].weight().unwrap()
+            }).sum::<f64>();
+            self.problem[distribution].set_remaining(sum, &mut self.state);
+        }
         let max_probability = self
             .problem
             .distributions_iter()
