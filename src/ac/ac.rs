@@ -320,7 +320,7 @@ where R: SemiRing
         // Generating the nodes in the network 
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = node.0;
-            let value = format!("{:.4}", self[node].value().to_f64());
+            let value = format!("{:.9}", self[node].value().to_f64());
             match self[node].get_type() {
                 NodeType::Sum => {
                     let attributes = &sum_node_attributes;

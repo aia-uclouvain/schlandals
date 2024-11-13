@@ -132,6 +132,10 @@ impl Distribution {
         state.get_f64(self.remaining)
     }
 
+    pub fn set_remaining(&self, value: f64, state: &mut StateManager) {
+        state.set_f64(self.remaining, value);
+    }
+
     pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
         let old_value = state.get_f64(self.remaining);
         let new_value = old_value- removed;

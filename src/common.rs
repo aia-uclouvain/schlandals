@@ -24,7 +24,7 @@ macro_rules! F128 {
 }
 pub(crate) use F128;
 
-pub const FLOAT_CMP_THRESHOLD: f64 = 0.0; //0.000000000001;
+pub const FLOAT_CMP_THRESHOLD: f64 = 0.00000000001;
 
 pub type Bounds = (Float, Float);
 
@@ -101,6 +101,16 @@ impl CacheKey {
             repr,
         }
     }
+    pub fn append(self, repr: String) -> Self {
+        Self {
+            hash: self.hash,
+            repr: self.repr + &repr,
+        }
+    }
+    pub fn repr(&self) -> &str {
+        &self.repr
+    }
+    
 }
 
 impl Hash for CacheKey {
