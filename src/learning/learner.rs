@@ -83,7 +83,7 @@ impl <const S: bool> Learner<S> {
                                 equal_init,
                                 recompile: _,
                                 e_weighted: _,
-                                compilation_m,
+                                learning_m,
                             } = args.subcommand.unwrap() {
             rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
         
@@ -133,8 +133,7 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
-            println!("TODO SAT COMPILATION");
-            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, true);
+            let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
@@ -159,12 +158,27 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, true);
+            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, LearningMethod::Models);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
+            let mut cnt = 0;
+            if learning_m == LearningMethod::Both {
+                let mut q1 = train_queries.clone();
+                let mut q2 = train_queries.clone();
+                train_queries = vec![];
+                while !q1.is_empty() {
+                    train_queries.push(q1.pop().unwrap());
+                    train_queries.push(q2.pop().unwrap());                    
+                }
+            }
             while let Some(d) = train_dacs.pop() {
-                let expected = train_queries.pop().unwrap().1;
+                let expected = match learning_m {
+                    LearningMethod::Models => train_queries.pop().unwrap().1,
+                    LearningMethod::NonModels => 1.0 - train_queries.pop().unwrap().1,
+                    LearningMethod::Both => if cnt % 2 == 1 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
+                };
                 train_dataset.add_query(d,expected);
+                cnt += 1;
             }
             while let Some(d) = test_dacs.pop() {
                 let expected = test_queries.pop().unwrap().1;
@@ -245,10 +259,9 @@ impl <const S: bool> Learner<S> {
         self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
-    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
+    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, learning_m: LearningMethod) {
         let distributions = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
-        println!("TODO SAT COMPILATION");
-        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, true);
+        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, learning_m);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -335,7 +348,7 @@ impl <const S: bool> Learner<S> {
 
     /// Training loop for the train dacs, using the given training parameters
     //fn train(&mut self, params: &LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
-    pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod) {
+    pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod, learning_m: LearningMethod) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
         self.log.start();
@@ -387,7 +400,7 @@ impl <const S: bool> Learner<S> {
 
             if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
                 println!("Recompiling at epoch {}", e);
-                self.recompile_dacs(branching, approx, params.compilation_timeout());
+                self.recompile_dacs(branching, approx, params.compilation_timeout(), learning_m);
             }
 
             // TODO: Add a verbosity command line argument
@@ -399,7 +412,7 @@ impl <const S: bool> Learner<S> {
             if do_print { println!("Loss: {}", avg_loss);}
             */
         }
-        
+
         // Evaluate the test set after training, if it exists
         if self.test.len() != 0 {
             let predictions = self.test();
@@ -430,8 +443,8 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, sat_compile: bool) -> Vec<Dac<R>> {
-    queries_clauses.par_iter().map(|clauses| {
+pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, learning_m: LearningMethod) -> Vec<Dac<R>> {
+    let mut double_dacs = queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
         let mut state = StateManager::default();
@@ -443,27 +456,40 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false, sat_compile),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false, sat_compile),
-                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(false, sat_compile),
-                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(false, sat_compile),
-                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(false, sat_compile),
-                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(false, sat_compile),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(false),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(false),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(false),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(false),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true, sat_compile),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true, sat_compile),
-                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(true, sat_compile),
-                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(true, sat_compile),
-                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(true, sat_compile),
-                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true, sat_compile),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(true),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(true),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(true),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true),
                 }
             },
             
         }
-    }).collect::<Vec<_>>()
+    }).collect::<Vec<_>>();
+    let mut dacs = vec![];
+    while !double_dacs.is_empty() {
+        let (d1, d2) = double_dacs.pop().unwrap();
+        match learning_m {
+            LearningMethod::Models => dacs.push(d1),
+            LearningMethod::NonModels => dacs.push(d2),
+            LearningMethod::Both => {
+                dacs.push(d1);
+                dacs.push(d2);
+            }             
+        }
+    }
+    dacs
 }
 
 /// Decides whether early stopping should be performed or not

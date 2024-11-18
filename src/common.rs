@@ -62,13 +62,21 @@ pub enum ApproximateMethod {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum CompilationMethod {
+pub enum LearningMethod {
     /// Compiles the models of the probailistic problem
     Models,
     /// Compiles the non-models of the probailistic problem
     NonModels,
     /// Compiles both the models and the non-models of the probailistic problem
     Both,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum CompilationMethod {
+    /// Compiles the models of the probailistic problem
+    Models,
+    /// Compiles the non-models of the probailistic problem
+    NonModels,
 }
 
 impl std::fmt::Display for ApproximateMethod {
