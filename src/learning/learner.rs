@@ -133,6 +133,7 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
+            println!("Train");
             let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
@@ -158,7 +159,8 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, LearningMethod::Models);
+            println!("Test");
+            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, LearningMethod::Models);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut cnt = 0;
@@ -170,18 +172,23 @@ impl <const S: bool> Learner<S> {
                     train_queries.push(q1.pop().unwrap());
                     train_queries.push(q2.pop().unwrap());                    
                 }
+                train_queries.reverse();
             }
-            while let Some(d) = train_dacs.pop() {
+            while let Some(mut d) = train_dacs.pop() {
                 let expected = match learning_m {
                     LearningMethod::Models => train_queries.pop().unwrap().1,
                     LearningMethod::NonModels => 1.0 - train_queries.pop().unwrap().1,
-                    LearningMethod::Both => if cnt % 2 == 1 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
+                    LearningMethod::Both => if cnt % 2 == 0 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
                 };
+                d.evaluate();
+                //println!("eval {}, expected {}", d.circuit_probability().to_f64(), expected);
                 train_dataset.add_query(d,expected);
                 cnt += 1;
             }
-            while let Some(d) = test_dacs.pop() {
+            while let Some(mut d) = test_dacs.pop() {
                 let expected = test_queries.pop().unwrap().1;
+                d.evaluate();
+                //println!("eval {} expected {}", d.circuit_probability().to_f64(), expected);
                 test_dataset.add_query(d, expected);
             }
             // Initializing the logger
@@ -474,12 +481,12 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
                     crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true),
                 }
             },
-            
         }
     }).collect::<Vec<_>>();
     let mut dacs = vec![];
     while !double_dacs.is_empty() {
         let (d1, d2) = double_dacs.pop().unwrap();
+        println!("DACs generated: {} {}", d1.number_nodes(), d2.number_nodes());
         match learning_m {
             LearningMethod::Models => dacs.push(d1),
             LearningMethod::NonModels => dacs.push(d2),
@@ -489,6 +496,7 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
             }             
         }
     }
+    dacs.reverse();
     dacs
 }
 

@@ -212,7 +212,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let mut backtrack_level = level - 1;
         let maximum_probability = self.component_extractor[component].max_probability();
         let all_component_distributions = self.component_extractor.component_distribution_iter(component).collect::<Vec<DistributionIndex>>();
-        let all_component_d_values = all_component_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+        let all_component_d_v = all_component_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+        let mut all_component_d_values = vec![];
+        for (d, v) in all_component_d_v.iter() {
+            let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+            if all_component_d_values.is_empty() || sum != 1.0 { all_component_d_values.push((d.clone(), v.clone())); }
+        }
 
         // Retrieve the cache entry if it exists, otherwise create a new one
         let mut cache_entry = self.cache.remove(&cache_key).unwrap_or_else(|| {
@@ -234,7 +239,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let distribution = cache_entry.distribution.unwrap();
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
             let unsat_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| self.problem[*d].is_constrained(&self.state)&&*d!=distribution).collect::<Vec<DistributionIndex>>();
-            let unsat_d_values = unsat_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+            let unsat_d_v = unsat_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+            let mut unsat_d_values = vec![];
+            for (d, v) in unsat_d_v.iter() {
+                let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+                if unsat_d_values.is_empty() || sum != 1.0 { unsat_d_values.push((d.clone(), v.clone())); }
+            }
             if prnt {
                 println!("....unsat_distributions {:?}", unsat_distributions);
                 println!("....unsat_d_values {:?}", unsat_d_values);
@@ -303,7 +313,12 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             .map(|d| self.problem[d].remaining(&self.state))
                             .product::<f64>(), removed);}
                         let remaining_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution && self.problem[*d].is_constrained(&self.state)).collect::<Vec<DistributionIndex>>();
-                        let remaining_d_values = remaining_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+                        let remaining_d_v = remaining_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+                        let mut remaining_d_values = vec![];
+                        for (d, v) in remaining_d_v.iter() {
+                            let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+                            if remaining_d_values.is_empty() || sum != 1.0 { remaining_d_values.push((d.clone(), v.clone())); }
+                        }
                         if prnt {
                             println!("....remaining_distribution {:?}", remaining_distributions);
                             println!("....remaining_d_values {:?}", remaining_d_values);
@@ -405,6 +420,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         let prnt = false;
         let start = Instant::now();
         self.state.save_state();
+        //println!("start compile");
 
         let preproc_result = self.preprocess();
         // Create the DAC and add elements from the preprocessing
@@ -479,6 +495,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut ac_nonmodel = self.build_ac(sol.epsilon(), &forced_by_propagation, false);
             ac_model.set_compile_time(start.elapsed().as_secs());
             ac_nonmodel.set_compile_time(start.elapsed().as_secs());
+            //println!("compile time {}", start.elapsed().as_secs());
             (ac_model, ac_nonmodel)
         } else {
             let mut discrepancy = 1;
