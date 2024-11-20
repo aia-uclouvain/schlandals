@@ -25,6 +25,7 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::io::{BufRead, BufReader};
+use malachite::Rational;
 
 use cnf::*;
 use uai::*;
@@ -32,7 +33,7 @@ use pg::*;
 
 pub trait Parser {
     fn problem_from_file(&self, state: &mut StateManager) -> Problem;
-    fn distributions_from_file(&self) -> Vec<Vec<f64>>;
+    fn distributions_from_file(&self) -> Vec<Vec<Rational>>;
     fn clauses_from_file(&self) -> Vec<Vec<isize>>;
 }
 
@@ -72,7 +73,7 @@ pub fn evidence_from_os_string(evidence: &OsString) -> String {
     }
 }
 
-pub fn create_problem(distributions: &[Vec<f64>], clauses: &[Vec<isize>], state: &mut StateManager) -> Problem {
+pub fn create_problem(distributions: &[Vec<Rational>], clauses: &[Vec<isize>], state: &mut StateManager) -> Problem {
     let mut number_var = 0;
     for clause in clauses.iter() {
         number_var = number_var.max(clause.iter().map(|l| l.unsigned_abs()).max().unwrap());

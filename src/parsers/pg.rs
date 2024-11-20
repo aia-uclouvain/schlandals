@@ -22,6 +22,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
+use malachite::Rational;
+use crate::common::F128;
 
 struct EdgeConstraint {
     source: isize,
@@ -66,7 +68,7 @@ impl Parser for PgParser {
             _ => panic!("Bad header for probalistic graph file: {}", content[0]),
         };
         let mut map_node_to_id: FxHashMap<&str, isize> = FxHashMap::default();
-        let mut distributions: Vec<Vec<f64>> = vec![];
+        let mut distributions: Vec<Vec<Rational>> = vec![];
         let mut clauses: Vec<EdgeConstraint> = vec![];
         let mut node_index = 1;
         let mut parameter_index = 1;
@@ -76,7 +78,7 @@ impl Parser for PgParser {
             let target = content[content_index + 1];
             let proba_up = content[content_index + 2].parse::<f64>().unwrap();
             content_index += 3;
-            distributions.push(vec![proba_up, 1.0 - proba_up]);
+            distributions.push(vec![F128!(proba_up), F128!(1.0 - proba_up)]);
             let source_id = if !map_node_to_id.contains_key(source) {
                 map_node_to_id.insert(source, node_index);
                 node_index += 1;
@@ -125,7 +127,7 @@ impl Parser for PgParser {
             _ => panic!("Bad header for probalistic graph file: {}", content[0]),
         };
         let mut map_node_to_id: FxHashMap<&str, isize> = FxHashMap::default();
-        let mut distributions: Vec<Vec<f64>> = vec![];
+        let mut distributions: Vec<Vec<Rational>> = vec![];
         let mut clauses: Vec<EdgeConstraint> = vec![];
         let mut node_index = 1;
         let mut parameter_index = 1;
@@ -135,7 +137,7 @@ impl Parser for PgParser {
             let target = content[content_index + 1];
             let proba_up = content[content_index + 2].parse::<f64>().unwrap();
             content_index += 3;
-            distributions.push(vec![proba_up, 1.0 - proba_up]);
+            distributions.push(vec![F128!(proba_up), F128!(1.0 - proba_up)]);
             let source_id = if !map_node_to_id.contains_key(source) {
                 map_node_to_id.insert(source, node_index);
                 node_index += 1;
@@ -170,8 +172,7 @@ impl Parser for PgParser {
         clauses
     }
 
-
-    fn distributions_from_file(&self) -> Vec<Vec<f64>> {
+    fn distributions_from_file(&self) -> Vec<Vec<Rational>> {
         vec![]
     }
 }

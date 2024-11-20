@@ -22,11 +22,12 @@ use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
 use crate::ac::ac::{NodeIndex, Dac};
-use crate::semiring::SemiRing;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
-use rug::Float;
+use malachite::Rational;
+use malachite::num::arithmetic::traits::Abs;
+
 use std::time::Instant;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);
@@ -64,9 +65,9 @@ pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     /// Statistics gathered during the solving
     statistics: Statistics<S>,
     /// Product of the weight of the variables set to true during propagation
-    preproc_in: Option<Float>,
+    preproc_in: Option<Rational>,
     /// Probability of removed interpretation during propagation
-    preproc_out: Option<f64>,
+    preproc_out: Option<Rational>,
     /// Parameters of the solving
     parameters: SolverParameters,
     /// The caches present in the cache. Used during compilation to reconstruct the AC from the
@@ -107,15 +108,16 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn search(&mut self, is_lds: bool) -> Solution {
         self.parameters.start = Instant::now();
+        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
-        if let Some(sol) = self.preprocess() {
+        if let Some(sol) = self.preprocess(&max) {
             return sol;
         }
         self.restructure_after_preprocess();
 
         if self.problem.number_clauses() == 0 {
             let lb = self.preproc_in.clone().unwrap();
-            let ub = F128!(1.0 - self.preproc_out.unwrap());
+            let ub = max - self.preproc_out.clone().unwrap();
             return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
         }
         if !is_lds {
@@ -142,7 +144,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
     /// Preprocess the problem, if the problem is solved during the preprocess, return a solution.
     /// Returns None otherwise
-    fn preprocess(&mut self) -> Option<Solution> {
+    fn preprocess(&mut self, max: &Rational) -> Option<Solution> {
         self.propagator.init(self.problem.number_clauses());
         let mut preprocessor = Preprocessor::new(
             &mut self.problem,
@@ -160,26 +162,22 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }
         self.preproc_in = Some(preproc.unwrap());
         let max_after_preproc= self.problem.distributions_iter().map(|d| {
-            self.problem[d].remaining(&self.state)
-        }).product::<f64>();
-        self.preproc_out = Some(1.0 - max_after_preproc);
+            F128!(self.problem[d].remaining(&self.state))
+        }).product::<Rational>();
+        self.preproc_out = Some(max - max_after_preproc);
         None
     }
 
     fn restructure_after_preprocess(&mut self) {
         self.problem.clear_after_preprocess(&mut self.state);
+        let distribution_max = self.problem.distributions_iter().map(|d| {
+            F128!(self.problem[d].remaining(&self.state))
+        }).collect::<Vec<Rational>>();
         self.state.restore_state();
-        for distribution in self.problem.distributions_iter() {
-            let sum = self.problem[distribution].iter_variables().map(|v| {
-                self.problem[v].weight().unwrap()
-            }).sum::<f64>();
-            self.problem[distribution].set_remaining(sum, &mut self.state);
+        for (id, distribution) in self.problem.distributions_iter().enumerate() {
+            self.problem[distribution].set_remaining(distribution_max[id].clone(), &mut self.state);
         }
-        let max_probability = self
-            .problem
-            .distributions_iter()
-            .map(|d| self.problem[d].remaining(&self.state))
-            .product::<f64>();
+        let max_probability = distribution_max.iter().product::<Rational>();
         self.component_extractor.shrink(
             self.problem.number_clauses(),
             self.problem.number_variables(),
@@ -196,11 +194,12 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
+        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
         let result = self.pwmc(ComponentIndex(0), 1, discrepancy);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
-        let ub: Float = 1.0 - (self.preproc_out.unwrap() + p_out * self.preproc_in.clone().unwrap());
+        let ub: Rational = max - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
@@ -223,12 +222,16 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
         }
         let mut backtrack_level = level - 1;
-        let maximum_probability = self.component_extractor[component].max_probability();
-        if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(maximum_probability) {
+        let maximum_probability = self.component_extractor.component_distribution_iter(component).map(|d| {
+            F128!(self.problem[d].remaining(&self.state))
+        }).product::<Rational>();
+        if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(&maximum_probability) {
             let mut new_p_in = F128!(0.0);
             let mut new_p_out = F128!(0.0);
             let distribution = cache_entry.distribution.unwrap();
-            let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
+            let unsat_factor = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution).map(|d| {
+                F128!(self.problem[d].remaining(&self.state))
+            }).product::<Rational>();
             let mut child_id = 0;
             for variable in self.problem[distribution].iter_variables() {
                 if self.problem[variable].is_fixed(&self.state) {
@@ -242,22 +245,22 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                 match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
                     Err(bt) => {
                         self.statistics.unsat();
-                        new_p_out += v_weight * unsat_factor;
+                        new_p_out += v_weight * unsat_factor.clone();
                         if bt != level {
                             self.restore();
                             backtrack_level = bt;
-                            new_p_out = F128!(maximum_probability);
+                            new_p_out = maximum_probability.clone();
                             cache_entry.clear_children();
                             break;
                         }
                     },
                     Ok(_) => {
                         let p = self.propagator.get_propagation_prob();
-                        let removed = unsat_factor - self.component_extractor
+                        let removed = unsat_factor.clone() - self.component_extractor
                             .component_distribution_iter(component)
                             .filter(|d| *d != distribution)
-                            .map(|d| self.problem[d].remaining(&self.state))
-                            .product::<f64>();
+                            .map(|d| F128!(self.problem[d].remaining(&self.state)))
+                            .product::<Rational>();
                         new_p_out += removed * v_weight;
 
                         // Decomposing into independent components
@@ -266,8 +269,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                         let prod_maximum_probability = self.component_extractor
                             .component_distribution_iter(component)
                             .filter(|d| self.problem[*d].is_constrained(&self.state))
-                            .map(|d| self.problem[d].remaining(&self.state))
-                            .product::<f64>();
+                            .map(|d| F128!(self.problem[d].remaining(&self.state)))
+                            .product::<Rational>();
                         let (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
                         self.state.save_state();
@@ -282,7 +285,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                                     self.restore();
                                     is_product_sat = false;
                                     backtrack_level = sub_solution.backtrack_level;
-                                    new_p_out = F128!(maximum_probability);
+                                    new_p_out = maximum_probability.clone();
                                     cache_entry.clear_children();
                                     break;
                                 }
@@ -326,10 +329,11 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
 impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
-    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> Dac<R> {
+    pub fn compile(&mut self, is_lds: bool) -> Dac {
         let start = Instant::now();
+        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
-        let preproc_result = self.preprocess();
+        let preproc_result = self.preprocess(&max);
         // Create the DAC and add elements from the preprocessing
         let forced_by_propagation = self.forced_from_propagation();
         self.restructure_after_preprocess();
@@ -375,7 +379,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }        
     }
 
-    pub fn build_ac<R: SemiRing>(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac<R> {
+    pub fn build_ac(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac {
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
@@ -418,7 +422,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         dac
     }
 
-    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>) -> NodeIndex {
+    pub fn explore_cache(&self, dac: &mut Dac, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>) -> NodeIndex {
         if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
         }
@@ -497,7 +501,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             // distribution has at least one value set to false.
             // Otherwise it would always send 1.0 to the product node.
             for distribution in self.propagator.unconstrained_distributions_iter() {
-                if self.problem[distribution].number_false(&self.state) != 0 {
+                if self.problem[distribution].remaining(&self.state) != 1.0 {
                     let values = self.problem[distribution].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>();
                     unconstrained_distribution_variables.push((distribution, values));
                 }
@@ -588,7 +592,7 @@ impl CacheEntry {
         self.children.get(&variable).unwrap().children_keys.clone()
     }
 
-    fn are_bounds_tight(&self, maximum_probability: f64) -> bool {
+    fn are_bounds_tight(&self, maximum_probability: &Rational) -> bool {
         (self.bounds.0.clone() + &self.bounds.1 - maximum_probability).abs() <= FLOAT_CMP_THRESHOLD
     }
 }
@@ -615,7 +619,7 @@ impl CacheChildren {
 }
 
 struct SearchResult {
-    bounds: (Float, Float),
+    bounds: (Rational, Rational),
     backtrack_level: isize,
     cache_index: usize,
 }

@@ -19,7 +19,7 @@ use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
-use rug::Float;
+use malachite::Rational;
 use crate::common::F128;
 
 pub struct Preprocessor<'b>
@@ -47,7 +47,7 @@ where
         }
     }
     
-    pub fn preprocess(&mut self) -> Option<Float> {
+    pub fn preprocess(&mut self) -> Option<Rational> {
         let mut p = F128!(1.0);
 
         for variable in self.problem.variables_iter() {

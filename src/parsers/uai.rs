@@ -23,6 +23,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
+use malachite::Rational;
+use crate::common::F128;
 
 struct CPTConstraint {
     indicator_variables: Vec<usize>,
@@ -112,7 +114,7 @@ impl Parser for UaiParser {
             content_index += scope_size + 1;
         }
 
-        let mut distributions: Vec<Vec<f64>> = vec![];
+        let mut distributions: Vec<Vec<Rational>> = vec![];
         let mut clauses: Vec<CPTConstraint> = vec![];
 
         // Now we parse the actual factors with their probabilities.
@@ -139,13 +141,13 @@ impl Parser for UaiParser {
 
             let mut choice_idx = 0;
             for _ in 0..number_distribution {
-                let distribution = (0..distribution_size).map(|j| content[content_index + j].parse::<f64>().unwrap()).collect::<Vec<f64>>();
+                let distribution = (0..distribution_size).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>();
                 content_index += distribution_size;
 
-                let distribution_no_zero = distribution.iter().copied().filter(|p| *p != 0.0).collect::<Vec<f64>>();
+                let distribution_no_zero = (0..distribution.len()).filter(|j| distribution[*j] != 0.0).map(|j| distribution[j].clone()).collect::<Vec<Rational>>();
                 if distribution_no_zero.len() == 1 {
-                    for (i, p) in distribution.iter().copied().enumerate() {
-                        if p != 0.0 {
+                    for (i, p) in distribution.iter().enumerate() {
+                        if *p != 0.0 {
                             let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx + i].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
                             clauses.push(CPTConstraint::new(indicator_variables, None));
                             break;
@@ -159,11 +161,11 @@ impl Parser for UaiParser {
                 let cache_key = cache_key.iter().map(|p| format!("{}", p)).collect::<Vec<String>>().join(" ");
                 match distribution_cache.get(&cache_key) {
                     Some(v) => {
-                        let mut sorted_proba = distribution.iter().copied().enumerate().collect::<Vec<(usize, f64)>>();
-                        sorted_proba.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                        let mut sorted_proba = distribution.iter().enumerate().collect::<Vec<(usize, &Rational)>>();
+                        sorted_proba.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
                         let mut v_idx = 0;
                         for (j, p) in sorted_proba.iter().copied() {
-                            if p == 0.0 {
+                            if *p == 0.0 {
                                 continue;
                             }
                             let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx + j].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
@@ -174,16 +176,16 @@ impl Parser for UaiParser {
                     },
                     None => {
                         distributions.push(distribution_no_zero);
-                        let mut cache_entry: Vec<(f64, isize)> = vec![];
-                        for probability in distribution.iter().copied() {
-                            if probability == 0.0 {
+                        let mut cache_entry: Vec<(Rational, isize)> = vec![];
+                        for probability in distribution.iter() {
+                            if *probability == 0.0 {
                                 choice_idx += 1;
                                 continue;
                             }
                             let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
                             choice_idx += 1;
                             clauses.push(CPTConstraint::new(indicator_variables,Some(variable_index)));
-                            cache_entry.push((probability, variable_index));
+                            cache_entry.push((probability.clone(), variable_index));
                             variable_index += 1;
                         }
                         cache_entry.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -333,7 +335,7 @@ impl Parser for UaiParser {
     }
 
 
-    fn distributions_from_file(&self) -> Vec<Vec<f64>> {
+    fn distributions_from_file(&self) -> Vec<Vec<Rational>> {
         vec![]
     }
 }

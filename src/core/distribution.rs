@@ -21,8 +21,11 @@
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
 use super::{problem::{ClauseIndex, VariableIndex}, sparse_set::SparseSet};
-use search_trail::{F64Manager, BoolManager, ReversibleBool, ReversibleF64, ReversibleUsize, StateManager, UsizeManager};
+use search_trail::{F64Manager, ReversibleF64, ReversibleUsize, StateManager, UsizeManager};
 use rustc_hash::FxHashMap;
+use malachite::Rational;
+use malachite::num::conversion::traits::RoundingFrom;
+use malachite::rounding_modes::RoundingMode::Nearest;
 
 /// A distribution of the input problem
 #[derive(Debug)]
@@ -31,21 +34,18 @@ pub struct Distribution {
     id: usize,
     /// First variable in the distribution
     first: VariableIndex,
+    pub domain_size: usize,
     /// Number of variable in the distribution
-    size: usize,
+    size: ReversibleUsize,
     /// Reversible sparse set containing the distribution constraining the distribution. We assume
     /// that the distribution do not appear twice in the same clause. At the time of the writing of
     /// these line this is a reasonnable constraint, but time will tell if I must update this code.
     clauses: SparseSet<ClauseIndex>,
-    /// Number of variables assigned to F in the distribution
-    number_false: ReversibleUsize,
     /// Sum of the weight of the unfixed variables in the distribution
     remaining: ReversibleF64,
-    /// Is the distribution a candidate for branching ?
-    branching_candidate: bool,
     /// Initial first variable of the distribution in the problem
     old_first: VariableIndex,
-    fixed: ReversibleBool,
+    pub flag: bool,
 }
 
 impl Distribution {
@@ -54,13 +54,12 @@ impl Distribution {
         Self {
             id,
             first,
-            size,
+            domain_size: size,
+            size: state.manage_usize(size),
             clauses: SparseSet::new(state),
-            number_false: state.manage_usize(0),
             remaining: state.manage_f64(1.0),
-            branching_candidate: true,
             old_first: first,
-            fixed: state.manage_bool(false),
+            flag: false,
         }
     }
 
@@ -79,28 +78,7 @@ impl Distribution {
     pub fn set_unconstrained(&self, state: &mut StateManager) {
         self.clauses.remove_all(state);
     }
-
-    /// Icrements the number of variable assigned to false in the distribution. This operation
-    /// is reversed when the trail restore its state.
-    pub fn increment_number_false(&self, state: &mut StateManager) -> usize {
-        state.increment_usize(self.number_false)
-    }
     
-    /// Returns the number of unfixed variables in the distribution. This assume that the distribution
-    /// has no variable set to true (otherwise there is no need to consider it).
-    pub fn number_unfixed(&self, state: &StateManager) -> usize {
-        let n = state.get_usize(self.number_false);
-        if  n > self.size {
-            panic!("Size is {} but number false is {}", self.size, n);
-        }
-        self.size - state.get_usize(self.number_false)
-    }
-    
-    /// Returns the number of variable set to false in the distribution.
-    pub fn number_false(&self, state: &StateManager) -> usize {
-        state.get_usize(self.number_false)
-    }
-
     /// Returns the initial index of the distribution in the problem
     pub fn old_index(&self) -> usize {
         self.id
@@ -120,55 +98,40 @@ impl Distribution {
         self.first = start;
     }
 
-    pub fn set_size(&mut self, size: usize) {
-        self.size = size;
-    }
-    
     pub fn remaining(&self, state: &StateManager) -> f64 {
         state.get_f64(self.remaining)
     }
 
-    pub fn set_remaining(&self, value: f64, state: &mut StateManager) {
-        state.set_f64(self.remaining, value);
+    pub fn set_remaining(&self, value: Rational, state: &mut StateManager) {
+        let remaining = f64::rounding_from(value, Nearest).0;
+        state.set_f64(self.remaining, remaining);
     }
 
-    pub fn remove_probability_mass(&self, removed: f64, state: &mut StateManager) {
+    pub fn remove_probability_mass(&self, removed: Rational, state: &mut StateManager) {
         let old_value = state.get_f64(self.remaining);
-        let new_value = old_value- removed;
+        let new_value = old_value - f64::rounding_from(removed, Nearest).0;
         state.set_f64(self.remaining, new_value);
+        let old_size = state.get_usize(self.size);
+        state.set_usize(self.size, old_size - 1);
     }
 
-    pub fn set_branching_candidate(&mut self, value: bool) {
-        self.branching_candidate = value;
-    }
-
-    pub fn is_branching_candidate(&self) -> bool {
-        self.branching_candidate
-    }
-
-    pub fn size(&self) -> usize { self.size }
-
-    pub fn domain_size(&self, state: &StateManager) -> usize {
-        self.clauses.len(state)
+    pub fn size(&self, state: &StateManager) -> usize {
+        state.get_usize(self.size)
     }
 
     pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.clauses.clear(map, state);
     }
 
-    pub fn set_fixed(&self, state: &mut StateManager) {
-        state.set_bool(self.fixed, true);
-    }
-
-    pub fn is_fixed(&self, state: &StateManager) -> bool {
-        state.get_bool(self.fixed)
+    pub fn set_domain_size(&mut self, domain_size: usize) {
+        self.domain_size = domain_size;
     }
 
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
     pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> {
-        (self.first.0..(self.first.0 + self.size)).map(VariableIndex)
+        (self.first.0..(self.first.0 + self.domain_size)).map(VariableIndex)
     }
 
     pub fn iter_clauses(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {

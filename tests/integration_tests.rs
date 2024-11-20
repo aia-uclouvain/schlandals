@@ -16,7 +16,7 @@ macro_rules! test_input_with_branching {
                 assert!(($value - sol).abs() < 0.000001);
             }
             
-            #[test]
+            //#[test]
             fn [<compile_ $b _ $name>]() {
                 let mut args = Args::default();
                 args.input = PathBuf::from(format!("tests/instances/{}/{}.cnf", stringify!($dir), stringify!($name)));

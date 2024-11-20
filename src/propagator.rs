@@ -50,7 +50,7 @@ use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 use crate::common::F128;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::problem::{ClauseIndex, DistributionIndex, Problem, VariableIndex};
-use rug::{Assign, Float};
+use malachite::Rational;
 
 use super::core::literal::Literal;
 use super::core::variable::Reason;
@@ -66,7 +66,7 @@ pub struct Propagator {
     assignments: Vec<Literal>,
     base_assignments: ReversibleUsize,
     unconstrained_distributions: Vec<DistributionIndex>,
-    propagation_prob: Float,
+    propagation_prob: Rational,
 }
 
 impl Propagator {
@@ -111,7 +111,7 @@ impl Propagator {
     }
 
     /// Returns the propagation probability of the last call to propagate
-    pub fn get_propagation_prob(&self) -> Float {
+    pub fn get_propagation_prob(&self) -> Rational {
         self.propagation_prob.clone()
     }
     
@@ -140,9 +140,9 @@ impl Propagator {
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
-        if !g[distribution].is_fixed(state) {
+        if g[distribution].is_constrained(state) {
             self.unconstrained_distributions.push(distribution);
-            self.propagation_prob *= g[distribution].remaining(state);
+            self.propagation_prob *= F128!(g[distribution].remaining(state));
         }
     }
     
@@ -188,7 +188,7 @@ impl Propagator {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
-        self.propagation_prob.assign(1.0);
+        self.propagation_prob = F128!(1.0);
         while let Some((variable, value, l, reason)) = self.propagation_stack.pop() {
             if let Some(v) = g[variable].value(state) {
                 if v == value {
@@ -267,12 +267,11 @@ impl Propagator {
                 }
                 if value {
                     g[distribution].set_unconstrained(state);
-                    g[distribution].set_fixed(state);
                     self.propagation_prob *= g[variable].weight().unwrap();
                     for v in g[distribution].iter_variables().filter(|va| !g[*va].is_fixed(state) && *va != variable) {
                         self.add_to_propagation_stack(v, false, level, Some(Reason::Distribution(distribution)));
                     }
-                } else if g[distribution].number_unfixed(state) == 1 {
+                } else if g[distribution].size(state) == 1 {
                     if let Some(v) = g[distribution].iter_variables().find(|v| !g[*v].is_fixed(state)) {
                         self.add_to_propagation_stack(v, true, level, Some(Reason::Distribution(distribution)));
                     }
@@ -574,15 +573,15 @@ mod test_clause_learning {
         propagator.init(7);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
         g.add_distributions(&vec![
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
-            vec![0.5, 0.5],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
+            vec![F128!(0.5), F128!(0.5)],
         ], &mut state);
 
         g.add_clause(vec![

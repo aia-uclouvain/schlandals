@@ -14,19 +14,28 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 use clap::ValueEnum;
-use rug::Float;
 use std::hash::Hash;
+use malachite::Rational;
+use malachite::num::conversion::traits::RoundingFrom;
+use malachite::rounding_modes::RoundingMode::Nearest;
 
 macro_rules! F128 {
     ($v:expr) => {
-        Float::with_val(113, $v)
+        Rational::try_from($v).unwrap()
     };
 }
 pub(crate) use F128;
 
-pub const FLOAT_CMP_THRESHOLD: f64 = 0.000001;
+macro_rules! rational_to_f64 {
+    ($v:expr) => {
+        f64::rounding_from($v, Nearest).0
+    }
+}
+pub(crate) use rational_to_f64;
 
-pub type Bounds = (Float, Float);
+pub const FLOAT_CMP_THRESHOLD: f64 = 0.00000;
+
+pub type Bounds = (Rational, Rational);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Branching {
@@ -117,16 +126,16 @@ impl Eq for CacheKey {}
 #[derive(Clone)]
 pub struct Solution {
     /// Lower bound on the true probability
-    lower_bound: Float,
+    lower_bound: Rational,
     /// Upper bound on the true probability
-    upper_bound: Float,
+    upper_bound: Rational,
     /// Number of seconds, since the start of the search, at which the solution was found
     time_found: u64,
 }
 
 impl Solution {
 
-    pub fn new(lower_bound: Float, upper_bound: Float, time_found: u64) -> Self {
+    pub fn new(lower_bound: Rational, upper_bound: Rational, time_found: u64) -> Self {
         Self {
             lower_bound,
             upper_bound,
@@ -135,7 +144,8 @@ impl Solution {
     }
 
     pub fn has_converged(&self, epsilon: f64) -> bool {
-        self.upper_bound <= self.lower_bound.clone()*(1.0 + epsilon).powf(2.0) + FLOAT_CMP_THRESHOLD
+        let conv_factor = F128!((1.0 + epsilon).powf(2.0));
+        self.upper_bound <= self.lower_bound.clone()*conv_factor //+ FLOAT_CMP_THRESHOLD
     }
 
     pub fn print(&self) {
@@ -143,20 +153,26 @@ impl Solution {
     }
 
     pub fn to_f64(&self) -> f64 {
-        (self.lower_bound.clone() * self.upper_bound.clone()).sqrt().to_f64()
+        rational_to_f64!(self.lower_bound.clone() * self.upper_bound.clone()).sqrt()
     }
 
     pub fn bounds(&self) -> (f64, f64) {
-        (self.lower_bound.to_f64(), self.upper_bound.to_f64())
+        (rational_to_f64!(&self.lower_bound), rational_to_f64!(&self.upper_bound))
     }
 
     pub fn epsilon(&self) -> f64 {
-        ((self.upper_bound.to_f64()/(self.lower_bound.to_f64()+FLOAT_CMP_THRESHOLD)).sqrt() - 1.0).max(0.0)
+        let (lb, ub) = self.bounds();
+        if lb != 0.0 {
+            (ub / lb ).sqrt() - 1.0
+        } else {
+            f64::MAX
+        }
     }
 }
 
 impl std::fmt::Display for Solution {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Estimated probability {:.8} with bounds [{:.8} {:.8}] (epsilon {}) found in {} seconds", (self.lower_bound.clone() * self.upper_bound.clone()).sqrt(), self.lower_bound, self.upper_bound, self.epsilon(), self.time_found)
+        let (lb, ub) = self.bounds();
+        write!(f, "Estimated probability {:.8} with bounds [{:.8} {:.8}] (epsilon {}) found in {} seconds", (lb * ub).sqrt(), lb, ub, self.epsilon(), self.time_found)
     }
 }

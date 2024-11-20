@@ -48,6 +48,8 @@ use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use malachite::Rational;
+use crate::common::F128;
 
 pub struct CnfParser {
     input: PathBuf,
@@ -130,8 +132,8 @@ impl Parser for CnfParser {
     }
 
     
-    fn distributions_from_file(&self) -> Vec<Vec<f64>> {
-        let mut distributions: Vec<Vec<f64>> = vec![];
+    fn distributions_from_file(&self) -> Vec<Vec<Rational>> {
+        let mut distributions: Vec<Vec<Rational>> = vec![];
         let file = File::open(&self.input).unwrap();
         let reader = BufReader::new(&file);
         for l in reader.lines() {
@@ -139,7 +141,7 @@ impl Parser for CnfParser {
                 Err(e) => panic!("Problem while parsing the distributions: {}", e),
                 Ok(line) => {
                     if line.starts_with("c p distribution") {
-                        let weights: Vec<f64> = line.split_whitespace().skip(3).map(|token| token.parse::<f64>().unwrap()).collect();
+                        let weights: Vec<Rational> = line.split_whitespace().skip(3).map(|token| F128!(token.parse::<f64>().unwrap())).collect();
                         distributions.push(weights);
                     }
                 }

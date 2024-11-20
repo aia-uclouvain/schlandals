@@ -25,13 +25,12 @@ mod propagator;
 mod preprocess;
 pub mod learning;
 pub mod ac;
-pub mod semiring;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Write, BufRead, BufReader};
-use rug::Float;
+use malachite::Rational;
 use clap::{Parser, Subcommand};
 
 use learning::{learner::Learner, LearnParameters};
@@ -137,10 +136,6 @@ pub enum Command {
         /// Number of threads to use for the evaluation of the DACs
         #[clap(long, default_value_t=1, short)]
         jobs: usize,
-        /// The semiring on which to evaluate the circuits. If `tensor`, use torch
-        /// to compute the gradients. If `probability`, use custom efficient backpropagations
-        #[clap(long, short, default_value_t=Semiring::Probability, value_enum)]
-        semiring: Semiring,
         /// The optimizer to use if `tensor` is selected as semiring
         #[clap(long, short, default_value_t=Optimizer::Adam, value_enum)]
         optimizer: Optimizer,
@@ -195,7 +190,6 @@ impl Command {
             ltimeout: u64::MAX,
             loss: Loss::MAE,
             jobs: 1,
-            semiring: Semiring::Probability,
             optimizer: Optimizer::Adam,
             lr_drop: 0.75,
             epoch_drop:100,
@@ -244,7 +238,8 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
-    let problem = create_problem(distributions, clauses, &mut state);
+    let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| F128!(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
+    let problem = create_problem(&distributions_rational, clauses, &mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
     let solution = match solver {
@@ -266,7 +261,7 @@ pub fn compile(args: Args) -> f64 {
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
 
-    let mut ac: Dac<Float> = match args.approx {
+    let mut ac: Dac = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
                 GenericSolver::SMinInDegreeCompile(mut solver) => solver.compile(false),
@@ -330,7 +325,6 @@ pub fn learn(args: Args) {
                     ltimeout,
                     loss,
                     jobs: _,
-                    semiring: _,
                     optimizer,
                     lr_drop,
                     epoch_drop,

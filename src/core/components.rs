@@ -31,6 +31,8 @@
 use super::problem::{ClauseIndex, VariableIndex, Problem, DistributionIndex};
 use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
+use malachite::Rational;
+use crate::common::F128;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -90,7 +92,7 @@ pub struct Component {
     hash: u64,
     /// Maximum probability of the sub-problem represented by the component (i.e., all remaining
     /// valid interpretation are models)
-    max_probability: f64,
+    max_probability: Rational,
     /// Representation of the component for hash
     repr: String,
 }
@@ -101,8 +103,8 @@ impl Component {
         self.hash
     }
 
-    pub fn max_probability(&self) -> f64 {
-        self.max_probability
+    pub fn max_probability(&self) -> Rational {
+        self.max_probability.clone()
     }
 
     pub fn get_cache_key(&self) -> CacheKey {
@@ -127,7 +129,7 @@ impl ComponentExtractor {
             distribution_start: 0,
             number_distribution: g.number_distributions(),
             hash: 0,
-            max_probability: 1.0,
+            max_probability: F128!(1.0),
             repr: String::new(),
         }];
         Self {
@@ -177,7 +179,7 @@ impl ComponentExtractor {
         comp_distribution_start: usize,
         comp_number_distribution: &mut usize,
         hash: &mut u64,
-        max_probability: &mut f64,
+        max_probability: &mut Rational,
         clauses: &mut Vec<ClauseIndex>,
         variables: &mut Vec<VariableIndex>,
         state: &mut StateManager,
@@ -224,7 +226,7 @@ impl ComponentExtractor {
                                     self.distribution_positions[distribution.0] = new_d_pos;
                                     self.distribution_positions[moved_d.0] = current_d_pos;
                                 }
-                                *max_probability *= g[distribution].remaining(state);
+                                *max_probability *= F128!(g[distribution].remaining(state));
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
@@ -284,7 +286,7 @@ impl ComponentExtractor {
                 let mut size = 0;
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
-                let mut max_probability = 1.0;
+                let mut max_probability = F128!(1.0);
                 let mut clauses: Vec<ClauseIndex> = vec![];
                 let mut variables: Vec<VariableIndex> = vec![];
                 self.exploration_stack.push(clause);
@@ -364,7 +366,7 @@ impl ComponentExtractor {
         self.distributions[start..end].iter().copied()
     }
 
-    pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize, max_probability: f64) {
+    pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize, max_probability: Rational) {
         self.clauses.truncate(number_clause);
         self.clauses.shrink_to_fit();
         self.clause_positions.truncate(number_clause);

@@ -14,7 +14,11 @@
 //You should have received a copy of the GNU Affero General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use malachite::Rational;
+use malachite::num::arithmetic::traits::{Abs, Pow};
+
 use crate::{Loss, Optimizer};
+use crate::common::F128;
 
 pub mod learner;
 mod logger;
@@ -37,7 +41,7 @@ pub struct LearnParameters {
     /// The number of epochs after which the learning rate is dropped
     epoch_drop: usize,
     /// The error threshold under which the training is stopped
-    early_stop_threshold: f64,
+    early_stop_threshold: Rational,
     /// The minimum delta between two epochs to consider that the training is still improving
     early_stop_delta: f64,
     /// The number of epochs to wait before stopping the training if the loss is not improving
@@ -52,7 +56,7 @@ impl LearnParameters {
     
     pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, 
                early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool) -> Self {
-        Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, 
+        Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold: F128!(early_stop_threshold), early_stop_delta, 
               patience, recompile, e_weighted}
     }
 
@@ -97,8 +101,8 @@ impl LearnParameters {
     }
 
     /// Returns the loss threshold at which the learning can do an early stopping
-    pub fn early_stop_threshold(&self) -> f64 {
-        self.early_stop_threshold
+    pub fn early_stop_threshold(&self) -> &Rational {
+        &self.early_stop_threshold
     }
 
     /// Returns the delta for early stopping. If the improvement between two successive epochs (in
@@ -130,30 +134,30 @@ impl LearnParameters {
 ///     - Their gradient (gradient)
 pub trait LossFunctions {
     /// Evaluates the loss given a predicted and expected output
-    fn loss(&self, predicted: f64, expected: f64) -> f64;
+    fn loss(&self, predicted: &Rational, expected: &Rational) -> Rational;
     /// Evaluates the gradient of the loss given a predicted and expected output
-    fn gradient(&self, predicted: f64, expected: f64) -> f64;
+    fn gradient(&self, predicted: &Rational, expected: &Rational) -> Rational;
 }
 
 impl LossFunctions for Loss {
 
-    fn loss(&self, predicted: f64, expected: f64) -> f64 {
+    fn loss(&self, predicted: &Rational, expected: &Rational) -> Rational {
         match self {
-            Loss::MSE => (predicted - expected).powi(2),
+            Loss::MSE => (predicted - expected).pow(2i64),
             Loss::MAE => (predicted - expected).abs(),
         }
     }
 
-    fn gradient(&self, predicted: f64, expected: f64) -> f64 {
+    fn gradient(&self, predicted: &Rational, expected: &Rational) -> Rational {
         match self {
-            Loss::MSE => 2.0 * (predicted - expected),
+            Loss::MSE => F128!(2.0) * (predicted - expected),
             Loss::MAE => {
                 if predicted == expected {
-                    0.0
+                    F128!(0.0)
                 } else if predicted > expected {
-                    1.0
+                    F128!(1.0)
                 } else {
-                    -1.0
+                    F128!(-1.0)
                 }
             },
         }

@@ -20,6 +20,7 @@
 use search_trail::*;
 use crate::core::problem::{ClauseIndex, DistributionIndex};
 use rustc_hash::FxHashMap;
+use malachite::Rational;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Reason {
@@ -33,7 +34,7 @@ pub struct Variable {
     /// The id of the variable in the input problem
     id: usize,
     /// The weight of the variable. None if the variable is deterministic
-    weight: Option<f64>,
+    weight: Option<Rational>,
     /// Index of the variable in the distribution (from the initial problem, after sorting them by
     /// weight)
     index_in_distribution: Option<usize>,
@@ -60,7 +61,7 @@ pub struct Variable {
 
 impl Variable {
     
-    pub fn new(id: usize, weight: Option<f64>, index_in_distribution: Option<usize>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, weight: Option<Rational>, index_in_distribution: Option<usize>, distribution: Option<DistributionIndex>, state: &mut StateManager) -> Self {
         Self {
             id,
             weight,
@@ -79,7 +80,7 @@ impl Variable {
     }
     
     /// Sets the weight of the variable to the given value
-    pub fn set_weight(&mut self, weight: f64) {
+    pub fn set_weight(&mut self, weight: Rational) {
         self.weight = Some(weight);
     }
 
@@ -104,8 +105,8 @@ impl Variable {
     }
     
     /// Returns the weight of the variable
-    pub fn weight(&self) -> Option<f64> {
-        self.weight
+    pub fn weight(&self) -> Option<Rational> {
+        self.weight.clone()
     }
 
     pub fn index_in_distribution(&self) -> Option<usize> {
@@ -251,15 +252,5 @@ impl Variable {
 impl std::fmt::Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "V{}", self.id + 1)
-    }
-}
-
-#[cfg(test)]
-mod test_variables {
-    
-    use search_trail::StateManager;
-
-    #[test]
-    pub fn create_deterministic() {
     }
 }

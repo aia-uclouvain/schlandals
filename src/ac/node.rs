@@ -15,10 +15,8 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //! This module provide an implementation of a node in an arithmetic circuits.
-//! The node is generic over a semiring R
 
-use rug::Float;
-use crate::semiring::*;
+use malachite::Rational;
 use crate::common::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,12 +40,10 @@ macro_rules! is_node_type {
 }
 
 /// A node structure that represents both internal and distribution nodes.
-pub struct Node<R>
-    where R: SemiRing
-{
+pub struct Node {
     /// Value of the node. Initialized at 1.0 for product, at 0.0 for sum and at a specific value for distribution nodes.
     /// For product and sum nodes, after the evaluation it is equal to the product (sum) of its input values.
-    value: R,
+    value: Rational,
     /// Type of node
     nodetype: NodeType,
     /// Start of the inputs in the vector of inputs
@@ -55,17 +51,15 @@ pub struct Node<R>
     /// Number of inputs the node has
     number_inputs: usize,
     /// The multiplicative factor accumulated on the paths to the root whil computing the gradient
-    /// (only used when evaluating on the Float semiring)
-    path_value: Float,
+    /// (only used when evaluating on the Rational semiring)
+    path_value: Rational,
 }
 
-impl<R> Node<R>
-    where R: SemiRing
-{
+impl Node {
     /// Returns a new product node
     pub fn product() -> Self {
         Node {
-            value: R::one(),
+            value: F128!(1.0),
             nodetype: NodeType::Product,
             input_start: 0,
             number_inputs: 0,
@@ -76,7 +70,7 @@ impl<R> Node<R>
     /// Returns a new sum node
     pub fn sum() -> Self {
         Node {
-            value: R::zero(),
+            value: F128!(0.0),
             nodetype: NodeType::Sum,
             input_start: 0,
             number_inputs: 0,
@@ -85,9 +79,9 @@ impl<R> Node<R>
     }
 
     /// Returns a new distribution node with P[distribution = value] = probability
-    pub fn distribution(distribution: usize, value: usize, probability: f64) -> Self {
+    pub fn distribution(distribution: usize, value: usize, probability: Rational) -> Self {
         Node {
-            value: R::from_f64(probability),
+            value: probability,
             nodetype: NodeType::Distribution {d: distribution, v: value},
             input_start: 0,
             number_inputs: 0,
@@ -111,18 +105,18 @@ impl<R> Node<R>
     }
 
     /// Returns a reference to the value stored in the node
-    pub fn value(&self) -> &R {
+    pub fn value(&self) -> &Rational {
         &self.value
     }
 
     /// Returns a mutable reference to the value stored in the node
-    pub fn value_mut(&mut self) -> &mut R {
+    pub fn value_mut(&mut self) -> &mut Rational {
         &mut self.value
     }
 
     // Return the path value of the node. The path value of a node is the accumulated product of
     // the value of the nodes from the root of the circuit to the node.
-    pub fn path_value(&self) -> Float {
+    pub fn path_value(&self) -> Rational {
         self.path_value.clone()
     }
 
@@ -145,21 +139,21 @@ impl<R> Node<R>
     // --- Setters --- /
 
     /// Sets the value of the node to the given float
-    pub fn set_value(&mut self, value: R){
+    pub fn set_value(&mut self, value: Rational){
         self.value = value
     }
 
-    pub fn assign(&mut self, value: &R) {
-        self.value.set_value(value);
+    pub fn assign(&mut self, value: &Rational) {
+        self.value = value.clone();
     }
 
     /// Sets the path value of the node to the given float
-    pub fn set_path_value(&mut self, value: Float){
+    pub fn set_path_value(&mut self, value: Rational){
         self.path_value = value;
     }
 
     /// Adds the given float to the path value of the node
-    pub fn add_to_path_value(&mut self, value: Float){
+    pub fn add_to_path_value(&mut self, value: Rational){
         self.path_value += value;
     }
 

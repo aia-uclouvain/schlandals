@@ -16,9 +16,10 @@
 
 use std::path::PathBuf;
 use chrono;
-//use rug::Float;
+use malachite::Rational;
 use std::fs::File;
 use std::io::Write;
+use crate::common::F128;
 
 /// Implements a bunch of statistics that are collected during the search
 #[cfg(not(tarpaulin_include))]
@@ -75,11 +76,11 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&[f64], lr: f64, epsilon:f64, predictions:&[f64]) {
+    pub fn log_epoch(&mut self, loss:&[Rational], lr: f64, epsilon:f64, predictions:&[Rational]) {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
+            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<Rational>() / F128!(loss.len())));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
@@ -90,10 +91,10 @@ impl<const B: bool> Logger<B> {
         }
     }
 
-    pub fn log_test(&mut self, loss:&[f64], epsilon:f64, predictions:&[f64]) {
+    pub fn log_test(&mut self, loss:&[Rational], epsilon:f64, predictions:&[Rational]) {
         if B {
             let mut output = String::new();
-            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<f64>() / loss.len() as f64));
+            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<Rational>() / F128!(loss.len())));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }

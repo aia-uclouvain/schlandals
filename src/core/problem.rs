@@ -22,6 +22,7 @@ use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use super::watched_vector::WatchedVector;
+use malachite::Rational;
 
 use rustc_hash::FxHashMap;
 
@@ -85,24 +86,24 @@ impl Problem {
     /// Moreover, the variables are stored by decreasing probability. The mapping from the old
     /// variables index (the ones used in the encoding) and the new one (in the vector) is
     /// returned.
-    pub fn add_distributions(&mut self, distributions: &[Vec<f64>], state: &mut StateManager) -> FxHashMap<usize, usize> {
+    pub fn add_distributions(&mut self, distributions: &[Vec<Rational>], state: &mut StateManager) -> FxHashMap<usize, usize> {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
             let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
-            let mut weight_with_ids = weights.iter().copied().enumerate().map(|(i, w)| (w,i)).collect::<Vec<(f64, usize)>>();
+            let mut weight_with_ids = weights.iter().enumerate().map(|(i, w)| (w.clone(),i)).collect::<Vec<(Rational, usize)>>();
             weight_with_ids.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
             // j is the new index while i is the initial index
             // So the variable will be store at current_start + j instead of current_start + i (+ 1
             // for the mapping because in the input file indexes start at 1)
-            for (j, (w, i)) in weight_with_ids.iter().copied().enumerate() {
+            for (j, (w, i)) in weight_with_ids.iter().enumerate() {
                 let new_index = current_start + j;
                 let initial_index = current_start + i;
                 self.variables[new_index].set_distribution(distribution_id);
-                self.variables[new_index].set_weight(w);
-                self.variables[new_index].set_distribution_index(i);
+                self.variables[new_index].set_weight(w.clone());
+                self.variables[new_index].set_distribution_index(*i);
                 mapping.insert(initial_index + 1, new_index + 1);
             }
             current_start += weights.len();
@@ -217,9 +218,12 @@ impl Problem {
         let mut distributions_map: FxHashMap<DistributionIndex, DistributionIndex> = FxHashMap::default();
         let mut new_distribution_index = 0;
         for (i, distribution) in self.distributions_iter().enumerate() {
-            if self[distribution].is_constrained(state) || self[distribution].number_unfixed(state) > 1 {
-                let new_size = self[distribution].number_unfixed(state);
-                self[distribution].set_size(new_size);
+            if self[distribution].is_constrained(state) {
+                let new_size = self[distribution].iter_variables().filter(|v| !self[*v].is_fixed(state)).count();
+                if new_size != self[distribution].domain_size {
+                    self[distribution].flag = true;
+                }
+                self[distribution].set_domain_size(new_size);
                 distributions_map.insert(distribution, DistributionIndex(new_distribution_index));
                 self.distributions.swap(i, new_distribution_index);
                 new_distribution_index += 1;
@@ -294,7 +298,6 @@ impl Problem {
         // If probabilistic and false, update the counter
         if !value && self[variable].is_probabilitic() {
             let distribution = self[variable].distribution().unwrap();
-            self[distribution].increment_number_false(state);
             self[distribution].remove_probability_mass(self[variable].weight().unwrap(), state);
         }
     }
