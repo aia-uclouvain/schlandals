@@ -24,6 +24,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
 use malachite::Rational;
+use malachite::num::arithmetic::traits::Abs;
 use crate::common::F128;
 
 struct CPTConstraint {
@@ -141,7 +142,12 @@ impl Parser for UaiParser {
 
             let mut choice_idx = 0;
             for _ in 0..number_distribution {
-                let distribution = (0..distribution_size).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>();
+                let mut distribution = (0..distribution_size).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>();
+                // Ensures the distributions sums up to 1 in case the string representation is
+                // wrong (e.g., a distribution with three values 0.333 0.333 0.333, then the first
+                // one will be 0.334)
+                let diff = (F128!(1.0) - distribution.iter().sum::<Rational>()).abs();
+                distribution[0] += diff;
                 content_index += distribution_size;
 
                 let distribution_no_zero = (0..distribution.len()).filter(|j| distribution[*j] != 0.0).map(|j| distribution[j].clone()).collect::<Vec<Rational>>();

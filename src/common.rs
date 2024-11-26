@@ -144,8 +144,8 @@ impl Solution {
     }
 
     pub fn has_converged(&self, epsilon: f64) -> bool {
-        let conv_factor = F128!((1.0 + epsilon).powf(2.0));
-        self.upper_bound <= self.lower_bound.clone()*conv_factor //+ FLOAT_CMP_THRESHOLD
+        let conv_factor = F128!((1.0 + epsilon + 0.0000001).powf(2.0));
+        self.upper_bound <= self.lower_bound.clone()*conv_factor
     }
 
     pub fn print(&self) {
