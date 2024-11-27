@@ -45,7 +45,6 @@ pub struct Distribution {
     remaining: ReversibleF64,
     /// Initial first variable of the distribution in the problem
     old_first: VariableIndex,
-    pub flag: bool,
 }
 
 impl Distribution {
@@ -59,7 +58,6 @@ impl Distribution {
             clauses: SparseSet::new(state),
             remaining: state.manage_f64(1.0),
             old_first: first,
-            flag: false,
         }
     }
 

@@ -22,7 +22,6 @@ use std::io::Write;
 use crate::common::F128;
 
 /// Implements a bunch of statistics that are collected during the search
-#[cfg(not(tarpaulin_include))]
 pub struct Logger<const B: bool> {
     global_timestamp: chrono::DateTime<chrono::Local>,
     outfile_train: Option<File>,

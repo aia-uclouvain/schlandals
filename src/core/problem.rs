@@ -220,9 +220,6 @@ impl Problem {
         for (i, distribution) in self.distributions_iter().enumerate() {
             if self[distribution].is_constrained(state) {
                 let new_size = self[distribution].iter_variables().filter(|v| !self[*v].is_fixed(state)).count();
-                if new_size != self[distribution].domain_size {
-                    self[distribution].flag = true;
-                }
                 self[distribution].set_domain_size(new_size);
                 distributions_map.insert(distribution, DistributionIndex(new_distribution_index));
                 self.distributions.swap(i, new_distribution_index);
