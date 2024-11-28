@@ -207,7 +207,11 @@ impl<R> Dac<R>
 
     pub fn solution(&self) -> Solution {
         let p = if !self.is_empty() {self.nodes.last().unwrap().value().to_f64()} else {0.0};
-        Solution::new(F128!(p), F128!(p), self.compile_time)
+        Solution::new(F128!(p), F128!(p), self.compile_time, None)
+    }
+
+    pub fn compile_time(&self) -> u64 {
+        self.compile_time
     }
 
     /// Updates the values of the distributions to the given values
@@ -258,6 +262,7 @@ impl<R> Dac<R>
             }
         }
         // Last node is the root since it has the higher layer
+        //println!("Root value: {}", self.nodes.last().unwrap().value().to_f64());
         self.nodes.last().unwrap().value().clone()
     }
 

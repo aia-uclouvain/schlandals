@@ -152,15 +152,18 @@ pub struct Solution {
     upper_bound: Float,
     /// Number of seconds, since the start of the search, at which the solution was found
     time_found: u64,
+    /// The index of the cache entry that was used to find this solution
+    cache_index: Option<usize>,
 }
 
 impl Solution {
 
-    pub fn new(lower_bound: Float, upper_bound: Float, time_found: u64) -> Self {
+    pub fn new(lower_bound: Float, upper_bound: Float, time_found: u64, cache_index: Option<usize>) -> Self {
         Self {
             lower_bound,
             upper_bound,
             time_found,
+            cache_index,
         }
     }
 
@@ -182,6 +185,10 @@ impl Solution {
 
     pub fn epsilon(&self) -> f64 {
         ((self.upper_bound.to_f64()/(self.lower_bound.to_f64()+FLOAT_CMP_THRESHOLD)).sqrt() - 1.0).max(0.0)
+    }
+
+    pub fn cache_index(&self) -> Option<usize> {
+        self.cache_index
     }
 }
 

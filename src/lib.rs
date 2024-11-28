@@ -304,7 +304,7 @@ pub fn compile(args: Args) -> f64 {
         }
     }
     let solution = ac.solution();
-    solution.print();
+    println!("Estimated probability {:.8} (epsilon {}) found in {} seconds", solution.to_f64(), ac.epsilon(), ac.compile_time());
     solution.to_f64()
 }
 

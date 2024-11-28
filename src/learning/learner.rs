@@ -135,7 +135,7 @@ impl <const S: bool> Learner<S> {
             // Compiling the train and test queries into arithmetic circuits
             println!("Train");
             let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m);
-            if args.approx == ApproximateMethod::LDS {
+            /* if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
                 let mut cnt_unfinished = 0;
@@ -158,7 +158,7 @@ impl <const S: bool> Learner<S> {
                 println!("Occurance of distributions {:?}", present_distributions);//.iter().filter(|b| **b!=0).collect::<Vec<&usize>>());
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
-            }
+            } */
             println!("Test");
             let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, LearningMethod::Models);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
@@ -180,6 +180,10 @@ impl <const S: bool> Learner<S> {
                     LearningMethod::NonModels => 1.0 - train_queries.pop().unwrap().1,
                     LearningMethod::Both => if cnt % 2 == 0 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
                 };
+                if args.epsilon == 0.0 && d.epsilon() != 0.0 && args.approx != ApproximateMethod::LDS {
+                    println!("Ignoring query with epsilon {} as compilation timeout", d.epsilon());
+                    continue;
+                }
                 d.evaluate();
                 //println!("eval {}, expected {}", d.circuit_probability().to_f64(), expected);
                 train_dataset.add_query(d,expected);
@@ -486,7 +490,7 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
     let mut dacs = vec![];
     while !double_dacs.is_empty() {
         let (d1, d2) = double_dacs.pop().unwrap();
-        println!("DACs generated: {} {}", d1.number_nodes(), d2.number_nodes());
+        //println!("DACs generated: {} {}", d1.number_nodes(), d2.number_nodes());
         match learning_m {
             LearningMethod::Models => dacs.push(d1),
             LearningMethod::NonModels => dacs.push(d2),
