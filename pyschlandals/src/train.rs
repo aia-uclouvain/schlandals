@@ -3,6 +3,7 @@ use super::*;
 
 use schlandals::learning::LearnParameters;
 use schlandals::ApproximateMethod;
+use schlandals::common::{Branching, Loss, Optimizer, Semiring};
 
 #[pyclass]
 #[derive(Clone)]
