@@ -23,6 +23,9 @@ use super::clause::*;
 use super::distribution::*;
 use super::watched_vector::WatchedVector;
 use malachite::Rational;
+use malachite::num::conversion::traits::RoundingFrom;
+use crate::common::rational_to_f64;
+use malachite::rounding_modes::RoundingMode::Nearest;
 
 use rustc_hash::FxHashMap;
 
@@ -90,7 +93,8 @@ impl Problem {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
-            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
+            let probability_mass = weights.iter().sum::<Rational>();
+            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), rational_to_f64!(probability_mass), state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
             let mut weight_with_ids = weights.iter().enumerate().map(|(i, w)| (w.clone(),i)).collect::<Vec<(Rational, usize)>>();

@@ -20,7 +20,7 @@ use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
 use malachite::Rational;
-use crate::common::F128;
+use crate::common::*;
 
 pub struct Preprocessor<'b>
 {

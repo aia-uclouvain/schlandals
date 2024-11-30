@@ -116,9 +116,9 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         self.restructure_after_preprocess();
 
         if self.problem.number_clauses() == 0 {
-            let lb = self.preproc_in.clone().unwrap();
-            let ub = max - self.preproc_out.clone().unwrap();
-            return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
+            //let lb = self.preproc_in.clone().unwrap();
+            //let ub = max - self.preproc_out.clone().unwrap();
+            return Solution::new(max.clone(), max.clone(), self.parameters.start.elapsed().as_secs());
         }
         if !is_lds {
             let sol = self.do_discrepancy_iteration(usize::MAX);
@@ -145,6 +145,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     /// Preprocess the problem, if the problem is solved during the preprocess, return a solution.
     /// Returns None otherwise
     fn preprocess(&mut self, max: &Rational) -> Option<Solution> {
+        println!("Maximum is {}", rational_to_string(max));
         self.propagator.init(self.problem.number_clauses());
         let mut preprocessor = Preprocessor::new(
             &mut self.problem,

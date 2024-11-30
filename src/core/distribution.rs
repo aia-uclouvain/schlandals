@@ -49,14 +49,14 @@ pub struct Distribution {
 
 impl Distribution {
     
-    pub fn new(id: usize, first: VariableIndex, size: usize, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, first: VariableIndex, size: usize, probability_mass:f64, state: &mut StateManager) -> Self {
         Self {
             id,
             first,
             domain_size: size,
             size: state.manage_usize(size),
             clauses: SparseSet::new(state),
-            remaining: state.manage_f64(1.0),
+            remaining: state.manage_f64(probability_mass),
             old_first: first,
         }
     }

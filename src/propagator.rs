@@ -140,10 +140,8 @@ impl Propagator {
     /// Computes the unconstrained probability of a distribution. When a distribution does not appear anymore in any constrained
     /// clauses, the probability of branching on it can be pre-computed. This is what this function returns.
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
-        if g[distribution].is_constrained(state) {
-            self.unconstrained_distributions.push(distribution);
-            self.propagation_prob *= F128!(g[distribution].remaining(state));
-        }
+        self.unconstrained_distributions.push(distribution);
+        self.propagation_prob *= F128!(g[distribution].remaining(state));
     }
     
     /// Propagates all the unconstrained clauses in the unconstrained clauses stack. It actually updates the sparse-sets of
@@ -285,11 +283,8 @@ impl Propagator {
             }
         }
         self.propagate_unconstrained_clauses(g, state);
-        // Possibly the bug: we detect too many unconstrained distribution, some may be constrained
-        // by learned clause and have an impact on the problem but we do not detect them because we
-        // do not use the learned clause in the branching.
         for distribution in extractor.component_distribution_iter(component) {
-            if !g[distribution].is_constrained(state) {
+            if !g[distribution].is_constrained(state) && g[distribution].size(state) > 1 {
                 self.propagate_unconstrained_distribution(g, distribution, state);
             }
         }

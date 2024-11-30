@@ -51,6 +51,8 @@ pub fn parser_from_input(filepath: PathBuf, evidence: Option<OsString>) -> Box<d
         Box::new(CnfParser::new(filepath, evidence.unwrap_or(OsString::default())))
     } else if header.starts_with("BAYES") {
         Box::new(UaiParser::new(filepath, evidence.unwrap()))
+    } else if header.starts_with("MARKOV") {
+        Box::new(UaiParser::new(filepath, evidence.unwrap()))
     } else if header.starts_with("DIRECTED") || header.starts_with("UNDIRECTED") {
         Box::new(PgParser::new(filepath, evidence.unwrap()))
     } else {

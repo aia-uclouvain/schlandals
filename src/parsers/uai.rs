@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use rustc_hash::FxHashMap;
 use malachite::Rational;
 use malachite::num::arithmetic::traits::Abs;
-use crate::common::F128;
+use crate::common::*;
 
 struct CPTConstraint {
     indicator_variables: Vec<usize>,
@@ -102,9 +102,11 @@ impl Parser for UaiParser {
             variables_indicators.push(indicators);
         }
         let number_cpt = content[number_var + 1].parse::<usize>().unwrap();
+        /*
         if number_cpt != number_var {
             panic!("The file declares {} variables but {} CPTs. In Bayesian network there must be one CPT per varaible", number_var, number_cpt);
         }
+        */
         let mut cpts_scope = (0..number_cpt).map(|_| vec![]).collect::<Vec<Vec<usize>>>();
         let mut content_index = number_var + 2;
         for cpt_scope in cpts_scope.iter_mut() {
@@ -117,6 +119,8 @@ impl Parser for UaiParser {
 
         let mut distributions: Vec<Vec<Rational>> = vec![];
         let mut clauses: Vec<CPTConstraint> = vec![];
+        
+        let mut test_r = F128!(1.0);
 
         // Now we parse the actual factors with their probabilities.
         let mut variable_index = 1;
@@ -126,6 +130,8 @@ impl Parser for UaiParser {
                 panic!("Error while loading CPT for factor {}; {} entries are declared in the file, but the cartesian product of the variables in the scope is of size {}", cpt_index, content[content_index].parse::<usize>().unwrap(), number_entry);
             }
             content_index += 1;
+
+            test_r *= (0..number_entry).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>().iter().sum::<Rational>();
 
             // Cache used to detect if multiple line in the CPT represent the same distribution
             let mut distribution_cache: FxHashMap<String, Vec<isize>> = FxHashMap::default();
@@ -142,12 +148,7 @@ impl Parser for UaiParser {
 
             let mut choice_idx = 0;
             for _ in 0..number_distribution {
-                let mut distribution = (0..distribution_size).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>();
-                // Ensures the distributions sums up to 1 in case the string representation is
-                // wrong (e.g., a distribution with three values 0.333 0.333 0.333, then the first
-                // one will be 0.334)
-                let diff = (F128!(1.0) - distribution.iter().sum::<Rational>()).abs();
-                distribution[0] += diff;
+                let distribution = (0..distribution_size).map(|j| F128!(content[content_index + j].parse::<f64>().unwrap())).collect::<Vec<Rational>>();
                 content_index += distribution_size;
 
                 let distribution_no_zero = (0..distribution.len()).filter(|j| distribution[*j] != 0.0).map(|j| distribution[j].clone()).collect::<Vec<Rational>>();
@@ -202,6 +203,7 @@ impl Parser for UaiParser {
                 };
             }
         }
+        println!("{}", rational_to_string(&test_r));
         let mut clauses = clauses.iter().map(|c| c.to_cnf(variable_index - 1)).collect::<Vec<Vec<isize>>>();
 
         let content = evidence_from_os_string(&self.evidence);
@@ -224,8 +226,10 @@ impl Parser for UaiParser {
         let reader = BufReader::new(&file);
         // Loading the content of the file. The file is loaded in a single String in which new line
         // have been removed. Then it is split by whitespace, giving only the numbers in the file.
-        let content = reader.lines().skip(1).map(|l| l.unwrap()).collect::<Vec<String>>().join(" ");
+        let content = reader.lines().map(|l| l.unwrap()).collect::<Vec<String>>().join(" ");
         let content = content.split_whitespace().collect::<Vec<&str>>();
+        let is_markov = content[0] == "MARKOV";
+        let content = content.iter().copied().skip(1).collect::<Vec<&str>>();
         // Parsing the preamble of the file containing the number of variables, their domain size, the
         // number of factor (must be equal to the number of variables), and their scope.
         let number_var = content[0].parse::<usize>().unwrap();
@@ -238,9 +242,10 @@ impl Parser for UaiParser {
             variables_indicators.push(indicators);
         }
         let number_cpt = content[number_var + 1].parse::<usize>().unwrap();
+        /*
         if number_cpt != number_var {
             panic!("The file declares {} variables but {} CPTs. In Bayesian network there must be one CPT per varaible", number_var, number_cpt);
-        }
+        }*/
         let mut cpts_scope = (0..number_cpt).map(|_| vec![]).collect::<Vec<Vec<usize>>>();
         let mut content_index = number_var + 2;
         for cpt_scope in cpts_scope.iter_mut() {
@@ -298,7 +303,7 @@ impl Parser for UaiParser {
                         choice_idx += distribution_size;
                     },
                     None => {
-                        if !distribution.contains(&1.0) {
+                        if !is_markov && !distribution.contains(&1.0) {
                             distributions.push(distribution.clone());
                         }
                         let mut cache_entry: Vec<(f64, Option<isize>)> = vec![];
@@ -310,7 +315,7 @@ impl Parser for UaiParser {
                             }
                             let indicator_variables = cpt_scope.iter().zip(variable_choices[choice_idx].iter()).map(|(variable, domain_idx)| variables_indicators[*variable][*domain_idx]).collect::<Vec<usize>>();
                             choice_idx += 1;
-                            let pv = if probability == 1.0 { None } else { Some(variable_index) };
+                            let pv = if !is_markov && probability == 1.0 { None } else { Some(variable_index) };
                             clauses.push(CPTConstraint::new(indicator_variables,pv));
                             cache_entry.push((probability, pv));
                             if pv.is_some() {

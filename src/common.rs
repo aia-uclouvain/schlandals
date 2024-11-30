@@ -18,6 +18,9 @@ use std::hash::Hash;
 use malachite::Rational;
 use malachite::num::conversion::traits::RoundingFrom;
 use malachite::rounding_modes::RoundingMode::Nearest;
+use malachite::num::conversion::string::options::ToSciOptions;
+use malachite::num::conversion::traits::ToSci;
+use malachite::num::arithmetic::traits::FloorSqrt;
 
 macro_rules! F128 {
     ($v:expr) => {
@@ -32,6 +35,12 @@ macro_rules! rational_to_f64 {
     }
 }
 pub(crate) use rational_to_f64;
+
+pub fn rational_to_string(r: &Rational) -> String {
+    let mut options = ToSciOptions::default();
+    options.set_precision(10);
+    format!("{}", r.to_sci_with_options(options))
+}
 
 pub const FLOAT_CMP_THRESHOLD: f64 = 0.00000;
 
@@ -172,7 +181,10 @@ impl Solution {
 
 impl std::fmt::Display for Solution {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let (lb, ub) = self.bounds();
-        write!(f, "Estimated probability {:.8} with bounds [{:.8} {:.8}] (epsilon {}) found in {} seconds", (lb * ub).sqrt(), lb, ub, self.epsilon(), self.time_found)
+        let mut options = ToSciOptions::default();
+        options.set_precision(10);
+        let lb = self.lower_bound.clone();
+        let ub = self.upper_bound.clone();
+        write!(f, "Bounds on the probability [{} {}] found in {} seconds", lb.to_sci_with_options(options), ub.to_sci_with_options(options), self.time_found)
     }
 }
