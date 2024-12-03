@@ -3,6 +3,9 @@ use pyo3::Python;
 use std::path::PathBuf;
 use schlandals::common::Branching;
 mod train;
+use train::*;
+mod learner;
+use learner::*;
 
 #[pyclass]
 #[derive(Clone, Copy)]

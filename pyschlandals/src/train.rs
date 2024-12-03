@@ -2,8 +2,7 @@ use pyo3::prelude::*;
 use super::*;
 
 use schlandals::learning::LearnParameters;
-use schlandals::ApproximateMethod;
-use schlandals::common::{Branching, Loss, Optimizer, Semiring};
+use schlandals::common::{LearningMethod, Loss, Optimizer, Semiring};
 
 #[pyclass]
 #[derive(Clone)]
@@ -12,13 +11,29 @@ pub enum PyLoss {
     MSE,
 }
 
-fn get_loss_from_pyloss(loss: PyLoss) -> Loss {
+pub fn get_loss_from_pyloss(loss: PyLoss) -> Loss {
     match loss {
         PyLoss::MAE => Loss::MAE,
         PyLoss::MSE => Loss::MSE,
     }
 }
 
+
+#[pyclass]
+#[derive(Clone)]
+pub enum PyLearningMethod {
+    Models,
+    NonModels,
+    Both,
+}
+
+pub fn get_learningm_from_pylearningm(loss: PyLearningMethod) -> LearningMethod {
+    match loss {
+        PyLearningMethod::Models => LearningMethod::Models,
+        PyLearningMethod::NonModels => LearningMethod::NonModels,
+        PyLearningMethod::Both => LearningMethod::Both,
+    }
+}
 
 #[pyclass]
 #[derive(Clone)]
@@ -45,13 +60,16 @@ pub struct PyLearnParameters {
     early_stop_delta: f64,
     /// The number of epochs to wait before stopping the training if the loss is not improving
     patience: usize,
+    recompile: bool,
+    e_weighted: bool,
+    equal_init: bool,
 }
 
 #[pymethods]
 impl  PyLearnParameters {
 
     #[new]
-    pub fn new(lr: Option<f64>, nepochs: Option<usize>, compilation_timeout: Option<u64>, learn_timeout: Option<u64>, loss: Option<PyLoss>, optimizer: Option<PyOptimizer>, lr_drop: Option<f64>, epoch_drop: Option<usize>, early_stop_threshold: Option<f64>, early_stop_delta: Option<f64>, patience: Option<usize>) -> Self {
+    pub fn new(lr: Option<f64>, nepochs: Option<usize>, compilation_timeout: Option<u64>, learn_timeout: Option<u64>, loss: Option<PyLoss>, optimizer: Option<PyOptimizer>, lr_drop: Option<f64>, epoch_drop: Option<usize>, early_stop_threshold: Option<f64>, early_stop_delta: Option<f64>, patience: Option<usize>, recompile:bool, e_weighted:bool, equal_init:bool) -> Self {
         Self {
             lr: if let Some(v) = lr { v } else { 0.3 },
             nepochs: if let Some(v) = nepochs { v } else { 6000 },
@@ -64,11 +82,70 @@ impl  PyLearnParameters {
             early_stop_threshold: if let Some(v) = early_stop_threshold { v } else { 0.0001 },
             early_stop_delta: if let Some(v) = early_stop_delta { v } else { 0.00001 },
             patience: if let Some(v) = patience { v } else { 5 },
+            recompile,
+            e_weighted,
+            equal_init,
         }
+    }
+
+    pub fn lr(&self) -> f64 {
+        self.lr
+    }
+
+    pub fn nepochs(&self) -> usize {
+        self.nepochs
+    }
+
+    pub fn compilation_timeout(&self) -> u64 {
+        self.compilation_timeout
+    }
+
+    pub fn learning_timeout(&self) -> u64 {
+        self.learn_timeout
+    }
+
+    pub fn loss(&self) -> PyLoss {
+        self.loss.clone()
+    }
+
+    pub fn optimizer(&self) -> PyOptimizer {
+        self.optimizer.clone()
+    }
+
+    pub fn lr_drop(&self) -> f64 {
+        self.lr_drop
+    }
+
+    pub fn epoch_drop(&self) -> usize {
+        self.epoch_drop
+    }
+
+    pub fn early_stop_threshold(&self) -> f64 {
+        self.early_stop_threshold
+    }
+
+    pub fn early_stop_delta(&self) -> f64 {
+        self.early_stop_delta
+    }
+
+    pub fn patience(&self) -> usize {
+        self.patience
+    }
+
+    pub fn equal_init(&self) -> bool {
+        self.equal_init
+    }
+
+    pub fn recompile(&self) -> bool {
+        self.recompile
+    }
+
+    pub fn e_weighted(&self) -> bool {
+        self.e_weighted
     }
 }
 
-fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
+pub fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
     LearnParameters::new(param.lr,
                          param.nepochs,
                          param.compilation_timeout,
@@ -79,7 +156,9 @@ fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
                          param.epoch_drop,
                          param.early_stop_threshold,
                          param.early_stop_delta,
-                         param.patience)
+                         param.patience,
+                         param.recompile,
+                         param.e_weighted)
 }
 
 // TODO: Find how to make the python binding to take into account that the tensors are a feature
@@ -91,7 +170,7 @@ pub enum PySemiring {
     //Tensor,
 }
 
-fn get_semiring_from_pysemiring(semiring: PySemiring) -> Semiring {
+pub fn get_semiring_from_pysemiring(semiring: PySemiring) -> Semiring {
     match semiring {
         PySemiring::Probability => Semiring::Probability,
         //PySemiring::Tensor => Semiring::Tensor,
@@ -105,7 +184,7 @@ pub enum PyOptimizer {
     Adam,
 }
 
-fn get_optimizer_from_pyoptimizer(optimizer: PyOptimizer) -> Optimizer {
+pub fn get_optimizer_from_pyoptimizer(optimizer: PyOptimizer) -> Optimizer {
     match optimizer {
         PyOptimizer::SGD => Optimizer::SGD,
         PyOptimizer::Adam => Optimizer::Adam,
@@ -115,13 +194,18 @@ fn get_optimizer_from_pyoptimizer(optimizer: PyOptimizer) -> Optimizer {
 #[pyfunction]
 #[pyo3(name = "learn")]
 pub fn pylearn(train_file: String, param: PyLearnParameters, branching: Option<PyBranching>, semiring: Option<PySemiring>, log: Option<bool>, epsilon: Option<f64>, jobs: Option<usize>, test_file: Option<String>, outfolder: Option<PathBuf>) {
-    let train = PathBuf::from(train_file);
+    let mut schlandals_arg = schlandals::Args::default();
+    schlandals_arg.branching = get_branching_from_pybranching(branching.unwrap_or(PyBranching::MinInDegree));
+    schlandals_arg.epsilon = epsilon.unwrap_or(0.0);
+    schlandals_arg.input = PathBuf::from(train_file);
+    schlandals_arg.statistics = log.unwrap_or(false);
+    /* let train = PathBuf::from(train_file);
     let test = if test_file.is_none() {
         None
     } else {
         Some(PathBuf::from(test_file.unwrap()))
-    };
-    schlandals::learn(train,
+    }; */
+    /* schlandals::learn(train,
                       test,
                       get_branching_from_pybranching(if let Some(v) = branching { v } else { PyBranching::MinInDegree }),
                       outfolder,
@@ -130,7 +214,8 @@ pub fn pylearn(train_file: String, param: PyLearnParameters, branching: Option<P
                       ApproximateMethod::Bounds,
                       if let Some(v) = jobs { v } else { 1 },
                       get_semiring_from_pysemiring(if let Some(v) = semiring { v } else { PySemiring::Probability }),
-                      get_param_from_pyparam(param))
+                      get_param_from_pyparam(param)) */
+    schlandals::learn(schlandals_arg);
 }
 
 #[pymodule]

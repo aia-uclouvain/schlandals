@@ -233,7 +233,32 @@ impl <const S: bool> Learner<S> {
         softmaxed
     }
 
+     /// Return the gradients of the parameters
+     pub fn get_gradients(&self) -> &Vec<Vec<Float>> {
+        &self.gradients
+    }
+
+    /// Return the train dataset
+    pub fn get_train(&self) -> &Dataset<Float> {
+        &self.train
+    }
+
+    /* /// Return the training queries, or an empty vector if no queries were provided
+    pub fn get_queries(&self) -> &Vec<(f64,f64)> {
+        &self.queries
+    } */
+
+
     // --- Setters --- //
+
+    /// Set the distributions to the given values (that are softmaxed or unsoftmaxed)
+    pub fn set_distributions(&mut self, distributions: Vec<Vec<f64>>, is_softmaxed: bool) {
+        if is_softmaxed{
+            self.unsoftmaxed_distributions = distributions.iter().map(|row| row.iter().map(|&x| x.ln()).collect()).collect();
+        } else {
+            self.unsoftmaxed_distributions = distributions;
+        }
+    }
 
     /// Set the gradients of the parameters to 0
     pub fn zero_grads(&mut self) {
@@ -561,6 +586,11 @@ impl<R> Dataset<R>
     /// Returns the expected output for the required query
     pub fn expected(&self, query_index: usize) -> f64 {
         self.expected[query_index]
+    }
+
+    /// Returns the list of expected outputs
+    pub fn get_expecteds(&self) -> &Vec<f64> {
+        &self.expected
     }
 
     /// Sets the queries of the dataset
