@@ -194,7 +194,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
-        let result = self.pwmc(ComponentIndex(0), 1, discrepancy);
+        let result = self.pwmc(ComponentIndex(0), 1, discrepancy, discrepancy);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
@@ -203,38 +203,42 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs(), Some(cache_index))
     }
 
-    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize) -> SearchResult {
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, init_d:usize) -> SearchResult {
+        let search = false;
+        let do_ub = true;
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
-
         let cache_key = self.component_extractor[component].get_cache_key();
         self.statistics.cache_access();
 
         let mut backtrack_level = level - 1;
         let maximum_probability = self.component_extractor[component].max_probability();
-        let all_component_distributions = self.component_extractor.component_distribution_iter(component).collect::<Vec<DistributionIndex>>();
-        let all_component_d_v = all_component_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+        // search
         let mut all_component_d_values = vec![];
-        for (d, v) in all_component_d_v.iter() {
-            let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
-            if all_component_d_values.is_empty() || sum != 1.0 { all_component_d_values.push((d.clone(), v.clone())); }
+        if !search && do_ub {
+            let all_component_distributions = self.component_extractor.component_distribution_iter(component).collect::<Vec<DistributionIndex>>();
+            let all_component_d_v = all_component_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+            for (d, v) in all_component_d_v.iter() {
+                let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+                if all_component_d_values.is_empty() || sum != 1.0 { all_component_d_values.push((d.clone(), v.clone())); }
+            }
         }
         // Retrieve the cache entry if it exists, otherwise create a new one
         let mut cache_entry = self.cache.remove(&cache_key).unwrap_or_else(|| {
             self.statistics.cache_miss();
             let cache_key_index = self.cache_keys.len();
-            self.cache_keys.push(cache_key.clone());
+            if !search {
+                self.cache_keys.push(cache_key.clone());
+            }
             //println!("new cache entry {}", cache_key_index);
-            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index, FxHashMap::default(), maximum_probability, all_component_d_values)
+            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index, FxHashMap::default(), maximum_probability, all_component_d_values, init_d-discrepancy, FxHashMap::default())
         });
-        //if cache_key.repr() == "c29c30c31c34c35c36c37c38c39c40c41c42v29v30v31v34v35v36v37v38v39v40v41v42" { println!("key {} level!! {} bounds {:?} max prob {}", cache_key.repr(),level, cache_entry.bounds, maximum_probability); }
-        //println!("after cache");
         if cache_entry.distribution.is_none() {
             self.statistics.or_node();
             cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
         }
-        let mut prnt = false;//level == 1 || level == 2;//(level == 1 && cache_entry.distribution.unwrap().0 == 0) || (level == 2 && cache_entry.distribution.unwrap().0 == 3) || (level == 3 && cache_entry.distribution.unwrap().0 == 592);
+        let prnt = false; //cache_entry.cache_key_index == 0; //|| cache_entry.cache_key_index == 17;//level == 1|| level == 2;//(level == 1 && cache_entry.distribution.unwrap().0 == 0) || (level == 2 && cache_entry.distribution.unwrap().0 == 3) || (level == 3 && cache_entry.distribution.unwrap().0 == 592);
         if prnt {println!("distribution {:?} cache key {:?}, max p {}", cache_entry.distribution, cache_entry.cache_key_index, maximum_probability);};
         if prnt{println!("discrepancy {}, cache discrepancy {}, is tight {} cache bounds {:?}", discrepancy, cache_entry.discrepancy, cache_entry.are_bounds_tight(maximum_probability), cache_entry.bounds);}
         if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(maximum_probability) {
@@ -242,17 +246,22 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut new_p_out = F128!(0.0);
             let distribution = cache_entry.distribution.unwrap();
             let unsat_factor = maximum_probability / self.problem[distribution].remaining(&self.state);
-            let unsat_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| self.problem[*d].is_constrained(&self.state)&&*d!=distribution).collect::<Vec<DistributionIndex>>();
-            let unsat_d_v = unsat_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+            // search
             let mut unsat_d_values = vec![];
-            for (d, v) in unsat_d_v.iter() {
-                let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
-                if unsat_d_values.is_empty() || sum != 1.0 { unsat_d_values.push((d.clone(), v.clone())); }
-            }
-            if prnt {
+            if !search && do_ub {
+                let unsat_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| self.problem[*d].is_constrained(&self.state)&&*d!=distribution).collect::<Vec<DistributionIndex>>();
+                let unsat_d_v = unsat_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+                for (d, v) in unsat_d_v.iter() {
+                    let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+                    if unsat_d_values.is_empty() || sum < 1.0 { unsat_d_values.push((d.clone(), v.clone())); }
+                }
+                if prnt {
                 println!("....unsat_distributions {:?}", unsat_distributions);
                 println!("....unsat_d_values {:?}", unsat_d_values);
+                }
             }
+            
+            // LB ok
             let mut child_id = 0;
             for variable in self.problem[distribution].iter_variables() {
                 //if variable.0 == 0 || variable.0 == 3 || variable.0 == 2 || variable.0 == 10 || variable.0 == 11 || variable.0 == 12 {prnt = false;}
@@ -264,6 +273,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || child_id == discrepancy {
                     if prnt{println!("discrepancy or timeout reached");}
                     break;
+                }
+                if cache_entry.child_discrepancy.get(&variable).is_none() {
+                    cache_entry.child_discrepancy.insert(variable, (init_d-discrepancy)+child_id);
                 }
                 let v_weight = self.problem[variable].weight().unwrap();
                 self.state.save_state();
@@ -282,29 +294,36 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             cache_entry.clear_children();
                             break;
                         }
-                        let component_distributions = self.component_extractor.component_distribution_iter(component).collect::<Vec<DistributionIndex>>();
+                        // search
+                        let mut component_distributions = vec![];
+                        if !search && do_ub {
+                            component_distributions = self.component_extractor.component_distribution_iter(component).collect::<Vec<DistributionIndex>>();
+                        }
                         self.restore(); // Restore the state before the propagation
                         // Retrieve all the distributions' variables that are not fixed when branching to the unsat, and ignoring the distribution still summing to 1
                         let mut excluded_distribtions = vec![];
-                        for d in component_distributions.iter() {
-                            let mut variables = vec![];
-                            let mut total = 0.0;
-                            if *d != distribution {
-                                for v in self.problem[*d].iter_variables() {
-                                    if !self.problem[v].is_fixed(&self.state) {
-                                        variables.push(v);
-                                        total += self.problem[v].weight().unwrap();
+                        // search
+                        if !search && do_ub {
+                            for d in component_distributions.iter() {
+                                let mut variables = vec![];
+                                let mut total = 0.0;
+                                if *d != distribution {
+                                    for v in self.problem[*d].iter_variables() {
+                                        if !self.problem[v].is_fixed(&self.state) {
+                                            variables.push(v);
+                                            total += self.problem[v].weight().unwrap();
+                                        }
+                                    }
+                                    if (!variables.is_empty() && total < 1.0) || excluded_distribtions.is_empty() {
+                                        excluded_distribtions.push((*d, variables));
                                     }
                                 }
-                                if (!variables.is_empty() && total != 1.0) || excluded_distribtions.is_empty() {
-                                    excluded_distribtions.push((*d, variables));
-                                }
                             }
+                            if prnt {println!("excluded_distribtions {:?}", excluded_distribtions);}
+                            let child_entry = CacheChildren::new(vec![(distribution, variable)], vec![], excluded_distribtions);
+                            cache_entry.unsat_children.insert(variable, child_entry);
+                            if prnt {println!("unsat child added to {} on variable {}, total unsat len {} new pout {}", cache_entry.cache_key_index, variable.0, cache_entry.unsat_children.len(), new_p_out);}
                         }
-                        if prnt {println!("excluded_distribtions {:?}", excluded_distribtions);}
-                        let child_entry = CacheChildren::new(vec![(distribution, variable)], vec![], excluded_distribtions);
-                        cache_entry.unsat_children.insert(variable, child_entry);
-                        if prnt {println!("unsat child added to {} on variable {}, total unsat len {}", cache_entry.cache_key_index, variable.0, cache_entry.unsat_children.len());}
                     },
                     Ok(_) => {
                         if prnt {println!("sat propagation 1");}
@@ -319,17 +338,22 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             .filter(|d| *d != distribution)
                             .map(|d| self.problem[d].remaining(&self.state))
                             .product::<f64>(), removed);}
-                        let remaining_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution && self.problem[*d].is_constrained(&self.state)).collect::<Vec<DistributionIndex>>();
-                        let remaining_d_v = remaining_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+                        // search
                         let mut remaining_d_values = vec![];
-                        for (d, v) in remaining_d_v.iter() {
-                            let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
-                            if remaining_d_values.is_empty() || sum != 1.0 { remaining_d_values.push((d.clone(), v.clone())); }
+                        if !search && do_ub {
+                            let remaining_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution && self.problem[*d].is_constrained(&self.state)).collect::<Vec<DistributionIndex>>();
+                            let remaining_d_v = remaining_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
+                            //let mut remaining_d_values = vec![];
+                            for (d, v) in remaining_d_v.iter() {
+                                let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
+                                if remaining_d_values.is_empty() || sum < 1.0 { remaining_d_values.push((d.clone(), v.clone())); }
+                            }
+                            if prnt {
+                                println!("....remaining_distribution {:?}", remaining_distributions);
+                                println!("....remaining_d_values {:?}", remaining_d_values);
+                            }
                         }
-                        if prnt {
-                            println!("....remaining_distribution {:?}", remaining_distributions);
-                            println!("....remaining_d_values {:?}", remaining_d_values);
-                        }
+                        
 
                         new_p_out += removed * v_weight;
                         if prnt {println!("removed {} * v_weight {} = {}", removed, v_weight, removed * v_weight);}
@@ -349,8 +373,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             println!("excluded_distribtions {:?}, ignored", excluded_distribtions);
                         }
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var, vec![]);
-                        child_entry.total_distributions = unsat_d_values.clone();
-                        child_entry.total_remaining_to_remove = remaining_d_values.clone();
+                        // search
+                        if !search{
+                            child_entry.total_distributions = unsat_d_values.clone();
+                            child_entry.total_remaining_to_remove = remaining_d_values.clone();
+                        }
                         self.state.save_state();
                         let mut is_product_sat = true;
                         let mut sat_keys = vec![];
@@ -360,35 +387,53 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             self.statistics.decomposition(self.component_extractor.number_components(&self.state));
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
-                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id);
+                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id, init_d);
                                 if prnt {println!("subcomponent {}, bounds {:?}", sub_component.0, sub_solution.bounds);}
                                 prod_p_in *= &sub_solution.bounds.0;
                                 prod_p_out *= sub_maximum_probability - sub_solution.bounds.1.clone();
                                 if prod_p_in == 0.0 {
                                     is_product_sat = false;
-                                    unsat_key.push(sub_solution.cache_index);
+                                    // search
+                                    if !search {
+                                        unsat_key.push(sub_solution.cache_index);
+                                    }
+                                    /* if prnt{ println!("prod p in {}, prod p out {}, unsat key {:?}", prod_p_in, prod_p_out, unsat_key);}
+                                    if prod_p_out == 0.0 { 
+                                        cache_entry.clear_children();
+                                    } */
                                     backtrack_level = sub_solution.backtrack_level;
-                                    cache_entry.bounds.1 = F128!(maximum_probability);
-                                    cache_entry.bounds.0 = F128!(0.0);
-                                    child_entry.excluded_distributions = unsat_d_values.clone();
+                                    // search
+                                    if !search {
+                                        cache_entry.bounds.1 = F128!(maximum_probability);
+                                        cache_entry.bounds.0 = F128!(0.0);
+                                        child_entry.excluded_distributions = unsat_d_values.clone();
+                                    }
                                     break;
                                 }
-                                sat_keys.push(sub_solution.cache_index);
+                                // search
+                                if !search {
+                                    sat_keys.push(sub_solution.cache_index);
+                                }
                             }
                         }
                         if prnt {println!("product sat {}, len {} and prod_p_in {}", is_product_sat, sat_keys.len(), prod_p_in);}
                         if is_product_sat {
                             if prnt {println!("product sat, len {}", sat_keys.len());}
-                            for key in sat_keys {
-                                child_entry.add_key(key);
+                            // search
+                            if !search {
+                                for key in sat_keys {
+                                    child_entry.add_key(key);
+                                }
                             }
                             if prnt {println!("sat child added to {} on variable {}", cache_entry.cache_key_index, variable.0);}
                             cache_entry.children.insert(variable, child_entry);
-                            if cache_entry.unsat_children.contains_key(&variable) {
+                            // search
+                            if !search && cache_entry.unsat_children.contains_key(&variable) {
                                 cache_entry.unsat_children.remove(&variable);
                             }
                         }
-                        else if !is_product_sat {
+                        // search
+                        else if !search && !is_product_sat {
                             if prnt {println!("unsat child added to {} on variable {}", cache_entry.cache_key_index, variable.0);}
                             for k in unsat_key{
                                 child_entry.add_key(k);
@@ -400,6 +445,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         }
                         prod_p_out = prod_maximum_probability - prod_p_out;
                         new_p_in += prod_p_in * &p;
+                        if prnt {println!("added to p_out {} * {} = {}", prod_p_out.clone(), p, prod_p_out.clone() * &p);}
                         new_p_out += prod_p_out * &p;
                         self.restore(); // Restore the state before the decomposition
                         self.restore(); // Restore the state before the propagation
@@ -422,16 +468,25 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         };
         if prnt {println!("for distribution {:?} at level {}, cache entry bounds {:?}, peut être probleme ici aussi!", cache_entry.distribution, level, cache_entry.bounds);
         println!("inserting cache_entry {}", cache_entry.cache_key_index);}
-        //if cache_key.repr() == "c29c30c31c34c35c36c37c38c39c40c41c42v29v30v31v34v35v36v37v38v39v40v41v42" { println!("end key bounds {:?} level!! {} bounds {:?} max prob {}", cache_key.repr(),level, cache_entry.bounds, maximum_probability);}
-        if cache_entry.bounds.0 == 0.0 || cache_entry.bounds.1 == 0.0 {//&& cache_entry.are_bounds_tight(maximum_probability) {
-            let new_key = cache_key.append(format!("v{}", self.cache.len()+1));
-            if prnt{println!("new key {}", new_key.repr());}
-            self.cache_keys[cache_entry.cache_key_index] = new_key.clone();
-            self.cache.insert(new_key, cache_entry);
+        // search
+        if !search {
+            /* if cache_entry.bounds.0 == 0.0 || cache_entry.bounds.1 == 0.0 {//&& cache_entry.are_bounds_tight(maximum_probability) {
+                let new_key = cache_key.append(format!("v{}", self.cache.len()+1));
+                if prnt{println!("new key {}", new_key.repr());}
+                self.cache_keys[cache_entry.cache_key_index] = new_key.clone();
+                self.cache.insert(new_key, cache_entry);
+            }
+            else {
+                if prnt{println!("with key {}", cache_key.repr());}
+                self.cache.insert(cache_key, cache_entry);
+            } */
+            self.cache.insert(cache_key, cache_entry);
         }
         else {
-            if prnt{println!("with key {}", cache_key.repr());}
             self.cache.insert(cache_key, cache_entry);
+            /* if cache_entry.bounds.0 != 0.0 {
+                self.cache.insert(cache_key, cache_entry);
+            } */
         }
         result
     }
@@ -439,7 +494,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
 impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
-    pub fn compile<R: SemiRing>(&mut self, is_lds: bool) -> (Dac<R>, Dac<R>) {
+    pub fn compile<R: SemiRing>(&mut self, is_lds: bool, lds_opti: bool) -> (Dac<R>, Dac<R>) {
         let prnt = false;
         let start = Instant::now();
         self.state.save_state();
@@ -492,14 +547,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.restructure_after_preprocess();
 
         if preproc_result.is_some() {
-            println!("to verify");
+            println!("to verifyyyy");
             return (Dac::default(), Dac::default());
         }
         // Perform the actual search that will fill the cache
         if self.problem.number_clauses() == 0 {
-            println!("A");
-            let mut ac_model = self.build_ac(0.0, &forced_by_propagation, true, None);
-            let mut ac_nonmodel = self.build_ac(0.0, &forced_by_propagation, false, None);
+            let mut ac_model = self.build_ac(0.0, &forced_by_propagation, true, None, usize::MAX);
+            let mut ac_nonmodel = self.build_ac(0.0, &forced_by_propagation, false, None, usize::MAX);
             ac_model.set_compile_time(start.elapsed().as_secs());
             ac_nonmodel.set_compile_time(start.elapsed().as_secs());
             return (ac_model, ac_nonmodel);
@@ -508,46 +562,106 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let sol = self.do_discrepancy_iteration(usize::MAX);
             self.statistics.print();
             if sol.has_converged(0.0) && sol.bounds().0 < FLOAT_CMP_THRESHOLD {
-                println!("to verify");
                 let mut ac_model = Dac::default();
                 let mut ac_nonmodel = Dac::default();
+                let n = ac_nonmodel.sum_node(0);
+                let n_i = ac_nonmodel.add_node(n);
+                ac_nonmodel.set_root(n_i);
                 ac_model.set_compile_time(start.elapsed().as_secs());
                 ac_nonmodel.set_compile_time(start.elapsed().as_secs());
                 return (ac_model, ac_nonmodel);
             }
-            let mut ac_model = self.build_ac(sol.epsilon(), &forced_by_propagation, true, sol.cache_index());
-            let mut ac_nonmodel = self.build_ac(sol.epsilon(), &forced_by_propagation, false, sol.cache_index());
+            let mut ac_model: Dac<R> = self.build_ac(sol.epsilon(), &forced_by_propagation, true, sol.cache_index(), usize::MAX);
             ac_model.set_compile_time(start.elapsed().as_secs());
+            let mut ac_nonmodel: Dac<R> = self.build_ac(sol.epsilon(), &forced_by_propagation, false, sol.cache_index(), usize::MAX);
             ac_nonmodel.set_compile_time(start.elapsed().as_secs());
+            /* let mut ac_nonmodel: Dac<R> = Dac::default();
+            println!("solution {:?} model out {}, nonmodel out 1-{} = {}", sol.bounds(), ac_model.evaluate().to_f64(), ac_nonmodel.evaluate().to_f64(), 1.0-ac_nonmodel.evaluate().to_f64()); */
+            // LB ok
+            //let mut ac_nonmodel: Dac<R> = Dac::default();
             //println!("compile time {}", start.elapsed().as_secs());
             (ac_model, ac_nonmodel)
         } else {
             let mut discrepancy = 1;
             let mut complete_sol = None;
-            let mut complete_ac_model: Option<Dac<R>> = None;
-            let mut complete_ac_nonmodel: Option<Dac<R>> = None;
+            let mut complete_ac_model: Option<Dac<R>>;
+            let mut complete_ac_nonmodel: Option<Dac<R>>;
+            let mut cnt_idem = 0;
+            let mut last_val = 0.0;
+            let mut last_discrepancy= 0;
+            let mut lbs = vec![];
+            let mut ubs = vec![];
+            let mut lb_size = vec![];
+            let mut ub_size = vec![];
+            let mut epsilon = vec![];
+            let mut time = vec![];
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy);
                 if prnt{println!("solution key {}", solution.cache_index().unwrap());}
                 //if discrepancy == 2 {
-                if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
+                if (self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none()) && cnt_idem < 20 {
                     if prnt{println!("discrepancy {}", discrepancy);}
-                    complete_ac_model = Some(self.build_ac(solution.epsilon(), &forced_by_propagation, true, solution.cache_index()));
-                    complete_ac_nonmodel = Some(self.build_ac(solution.epsilon(), &forced_by_propagation, false, solution.cache_index()));
-                    complete_ac_model.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
-                    complete_ac_model.as_mut().unwrap().evaluate();
-                    complete_ac_nonmodel.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
-                    complete_ac_nonmodel.as_mut().unwrap().evaluate();
-                    solution.print();
-                    let model_out = complete_ac_model.as_mut().unwrap().evaluate().to_f64();
+                    last_discrepancy = discrepancy;
+                    /* if discrepancy == 2 {
+                        let mut nonmodel: Dac<R> = self.build_ac(solution.epsilon(), &forced_by_propagation, false, solution.cache_index(), 3);
+                        nonmodel.evaluate();
+                        println!("dac\n{}", nonmodel.as_graphviz());
+                    } */
+                    complete_ac_model = Some(self.build_ac(solution.epsilon(), &forced_by_propagation, true, solution.cache_index(), last_discrepancy));
+                    complete_ac_nonmodel = Some(self.build_ac(solution.epsilon(), &forced_by_propagation, false, solution.cache_index(), last_discrepancy));
+                    lbs.push(solution.bounds().0);
+                    ubs.push(solution.bounds().1);
+                    lb_size.push(complete_ac_model.as_ref().unwrap().number_nodes());
+                    ub_size.push(complete_ac_nonmodel.as_ref().unwrap().number_nodes());
+                    epsilon.push(solution.epsilon());
+                    time.push(start.elapsed().as_secs());
+                    if solution.bounds().0 == last_val {
+                        cnt_idem += 1;
+                    }
+                    else {
+                        cnt_idem = 0;
+                        last_val = solution.bounds().0;
+                    }
+                    //complete_ac_nonmodel.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
+                    //complete_ac_nonmodel.as_mut().unwrap().evaluate();
+                    //solution.print();
+                    /* let model_out = complete_ac_model.as_mut().unwrap().evaluate().to_f64();
                     let nonmodel_out = complete_ac_nonmodel.as_mut().unwrap().evaluate().to_f64();
-                    println!("model out {}, nonmodel out 1-{} = {}", model_out, nonmodel_out, 1.0-nonmodel_out);
+                    println!("model out {}, nonmodel out 1-{} = {}", model_out, nonmodel_out, 1.0-nonmodel_out); */
                     complete_sol = Some(solution);
                 }
-                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) {//|| discrepancy == 2 {
-                    self.statistics.print();
-                    complete_sol.unwrap().print();
-                    return (complete_ac_model.unwrap(), complete_ac_nonmodel.unwrap());
+                if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) || cnt_idem>=20 {//|| discrepancy == 2 {
+                    let (lb_discr, ub_discr, eps) = if lds_opti {self.choose_discrepancy(&lbs, &ubs, &lb_size, &ub_size)} else {(last_discrepancy, last_discrepancy, complete_sol.as_ref().unwrap().epsilon())};
+                    if lds_opti {
+                        println!("lbs: {:?}", lbs);
+                        println!("ubs: {:?}", ubs);
+                        println!("lb_size: {:?}", lb_size);
+                        println!("ub_size: {:?}", ub_size);
+                        println!("epsilon: {:?}", epsilon);
+                        println!("chosen lb: {}", lb_discr);
+                        println!("chosen ub: {}", ub_discr);
+                        println!("chosen lb pred: {}", lbs[lb_discr]);
+                        println!("chosen ub pred: {}", ubs[ub_discr]);
+                        println!("chosen epsilon: {}", eps);
+                        println!("chosen lb size: {}", lb_size[lb_discr]);
+                        println!("chosen ub size: {}", ub_size[ub_discr]);
+                        println!("total size: {}", lb_size[lb_discr]+ub_size[ub_discr]);
+                        println!("other size: {}", lb_size[lbs.len()-1]+ub_size[lbs.len()-1]);
+                        println!("time: {:?}", time);
+                    }
+                    //let mut complete_ac_model: Dac<R> = self.build_ac(complete_sol.as_ref().unwrap().epsilon(), &forced_by_propagation, true, complete_sol.as_ref().unwrap().cache_index(), last_discrepancy);
+                    //let mut complete_ac_nonmodel: Dac<R> = self.build_ac(complete_sol.as_ref().unwrap().epsilon(), &forced_by_propagation, false, complete_sol.as_ref().unwrap().cache_index(), last_discrepancy);
+                    let mut complete_ac_model: Dac<R> = self.build_ac(eps, &forced_by_propagation, true, complete_sol.as_ref().unwrap().cache_index(), lb_discr);
+                    let mut complete_ac_nonmodel: Dac<R> = self.build_ac(eps, &forced_by_propagation, false, complete_sol.as_ref().unwrap().cache_index(), ub_discr);
+                    complete_ac_model.set_compile_time(start.elapsed().as_secs());
+                    complete_ac_nonmodel.set_compile_time(start.elapsed().as_secs());
+                    complete_ac_nonmodel.evaluate();
+                    //println!("dac\n{}", complete_ac_nonmodel.as_graphviz());
+                    if !lds_opti{println!("solution {:?} model out {}, nonmodel out 1-{} = {}", complete_sol.as_ref().unwrap().bounds(), complete_ac_model.evaluate().to_f64(), complete_ac_nonmodel.evaluate().to_f64(), 1.0-complete_ac_nonmodel.evaluate().to_f64());}
+                    //self.statistics.print();
+                    //complete_sol.unwrap().print();
+                    return (complete_ac_model, complete_ac_nonmodel);
+                    //return (complete_ac_model.unwrap(), complete_ac_nonmodel.unwrap());
                 }
                 //}
                 discrepancy += 1;
@@ -555,7 +669,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
     }
 
-    pub fn build_ac<R: SemiRing>(&mut self, epsilon: f64, forced_by_propagation:&(Vec<(usize, (usize, f64))>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>), sat_compile:bool, cache_index:Option<usize>) -> Dac<R> {
+    pub fn build_ac<R: SemiRing>(&mut self, epsilon: f64, forced_by_propagation:&(Vec<(usize, (usize, f64))>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>, Vec<(usize, Vec<(usize, f64)>)>), 
+                                sat_compile:bool, cache_index:Option<usize>, discrepancy_limit:usize) -> Dac<R> {
         let prnt = false;// !sat_compile;
         let mut dac = Dac::new(epsilon);
         // Adds the distributions in the circuit
@@ -573,7 +688,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             }
         } 
         let mut root_number_children = if self.cache.contains_key(&init_k) { has_node_search = true; 1 } else { 0 };*/
-        let mut root_number_children = if let Some(cache_index) = cache_index { has_node_search = true; 1 } else { 0 };
+        let mut root_number_children = if let Some(_) = cache_index { has_node_search = true; 1 } else { 0 };
         root_number_children += forced_by_propagation.0.len() + forced_by_propagation.1.len();
         if prnt {println!("\nroot forced by propagation {:?}", forced_by_propagation);
         println!("\nroot number children {}", root_number_children);
@@ -645,8 +760,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         let mut map: FxHashMap<usize, NodeIndex> = FxHashMap::default();
         let mut dist_map: FxHashMap<String, NodeIndex> = FxHashMap::default();
-        if has_node_search {//11
-            let node_search = self.explore_cache(&mut dac, cache_index.unwrap(), &mut map, &mut dist_map, sat_compile);
+        if has_node_search {
+            let node_search = self.explore_cache(&mut dac, cache_index.unwrap(), &mut map, &mut dist_map, sat_compile, discrepancy_limit);
             dac.add_input(child_id, node_search);
         }
         if let Some(super_root) = super_root {
@@ -661,20 +776,26 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         dac
     }
 
-    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, dist_c: &mut FxHashMap<String, NodeIndex>, sat_compile: bool) -> NodeIndex {
-        let prnt = false;// !sat_compile;
+    pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, dist_c: &mut FxHashMap<String, NodeIndex>, 
+                                    sat_compile: bool, discrepancy_limit:usize) -> NodeIndex {
+        let prnt = false;// !sat_compile;// && cache_key_index == 0;
         if prnt {println!("\nexplore cache key index {}", cache_key_index);}
         if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
         }
         let current = self.cache.get(&self.cache_keys[cache_key_index]).unwrap();
 
+        if current.init_discrepancy >= discrepancy_limit {
+            let p_node = dac.prod_node(0);
+            let p_id = dac.add_node(p_node);
+            return p_id;
+        }
         if current.bounds.0.clone() + FLOAT_CMP_THRESHOLD >= current.max_probability && !sat_compile {
             let p_node = dac.prod_node(0);
             let p_id = dac.add_node(p_node);
             return p_id;
         }
-        if sat_compile && current.number_children(sat_compile) == 0 {
+        if sat_compile && current.number_children(sat_compile, discrepancy_limit) == 0 {
             // For partial compilation, we can have entry without any sat children -> Zero
             let p_node = dac.prod_node(0);
             let p_id = dac.add_node(p_node);
@@ -684,9 +805,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         println!("current max prob {}", current.max_probability);}
 
         // Sum node with the different values the distribution can take
-        let sum_node_nb_child = current.number_children(sat_compile);
+        let sum_node_nb_child = current.number_children(sat_compile, discrepancy_limit);
         if sum_node_nb_child == 0 && !sat_compile {
-            println!("no children");
+            //println!("no children");
             // For partial compilation, we can have entry without any children, which is a one when nonmodel compilation
             let p_node = dac.prod_node(0);
             let p_id = dac.add_node(p_node);
@@ -700,9 +821,11 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         let mut sum_node_child = 0;
         // Iterate on the variables the distribution with the associated cache key for the sat children
-        for variable in current.children_variables(true) {
+        for variable in current.children_variables(true){//[..sum_node_nb_child].iter().copied() {
             if prnt {println!("SAT PART");
-            println!("explore variable {}, distribution old i {}, var in d {}", variable.0, self.problem[current.distribution.unwrap()].old_index(), self.problem[variable].index_in_distribution().unwrap());}
+            println!("var {}, discrepancy {}", variable.0, *current.child_discrepancy.get(&variable).unwrap_or(&0));}
+            if *current.child_discrepancy.get(&variable).unwrap_or(&0) >= discrepancy_limit {continue;}
+            if prnt{ println!("explore variable {}, distribution old i {}, var in d {}", variable.0, self.problem[current.distribution.unwrap()].old_index(), self.problem[variable].index_in_distribution().unwrap());}
 
             let number_children = if sat_compile {
                     current.child_keys(variable, true).len() + current.forced_choices(variable, true).len() + current.unconstrained_distribution_variables_of(variable, true).len()
@@ -807,7 +930,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             // Recursively build the DAC for each sub-component in case of a sat compilation
             if sat_compile {
                 for cache_key in current.child_keys(variable, true) {
-                    let id = self.explore_cache(dac, cache_key, c, dist_c, sat_compile);
+                    let id = self.explore_cache(dac, cache_key, c, dist_c, sat_compile, discrepancy_limit);
                     dac.add_input(child_id, id);
                     child_id += 1;
                 }
@@ -830,7 +953,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     if prnt {println!("before component id {:?}", before_component_id);}
                     dac.add_input(sum_component.input_start(), before_component_id);
                     let oppositer_after = dac.opposite_node(1);
-                    let id = self.explore_cache(dac, cache_key, c, dist_c, sat_compile);
+                    let id = self.explore_cache(dac, cache_key, c, dist_c, sat_compile, discrepancy_limit);
                     if prnt {println!("explore cache minus id {:?}", id);}
                     dac.add_input(oppositer_after.input_start(), id);
                     let oppositer_after_id = dac.add_node(oppositer_after);
@@ -859,14 +982,44 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         // Iterate on the variables the distribution with the associated cache key for the unsat children in case of an unsat compilation
         if !sat_compile {
-            if prnt {if current.children_variables(false).len() != 0 {println!("UNSAT PART");}}
+            if prnt {if current.children_variables(false).len() != 0 {println!("UNSAT PART");
+                    println!("unsat children {:?}", current.children_variables(false));}}
             for variable in current.children_variables(false) {
                 if prnt {println!("explore variable {}", variable.0);}
+                let nb_sum = if current.child_keys(variable, false).len() == 0 {1} else {2};
+                let sum_unsat = dac.sum_node(nb_sum);
+                let mut sum_unsat_child = 0;
+                if nb_sum != 1 {
+                    let removed_prod = dac.prod_node(2);
+                    let d_node = dac.distribution_value_node(&self.problem, current.distribution.unwrap(), variable);
+                    dac.add_input(removed_prod.input_start(), d_node);
+                    let removed_sum = dac.sum_node(2);
+                    let before_node = self.one_interpretation_node(dac, current.total_distributions_of(variable, false), dist_c);
+                    dac.add_input(removed_sum.input_start(), before_node);
+                    let negation_node = dac.opposite_node(1);
+                    let after_node = self.one_interpretation_node(dac, current.total_remaining_to_remove_of(variable, false), dist_c);
+                    dac.add_input(negation_node.input_start(), after_node);
+                    let negation_node_id = dac.add_node(negation_node);
+                    dac.add_input(removed_sum.input_start()+1, negation_node_id);
+                    let removed_sum_id = dac.add_node(removed_sum);
+                    dac.add_input(removed_prod.input_start()+1, removed_sum_id);
+                    let removed_prod_id = dac.add_node(removed_prod);
+                    dac.add_input(sum_unsat.input_start(), removed_prod_id);
+                    sum_unsat_child += 1;
+                }
                 let number_children = current.variable_unsat_number_children(variable, false);
                 if number_children == 0 {
                     continue;
                 }
                 let prod_node = dac.prod_node(number_children);
+                if prnt {
+                    println!("forced choices {:?}", current.forced_choices(variable, false));
+                    println!("unsat children {:?}", current.child_keys(variable, false));
+                    println!("excluded distributions {:?}", current.excluded_distribution_variables_of(variable, false));
+                    println!("unc distributions {:?}", current.unconstrained_distribution_variables_of(variable, false));
+                    println!("total distributions {:?}", current.total_distributions_of(variable, false));
+                    println!("total remaining to remove {:?}", current.total_remaining_to_remove_of(variable, false));
+                }
 
                 let mut child_id = prod_node.input_start();
                 // Adding to the new product node all the propagated variables, including the distribution value we branch on
@@ -912,13 +1065,15 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 // Recursively build the DAC for each sub-component
                 if prnt {println!("unsat children {:?}", current.child_keys(variable, sat_compile));}
                 for cache_key in current.child_keys(variable, sat_compile) {
-                    let id = self.explore_cache(dac, cache_key, c, dist_c, false);
+                    let id = self.explore_cache(dac, cache_key, c, dist_c, false, discrepancy_limit);
                     dac.add_input(child_id, id);
                     child_id += 1;
                 }
                 let id = dac.add_node(prod_node);
                 if prnt {println!("UNSAT child id {:?}", id);}
-                dac.add_input(sum_node.input_start() + sum_node_child, id);
+                dac.add_input(sum_unsat.input_start() + sum_unsat_child, id);
+                let unsat_id = dac.add_node(sum_unsat);
+                dac.add_input(sum_node.input_start() + sum_node_child, unsat_id);
                 sum_node_child += 1;
             }
         }
@@ -1019,6 +1174,37 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         }
         (forced_distribution_variables, unconstrained_distribution_variables, excluded_distribution_variables)
     }
+
+    pub fn choose_discrepancy(&self, lbs: &Vec<f64>, ubs: &Vec<f64>, lbs_size: &Vec<usize>, ubs_size: &Vec<usize>) -> (usize, usize, f64) {
+        let mut lb_disc = 0;
+        let mut ub_disc = 0;
+        while lbs_size[lb_disc] < 1000 && lb_disc < lbs.len()-1{
+            lb_disc += 1;
+        }
+        while ubs_size[ub_disc] < 1000 && ub_disc < ubs.len()-1{
+            ub_disc += 1;
+        }
+        let lb_gain = (0..lbs.len()-1).map(|i| 1.0-(lbs[i]/lbs[i+1])).collect::<Vec<f64>>();
+        let ub_gain = (0..ubs.len()-1).map(|i| 1.0-(ubs[i+1]/ubs[i])).collect::<Vec<f64>>();
+        let lb_size_gain = (0..lbs_size.len()-1).map(|i| 1.0-(lbs_size[i] as f64/lbs_size[i+1] as f64)).collect::<Vec<f64>>();
+        let ub_size_gain = (0..ubs_size.len()-1).map(|i| 1.0-(ubs_size[i] as f64/ubs_size[i+1] as f64)).collect::<Vec<f64>>();
+        println!("lb gain: {:?}", lb_gain);
+        println!("ub gain: {:?}", ub_gain);
+        println!("lb size gain: {:?}", lb_size_gain);
+        println!("ub size gain: {:?}", ub_size_gain);
+        let mut tresh = if lbs_size[lb_disc] < 2500 {0.02} else {0.1};
+        while lb_disc < lbs.len()-1 && lb_gain[lb_disc] > tresh {
+            lb_disc += 1;
+            tresh = if lbs_size[lb_disc] < 2500 {0.02} else {0.1};
+        }
+        tresh = if ubs_size[ub_disc] < 2500 {0.02} else {0.1};
+        while ub_disc < ubs.len()-1 && ub_gain[ub_disc] > tresh {
+            ub_disc += 1;
+            tresh = if ubs_size[ub_disc] < 2500 {0.02} else {0.1};
+        }
+        let eps = (ubs[ub_disc]/(lbs[lb_disc])).sqrt()-1.0;
+        (lb_disc, ub_disc, eps)
+    }
 }
 
 /// Parameters for the solving
@@ -1060,12 +1246,16 @@ pub struct CacheEntry {
     unsat_children: FxHashMap<VariableIndex, CacheChildren>,
     max_probability: f64,
     remaining_dist_values: Vec<(DistributionIndex, Vec<VariableIndex>)>,
+    init_discrepancy: usize,
+    child_discrepancy: FxHashMap<VariableIndex,usize>,
 }
 
 impl CacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>, cache_key_index: usize, unsat_children: FxHashMap<VariableIndex,CacheChildren>, max_probability: f64, remaining_d_v: Vec<(DistributionIndex, Vec<VariableIndex>)>) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>, 
+                cache_key_index: usize, unsat_children: FxHashMap<VariableIndex,CacheChildren>, max_probability: f64, remaining_d_v: Vec<(DistributionIndex, Vec<VariableIndex>)>, 
+                init_discrepancy: usize, child_discrepancy: FxHashMap<VariableIndex,usize>) -> Self {
         Self {
             bounds,
             discrepancy,
@@ -1075,6 +1265,8 @@ impl CacheEntry {
             unsat_children,
             max_probability,
             remaining_dist_values: remaining_d_v,
+            init_discrepancy,
+            child_discrepancy,
         }
     }
 
@@ -1123,12 +1315,20 @@ impl CacheEntry {
         }
     }
 
-    pub fn number_children(&self, sat_compile: bool) -> usize {
+    pub fn number_children(&self, sat_compile: bool, discrepancy_limit:usize) -> usize {
+        let mut cnt = 0;
+        for k in self.children.keys(){
+            if *self.child_discrepancy.get(k).unwrap_or(&0) < discrepancy_limit {
+                cnt += 1;
+            }
+        }
         if sat_compile {
-            return self.children.len();
+            //return self.children.len();
+            return cnt;
         }
         else {
-            return self.children.len() + self.unsat_children.len();
+            //return self.children.len() + self.unsat_children.len();
+            return cnt + self.unsat_children.len();
         }
     }
 

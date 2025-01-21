@@ -46,14 +46,15 @@ pub struct LearnParameters {
     recompile: bool,
     /// Whether to weight the learning with the epsilon value
     e_weighted: bool,
+    lds_opti: bool,
 }
 
 impl LearnParameters {
     
     pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, 
-               early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool) -> Self {
+               early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool, lds_opti:bool) -> Self {
         Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold, early_stop_delta, 
-              patience, recompile, e_weighted}
+              patience, recompile, e_weighted, lds_opti}
     }
 
     /// Returns the learning rate
@@ -121,6 +122,11 @@ impl LearnParameters {
     /// Whether to weight the learning with the epsilon value
     pub fn e_weighted(&self) -> bool {
         self.e_weighted
+    }
+
+    /// Whether to optimize the learning with the lds
+    pub fn lds_opti(&self) -> bool {
+        self.lds_opti
     }
 }
 

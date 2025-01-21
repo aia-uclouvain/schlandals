@@ -15,10 +15,10 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::path::PathBuf;
-use chrono;
-//use rug::Float;
 use std::fs::File;
 use std::io::Write;
+use crate::common::LearningMethod;
+use rug::Float;
 
 /// Implements a bunch of statistics that are collected during the search
 #[cfg(not(tarpaulin_include))]
@@ -26,22 +26,34 @@ pub struct Logger<const B: bool> {
     global_timestamp: chrono::DateTime<chrono::Local>,
     outfile_train: Option<File>,
     outfile_test: Option<File>,
+    learning_m: LearningMethod,
+    compile_t: usize,
 }
 
 impl<const B: bool> Logger<B> {
-    pub fn new(outfolder:Option<&PathBuf>, ndacs_train:usize, ndacs_test:usize) -> Self {
+    pub fn new(outfolder:Option<&PathBuf>, ndacs_train:usize, ndacs_test:usize, learning_m:LearningMethod, compile_t:usize) -> Self {
         let global_timestamp = chrono::Local::now();
 
         let outfile_train = if B{
             let mut out_train = outfolder.map(|x| File::create(x.join(format!("log_{}.csv", global_timestamp.format("%Y%m%d-%H%M%S")))).unwrap());
             let mut output= "".to_string();
-            output.push_str("epoch_lr,epsilon,epochs_total_duration,avg_errror,"); //avg_distance,
+            output.push_str("epoch_lr,epsilon,compile_t,epochs_total_duration,avg_errror,"); //avg_distance,
             for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} epoch_error,", i));
             }
             for i in 0..ndacs_train {
                 output.push_str(&format!("dac{} prediction,", i));
             }
+            output.push_str("parameters,");
+            
+            if learning_m == LearningMethod::Both {
+                for i in 0..20{//ndacs_train {
+                    output.push_str(&format!("dac{} grad,", i));
+                }
+            }
+            /* for i in 0..ndacs_train {
+                output.push_str(&format!("grad dac{},", i));
+            } */
             writeln!(out_train.as_mut().unwrap(), "{}", output).unwrap();
             out_train
         } else {
@@ -68,6 +80,8 @@ impl<const B: bool> Logger<B> {
             global_timestamp,
             outfile_train,
             outfile_test,
+            learning_m,
+            compile_t,
         }
     }
     pub fn start(&mut self) {
@@ -75,17 +89,58 @@ impl<const B: bool> Logger<B> {
             self.global_timestamp = chrono::Local::now();
         }
     }
-    pub fn log_epoch(&mut self, loss:&[f64], lr: f64, epsilon:f64, predictions:&[f64]) {
+    pub fn log_epoch(&mut self, loss:&[f64], lr: f64, epsilon:f64, predictions:&[f64], grads:&Vec<Vec<f64>>, parameters:&Vec<Vec<Float>>) {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
+            output.push_str(&format!("{:.4e},{},{},{},{:.4e},", lr, epsilon, self.compile_t, epoch_duration, loss.iter().sum::<f64>() / loss.len() as f64));
             for l in loss.iter() {
-                output.push_str(&format!("{:.6},", l));
+                output.push_str(&format!("{:.5e},", l));
             }
             for p in predictions.iter() {
-                output.push_str(&format!("{:.6},", p));
+                output.push_str(&format!("{:.5e},", p));
             }
+            output.push_str("");
+            for l in parameters.iter() {
+                output.push_str("");
+                for v in l.iter() {
+                    output.push_str(&format!("{:.4e} ", v));
+                }
+                output.push_str(" ");
+            }
+            if self.learning_m == LearningMethod::Both {
+                output.push_str("],");
+                for g_i in 0..20 {//grads.len() {
+                    let g = &grads[g_i];
+                    output.push_str("");
+                    for v in g.iter() {
+                        if *v!=0.0 {output.push_str(&format!("{:.4e} ", v));}
+                        else {output.push_str("0.0 ");}
+                    }
+                    output.push_str(",");
+                }
+            }
+            /* output.push_str("],[");
+            //output.push_str(&format!("{:?}!", parameters).replace(",", ";").replace("!", ","));
+            for g in grads.iter() {
+                output.push_str("[");
+                for v in g.iter() {
+                    output.push_str(&format!("{:.4e};", v));
+                }
+                output.push_str("]");
+            } */
+            output.push_str("],");
+            //output.push_str(&format!("{:?}!", gradients).replace(",", ";").replace("!", ","));
+            /* if self.learning_m == LearningMethod::Both {
+                for a in agree.iter() {
+                    output.push_str("[");
+                    for v in a.iter() {
+                        output.push_str(&format!("{:.4e};", v));
+                    }
+                    output.push_str("],");
+                    //output.push_str(&format!("{:?}!", a).replace(",", ";").replace("!", ","));
+                }
+            } */
             writeln!(self.outfile_train.as_mut().unwrap(), "{}", output).unwrap();
         }
     }

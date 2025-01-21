@@ -111,6 +111,9 @@ pub enum Command {
         /// Compilation method between models (default) and non-models
         #[clap(long, default_value_t=CompilationMethod::Models, value_enum)]
         compilation_m: CompilationMethod,
+        /// If lds is selected, whether to try the reduce the circuits
+        #[clap(long, default_value_t=false)]
+        lds_opti: bool,
     },
     Learn {
         /// The csv file containing the train filenames and the associated expected output
@@ -179,6 +182,9 @@ pub enum Command {
         /// Indicate whether to use only the sat compilation ("models", default), or only the non-models compilation ("nonmodels") or both ("both")
         #[clap(long, default_value_t=LearningMethod::Models, value_enum)]
         learning_m: LearningMethod,
+        /// If lds is selected, whether to try the reduce the circuits
+        #[clap(long, default_value_t=false)]
+        lds_opti: bool,
     },
 }
 
@@ -253,31 +259,35 @@ pub fn compile(args: Args) -> f64 {
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics);
     let mut comp_m = CompilationMethod::Models;
-    if let Command::Compile { fdac: _, dotfile: _, compilation_m } = args.subcommand.as_ref().unwrap() {
+    let mut lds_o = false;
+    if let Command::Compile { fdac: _, dotfile: _, compilation_m , lds_opti} = args.subcommand.as_ref().unwrap() {
         comp_m = *compilation_m;
+        lds_o = *lds_opti;
     }
-    let (ac_model, ac_nonmodel): (Dac<Float>, Dac<Float>) = match args.approx {
+    let (mut ac_model, mut ac_nonmodel): (Dac<Float>, Dac<Float>) = match args.approx {
         ApproximateMethod::Bounds => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(false),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(false),
-                GenericSolver::SMinConstrained(mut solver) => solver.compile(false),
-                GenericSolver::QMinConstrained(mut solver) => solver.compile(false),
-                GenericSolver::SMaxConstrained(mut solver) => solver.compile(false),
-                GenericSolver::QMaxConstrained(mut solver) => solver.compile(false),
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(false, lds_o),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(false, lds_o),
+                GenericSolver::SMinConstrained(mut solver) => solver.compile(false, lds_o),
+                GenericSolver::QMinConstrained(mut solver) => solver.compile(false, lds_o),
+                GenericSolver::SMaxConstrained(mut solver) => solver.compile(false, lds_o),
+                GenericSolver::QMaxConstrained(mut solver) => solver.compile(false, lds_o),
             }
         },
         ApproximateMethod::LDS => {
             match solver {
-                GenericSolver::SMinInDegree(mut solver) => solver.compile(true),
-                GenericSolver::QMinInDegree(mut solver) => solver.compile(true),
-                GenericSolver::SMinConstrained(mut solver) => solver.compile(true),
-                GenericSolver::QMinConstrained(mut solver) => solver.compile(true),
-                GenericSolver::SMaxConstrained(mut solver) => solver.compile(true),
-                GenericSolver::QMaxConstrained(mut solver) => solver.compile(true),
+                GenericSolver::SMinInDegree(mut solver) => solver.compile(true, lds_o),
+                GenericSolver::QMinInDegree(mut solver) => solver.compile(true, lds_o),
+                GenericSolver::SMinConstrained(mut solver) => solver.compile(true, lds_o),
+                GenericSolver::QMinConstrained(mut solver) => solver.compile(true, lds_o),
+                GenericSolver::SMaxConstrained(mut solver) => solver.compile(true, lds_o),
+                GenericSolver::QMaxConstrained(mut solver) => solver.compile(true, lds_o),
             }
         },
     };
+    println!("lower {}",ac_model.evaluate());
+    println!("upper {}",ac_nonmodel.evaluate());
     let mut ac = match comp_m {
         CompilationMethod::Models => ac_model,
         CompilationMethod::NonModels => ac_nonmodel,  
@@ -285,7 +295,7 @@ pub fn compile(args: Args) -> f64 {
     ac.evaluate();
     //println!("dac\n{}", ac.as_graphviz());
     println!("Final circuit size: {}", ac.number_nodes());
-    if let Some(Command::Compile { fdac, dotfile , compilation_m: _}) = args.subcommand {
+    if let Some(Command::Compile { fdac, dotfile , compilation_m: _, lds_opti: _}) = args.subcommand {
         if let Some(f) = dotfile {
             let out = ac.as_graphviz();
             let mut outfile = File::create(f).unwrap();
@@ -340,7 +350,8 @@ pub fn learn(args: Args) {
                     equal_init: _,
                     recompile,
                     e_weighted,
-                    learning_m,}) = args.subcommand {
+                    learning_m: _,
+                    lds_opti,}) = args.subcommand {
         let params = LearnParameters::new(
             lr,
             nepochs,
@@ -355,15 +366,16 @@ pub fn learn(args: Args) {
             patience,
             recompile,
             e_weighted,
+            lds_opti,
         );
         let approx = args.approx;
         let branching = args.branching;
         if do_log {
             let mut learner = Learner::<true>::new(args.input.clone(), args);
-            learner.train(&params, branching, approx, learning_m);
+            learner.train(&params, branching, approx);
         } else {
             let mut learner = Learner::<false>::new(args.input.clone(), args);
-            learner.train(&params, branching, approx, learning_m);
+            learner.train(&params, branching, approx);
         };
     }
 }

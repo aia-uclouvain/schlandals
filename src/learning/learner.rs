@@ -60,6 +60,7 @@ pub struct Learner<const S: bool> {
     log: Logger<S>,
     epsilon: f64,
     clauses: Vec<Vec<Vec<isize>>>,
+    learning_m: LearningMethod,
 }
 
 impl <const S: bool> Learner<S> {
@@ -84,34 +85,32 @@ impl <const S: bool> Learner<S> {
                                 recompile: _,
                                 e_weighted: _,
                                 learning_m,
+                                lds_opti,
                             } = args.subcommand.unwrap() {
-            rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();
+            if jobs!=1{rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global().unwrap();}
         
             // Parsing the input files to retrieve the problem and the queries
             let parser = parser_from_input(input.clone(), Some(OsString::default()));
             let mut train_queries = parse_csv(trainfile);
             let mut test_queries = if let Some(file) = testfile { parse_csv(file) } else { vec![] };
+            //println!("Test queries: {}", test_queries.len());
             let mut clauses = vec![];
+            let mut all_distributions = vec![];
             let mut test_clauses = vec![];
+            let mut all_test_distributions = vec![];
             for (query, _) in train_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
+                let d = q_parser.distributions_from_file();
                 clauses.push(c);
+                all_distributions.push(d);
             }
             for (query, _) in test_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
+                let d = q_parser.distributions_from_file();
                 test_clauses.push(c);
+                all_test_distributions.push(d);
             }
 
             // Retrieves the distributions values and computes their unsoftmaxed values
@@ -119,7 +118,7 @@ impl <const S: bool> Learner<S> {
             let distributions = parser.distributions_from_file();
             let mut grads: Vec<Vec<Float>> = vec![];
             let mut unsoftmaxed_distributions: Vec<Vec<f64>> = vec![];
-            let mut eps = args.epsilon;
+            let eps = args.epsilon;
             for distribution in distributions.iter() {
                 if !equal_init{
                     let unsoftmaxed_vector = distribution.iter().map(|p| p.log(std::f64::consts::E)).collect::<Vec<f64>>();
@@ -133,34 +132,12 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
-            println!("Train");
-            let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m);
-            /* if args.approx == ApproximateMethod::LDS {
-                eps = 0.0;
-                let mut present_distributions = vec![0; distributions.len()];
-                let mut cnt_unfinished = 0;
-                for dac in train_dacs.iter() {
-                    if !dac.is_complete() {
-                        cnt_unfinished += 1;
-                    }
-                    for node in dac.iter() {
-                        let start = dac[node].input_start();
-                        let end = start + dac[node].number_inputs();
-                        for i in start..end {
-                            if let NodeType::Distribution { d, .. } = dac[dac.input_at(i)].get_type() {
-                                present_distributions[d] += 1;
-                            }
-                        }
-                    }
-                    eps += dac.epsilon();
-                }
-                println!("Present distributions counted {}/{}", present_distributions.iter().filter(|b| **b!=0).count(), present_distributions.len());
-                println!("Occurance of distributions {:?}", present_distributions);//.iter().filter(|b| **b!=0).collect::<Vec<&usize>>());
-                println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
-                println!("Epsilon: {}", eps);
-            } */
-            println!("Test");
-            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, 3600, LearningMethod::Models);
+            //println!("Train");
+            let c_time = Instant::now();
+            let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &all_distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m, lds_opti);
+            let c_duration = c_time.elapsed().as_secs();
+            //println!("Test");
+            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &all_test_distributions, args.branching, args.epsilon, args.approx, 3600/2, LearningMethod::Models, false);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut cnt = 0;
@@ -169,8 +146,8 @@ impl <const S: bool> Learner<S> {
                 let mut q2 = train_queries.clone();
                 train_queries = vec![];
                 while !q1.is_empty() {
-                    train_queries.push(q1.pop().unwrap());
-                    train_queries.push(q2.pop().unwrap());                    
+                    train_queries.push(q2.pop().unwrap());
+                    train_queries.push(q1.pop().unwrap());                    
                 }
                 train_queries.reverse();
             }
@@ -178,9 +155,9 @@ impl <const S: bool> Learner<S> {
                 let expected = match learning_m {
                     LearningMethod::Models => train_queries.pop().unwrap().1,
                     LearningMethod::NonModels => 1.0 - train_queries.pop().unwrap().1,
-                    LearningMethod::Both => if cnt % 2 == 0 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
+                    LearningMethod::Both => if cnt % 2 != 0 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
                 };
-                if args.epsilon == 0.0 && d.epsilon() != 0.0 && args.approx != ApproximateMethod::LDS {
+                if args.epsilon == 0.0 && d.epsilon() > 0.0000001 && args.approx != ApproximateMethod::LDS {
                     println!("Ignoring query with epsilon {} as compilation timeout", d.epsilon());
                     continue;
                 }
@@ -189,6 +166,7 @@ impl <const S: bool> Learner<S> {
                 train_dataset.add_query(d,expected);
                 cnt += 1;
             }
+            train_dataset.reverse(); // We reverse the queries to have the same order as the input file (and first the model followed by the non-model in case of learning both)
             while let Some(mut d) = test_dacs.pop() {
                 let expected = test_queries.pop().unwrap().1;
                 d.evaluate();
@@ -196,7 +174,7 @@ impl <const S: bool> Learner<S> {
                 test_dataset.add_query(d, expected);
             }
             // Initializing the logger
-            let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
+            let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len(), learning_m, c_duration as usize);
             Self {
                 train: train_dataset,
                 test: test_dataset,
@@ -205,6 +183,7 @@ impl <const S: bool> Learner<S> {
                 log,
                 epsilon: eps,
                 clauses,
+                learning_m,
             }
         } else {
             panic!("learning procedure called with non-learn command line arguments");
@@ -243,6 +222,11 @@ impl <const S: bool> Learner<S> {
         &self.train
     }
 
+    /// Return the test dataset
+    pub fn get_test(&self) -> &Dataset<Float> {
+        &self.test
+    }
+
     /* /// Return the training queries, or an empty vector if no queries were provided
     pub fn get_queries(&self) -> &Vec<(f64,f64)> {
         &self.queries
@@ -258,6 +242,10 @@ impl <const S: bool> Learner<S> {
         } else {
             self.unsoftmaxed_distributions = distributions;
         }
+    }
+
+    pub fn set_gradients(&mut self, gradients: Vec<Vec<Float>>) {
+        self.gradients = gradients;
     }
 
     /// Set the gradients of the parameters to 0
@@ -295,9 +283,10 @@ impl <const S: bool> Learner<S> {
         self.test.get_queries().iter().map(|d| d.circuit_probability().to_f64()).collect()
     }
 
-    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, learning_m: LearningMethod) {
-        let distributions = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
-        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout, learning_m);
+    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64, learning_m: LearningMethod, lds_opti:bool) {
+        let distributions: Vec<Vec<f64>> = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.to_f64()).collect::<Vec<f64>>()).collect();
+        let repeat_distributions = vec![distributions.clone(); self.train.len()];
+        let mut train_dacs = generate_dacs(&self.clauses, &repeat_distributions, branching, self.epsilon, approx, compile_timeout, learning_m, lds_opti);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -313,9 +302,18 @@ impl <const S: bool> Learner<S> {
     // Compute the gradient of the distributions, from the different DAC queries
     // The computation is done in a top-down way, starting from the root node
     // and uses the chaine rule of the derivative to cumulatively compute the gradient in the leaves
-    pub fn compute_gradients(&mut self, gradient_loss: &[f64]) {
+    pub fn compute_gradients(&mut self, gradient_loss: &[f64], idxs: Option<Vec<usize>>) -> Vec<Vec<f64>> {
         self.zero_grads();
-        for query_id in 0..self.train.len() {
+        let ids = idxs.unwrap_or((0..self.train.len()).collect());
+        let z_g = self.get_gradients().clone(); 
+        let mut current_g = self.get_gradients().clone();
+        //let mut second_g = self.get_gradients().clone();
+        //let mut agree = vec![];
+        let mut grads = vec![];
+        for query_id in ids {
+            /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 { current_g = z_g.clone();}
+            else if self.learning_m == LearningMethod::Both && query_id%2==1 { second_g = z_g.clone();} */
+            if self.learning_m == LearningMethod::Both { current_g = z_g.clone();}
             self.train[query_id].zero_paths();
             // Iterate on all nodes from the DAC, top-down way
             for node in self.train[query_id].iter_rev() {
@@ -338,6 +336,7 @@ impl <const S: bool> Learner<S> {
                             if self.train[query_id][child].value().to_f64() != 0.0 {
                                 val = path_val.clone() * value / self.train[query_id][child].value().to_f64();
                             }
+                            //else { println!("Division by 0, up {}, down {}", path_val.clone()*value, self.train[query_id][child].value().to_f64()); }
                             self.train[query_id][child].add_to_path_value(val);
                         },
                         NodeType::Sum => {
@@ -364,13 +363,64 @@ impl <const S: bool> Learner<S> {
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
                             let weight = self.get_probability(d, params);
                             self.gradients[d][params] -= factor.clone() * weight * child_w;
+                            /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 {
+                                current_g[d][params] -= factor.clone() * weight * child_w;
+                            }
+                            else if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
+                                second_g[d][params] -= factor.clone() * weight * child_w;
+                            } */
+                            if self.learning_m == LearningMethod::Both {
+                                current_g[d][params] -= factor.clone() * weight * child_w;
+                            }
                             sum_other_w += weight;
+                        }
+                        /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 {
+                            current_g[d][v] += factor.clone() * child_w * sum_other_w.clone();
+                        }
+                        else if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
+                            second_g[d][v] += factor.clone() * child_w * sum_other_w.clone()
+                        } */
+                        if self.learning_m == LearningMethod::Both {
+                            current_g[d][v] += factor.clone() * child_w * sum_other_w.clone();
                         }
                         self.gradients[d][v] += factor * child_w * sum_other_w;
                     }
                 }
             }
+            /* if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
+                let mut cnt = vec![];
+                for i in 0..current_g.len(){
+                    for j in 0..current_g[i].len(){
+                        if !(current_g[i][j].is_zero() && second_g[i][j].is_zero()) {
+                            /* if (current_g[i][j].clone() * second_g[i][j].clone()) >= 0{
+                                cnt += 1.0;
+                            }
+                            total += 1.0; */
+                            cnt.push((current_g[i][j].clone() - second_g[i][j].clone()).abs().to_f64());
+                        }
+                    }
+                }
+                //total)
+                agree.push(cnt)
+            } */
+            if self.learning_m == LearningMethod::Both {
+                let mut cnt = vec![];
+                for i in 0..current_g.len(){
+                    for j in 0..current_g[i].len(){
+                            cnt.push(current_g[i][j].clone().to_f64());
+                    }
+                }
+                grads.push(cnt);
+            }
+            else {
+                grads.push(vec![]);
+            }
+            /* else if self.learning_m != LearningMethod::Both {
+                agree.push(vec![]);
+            } */
         }
+        //agree
+        grads
     }
 
     /// Update the distributions with the computed gradients and the learning rate, following an SGD approach
@@ -384,7 +434,7 @@ impl <const S: bool> Learner<S> {
 
     /// Training loop for the train dacs, using the given training parameters
     //fn train(&mut self, params: &LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
-    pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod, learning_m: LearningMethod) {
+    pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod) {
         let mut prev_loss = 1.0;
         let mut count_no_improve = 0;
         self.log.start();
@@ -402,14 +452,29 @@ impl <const S: bool> Learner<S> {
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
         for e in 0..params.nepochs() {
+            //println!("Epoch {}", e);
             // Update the learning rate
             let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
             // Forward pass
             let predictions = self.evaluate();
+            let mut other_pred = vec![];
+            if false && self.learning_m == LearningMethod::Both {
+                for i in 0..predictions.len()/2 {
+                    other_pred.push((predictions[2*i]*(1.0-predictions[2*i+1])).sqrt());
+                    other_pred.push(1.0-(predictions[2*i]*(1.0-predictions[2*i+1])).sqrt());
+                    /* println!("means {} {} ", other_pred[2*i], other_pred[2*i+1]);
+                    println!("preds {} 1-{} = {}", predictions[2*i], predictions[2*i+1], (1.0-predictions[2*i+1]));
+                    println!("expecteds {} {} ", self.train.expected(2*i), self.train.expected(2*i+1));
+                    panic!("stop"); */
+                }
+            }
+            else {
+                other_pred = predictions.clone();
+            }
             // Compute the loss and the gradients
             for i in 0..predictions.len() {
                 train_loss[i] = params.loss().loss(predictions[i], self.train.expected(i));
-                train_grad[i] = params.loss().gradient(predictions[i], self.train.expected(i));
+                train_grad[i] = params.loss().gradient(other_pred[i], self.train.expected(i));//predictions[i], self.train.expected(i));
                 if params.e_weighted() && self.epsilon != 0.0 {
                     //train_loss[i] *= 1.0 - self.train[i].epsilon()/self.epsilon;
                     let l = self.train.len() as f64;
@@ -417,11 +482,19 @@ impl <const S: bool> Learner<S> {
                 }
             }
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
-            self.compute_gradients(&train_grad);
+            let grads = self.compute_gradients(&train_grad, None);
+            println!("softmaxed: {:?}", self.get_softmaxed_array());
+            self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions, &grads, &self.get_softmaxed_array());
             // Update the parameters
             self.update_distributions(learning_rate);
             // Log the epoch
-            self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions);
+            
+            // TODO Remove
+            if self.test.len() != 0 {
+                let predictions = self.test();
+                let test_loss = predictions.iter().copied().enumerate().map(|(i, prediction)| params.loss().loss(prediction, self.test.expected(i))).collect::<Vec<f64>>();
+                self.log.log_test(&test_loss, self.epsilon, &predictions);
+            }
             // Early stopping
             if do_early_stopping(avg_loss, prev_loss, &mut count_no_improve, params.early_stop_threshold, params.patience(), params.early_stop_delta()) {
                 println!("breaking at epoch {} with avg_loss {} and prev_loss {}", e, avg_loss, prev_loss);
@@ -436,7 +509,7 @@ impl <const S: bool> Learner<S> {
 
             if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
                 println!("Recompiling at epoch {}", e);
-                self.recompile_dacs(branching, approx, params.compilation_timeout(), learning_m);
+                self.recompile_dacs(branching, approx, params.compilation_timeout(), self.learning_m, params.lds_opti());
             }
 
             // TODO: Add a verbosity command line argument
@@ -479,12 +552,13 @@ pub fn softmax(x: &[f64]) -> Vec<Float> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<f64>>,branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64, learning_m: LearningMethod) -> Vec<Dac<R>> {
-    let mut double_dacs = queries_clauses.par_iter().map(|clauses| {
+pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &Vec<Vec<Vec<f64>>>,branching: Branching, epsilon: f64, 
+    approx: ApproximateMethod, timeout: u64, learning_m: LearningMethod, lds_opti:bool) -> Vec<Dac<R>> {
+    let mut double_dacs = queries_clauses.par_iter().enumerate().map(|(i, clauses)| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
         let mut state = StateManager::default();
-        let problem = create_problem(distributions, clauses, &mut state); //parser.problem_from_file(&mut state);
+        let problem = create_problem(&distributions[i], clauses, &mut state); //parser.problem_from_file(&mut state);
         let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
         let propagator = Propagator::new(&mut state);
         let component_extractor = ComponentExtractor::new(&problem, &mut state);
@@ -492,22 +566,22 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false),
-                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(false),
-                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(false),
-                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(false),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(false, lds_opti),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(false, lds_opti),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(false, lds_opti),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(false, lds_opti),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(false, lds_opti),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(false, lds_opti),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true),
-                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(true),
-                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(true),
-                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true),
+                    crate::GenericSolver::SMinInDegree(mut s) => s.compile(true, lds_opti),
+                    crate::GenericSolver::QMinInDegree(mut s) => s.compile(true, lds_opti),
+                    crate::GenericSolver::SMinConstrained(mut s) => s.compile(true, lds_opti),
+                    crate::GenericSolver::QMinConstrained(mut s) => s.compile(true, lds_opti),
+                    crate::GenericSolver::SMaxConstrained(mut s) => s.compile(true, lds_opti),
+                    crate::GenericSolver::QMaxConstrained(mut s) => s.compile(true, lds_opti),
                 }
             },
         }
@@ -520,8 +594,8 @@ pub fn generate_dacs<R: SemiRing>(queries_clauses: &Vec<Vec<Vec<isize>>>, distri
             LearningMethod::Models => dacs.push(d1),
             LearningMethod::NonModels => dacs.push(d2),
             LearningMethod::Both => {
-                dacs.push(d1);
                 dacs.push(d2);
+                dacs.push(d1);
             }             
         }
     }
@@ -596,6 +670,12 @@ impl<R> Dataset<R>
     /// Sets the queries of the dataset
     pub fn set_queries(&mut self, queries: Vec<Dac<R>>) {
         self.queries = queries;
+    }
+
+    /// Reverses the queries of the dataset
+    pub fn reverse(&mut self) {
+        self.queries.reverse();
+        self.expected.reverse();
     }
 }
 

@@ -63,7 +63,7 @@ pub fn evidence_from_os_string(evidence: &OsString) -> String {
             if v {
                 let file = File::open(evidence).unwrap();
                 let reader = BufReader::new(&file);
-                reader.lines().map(|l| l.unwrap()).collect::<Vec<String>>().join(" ")
+                reader.lines().map(|l| l.unwrap()).filter(|l| !l.starts_with("p")&& !l.starts_with("c")).collect::<Vec<String>>().join(" ")
             } else {
                 evidence.to_str().unwrap().to_string()
             }
