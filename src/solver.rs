@@ -320,9 +320,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             backtrack_level,
             cache_index: cache_entry.cache_key_index,
         };
-        if cache_entry.bounds.0 != 0.0 {
-            self.cache.insert(cache_key, cache_entry);
-        }
+        self.cache.insert(cache_key, cache_entry);
         result
     }
 }

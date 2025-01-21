@@ -195,7 +195,7 @@ impl Propagator {
                     continue;
                 }
                 self.clear();
-                if reason.is_none() {
+                if true || reason.is_none() {
                     return PropagationResult::Err(level);
                 }
                 let (learned_clause, backjump) = self.learn_clause_from_conflict(g, state, reason.unwrap());
