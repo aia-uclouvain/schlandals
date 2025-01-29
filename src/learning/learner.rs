@@ -137,7 +137,7 @@ impl <const S: bool> Learner<S> {
             let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &all_distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m, lds_opti);
             let c_duration = c_time.elapsed().as_secs();
             //println!("Test");
-            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &all_test_distributions, args.branching, args.epsilon, args.approx, 3600/2, LearningMethod::Models, false);
+            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &all_test_distributions, args.branching, args.epsilon, args.approx, 3600, LearningMethod::Models, false);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut cnt = 0;
@@ -157,7 +157,7 @@ impl <const S: bool> Learner<S> {
                     LearningMethod::NonModels => 1.0 - train_queries.pop().unwrap().1,
                     LearningMethod::Both => if cnt % 2 != 0 {train_queries.pop().unwrap().1} else {1.0 - train_queries.pop().unwrap().1},
                 };
-                if args.epsilon == 0.0 && d.epsilon() > 0.0000001 && args.approx != ApproximateMethod::LDS {
+                if args.epsilon == 0.0 && d.epsilon() > 0.00001 && args.approx != ApproximateMethod::LDS {
                     println!("Ignoring query with epsilon {} as compilation timeout", d.epsilon());
                     continue;
                 }
@@ -483,7 +483,7 @@ impl <const S: bool> Learner<S> {
             }
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
             let grads = self.compute_gradients(&train_grad, None);
-            println!("softmaxed: {:?}", self.get_softmaxed_array());
+            //println!("softmaxed: {:?}", self.get_softmaxed_array());
             self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions, &grads, &self.get_softmaxed_array());
             // Update the parameters
             self.update_distributions(learning_rate);

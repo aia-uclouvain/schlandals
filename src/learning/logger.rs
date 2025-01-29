@@ -109,7 +109,7 @@ impl<const B: bool> Logger<B> {
                 output.push_str(" ");
             }
             if self.learning_m == LearningMethod::Both {
-                output.push_str("],");
+                output.push_str(",");
                 for g_i in 0..20 {//grads.len() {
                     let g = &grads[g_i];
                     output.push_str("");
