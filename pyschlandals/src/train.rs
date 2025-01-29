@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use super::*;
 
 use schlandals::learning::LearnParameters;
-use schlandals::common::{LearningMethod, Loss, Optimizer, Semiring};
+use schlandals::common::{LearningMethod, Loss, Optimizer, Semiring, ApproximateMethod};
 
 #[pyclass]
 #[derive(Clone)]
@@ -32,6 +32,20 @@ pub fn get_learningm_from_pylearningm(loss: PyLearningMethod) -> LearningMethod 
         PyLearningMethod::Models => LearningMethod::Models,
         PyLearningMethod::NonModels => LearningMethod::NonModels,
         PyLearningMethod::Both => LearningMethod::Both,
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub enum PyApproximateMethod {
+    LDS,
+    Bounds,
+}
+
+pub fn get_approximatem_from_pyapproximatem(approx: PyApproximateMethod) -> ApproximateMethod {
+    match approx {
+        PyApproximateMethod::LDS => ApproximateMethod::LDS,
+        PyApproximateMethod::Bounds => ApproximateMethod::Bounds,
     }
 }
 
@@ -86,6 +100,14 @@ impl  PyLearnParameters {
             e_weighted,
             equal_init,
         }
+    }
+
+    pub fn set_nepochs(&mut self, nepochs: usize) {
+        self.nepochs = nepochs;
+    }
+
+    pub fn set_lr(&mut self, lr: f64) {
+        self.lr = lr;
     }
 
     pub fn lr(&self) -> f64 {
@@ -158,7 +180,8 @@ pub fn get_param_from_pyparam(param: PyLearnParameters) -> LearnParameters {
                          param.early_stop_delta,
                          param.patience,
                          param.recompile,
-                         param.e_weighted)
+                         param.e_weighted,
+                         false,)
 }
 
 // TODO: Find how to make the python binding to take into account that the tensors are a feature
@@ -227,6 +250,8 @@ pub fn learn_submodule(py: Python<'_>, parent_module: &PyModule) -> PyResult<()>
     module.add_class::<PyLoss>()?;
     module.add_class::<PyOptimizer>()?;
     module.add_class::<PySemiring>()?;
+    module.add_class::<PyLearningMethod>()?;
+    module.add_class::<PyApproximateMethod>()?;
     module.add_function(wrap_pyfunction!(pylearn, module)?)?;
 
     parent_module.add_submodule(module)?;
