@@ -72,6 +72,7 @@ pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     /// The caches present in the cache. Used during compilation to reconstruct the AC from the
     /// cache (follow the children of a node)
     cache_keys: Vec<CacheKey>,
+    bound_approx: bool,
 }
 
 impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
@@ -95,6 +96,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             preproc_out: None,
             parameters,
             cache_keys: vec![],
+            bound_approx: false,
         }
     }
 
@@ -120,14 +122,17 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             return Solution::new(lb, ub, self.parameters.start.elapsed().as_secs());
         }
         if !is_lds {
-            let sol = self.do_discrepancy_iteration(usize::MAX);
+            if self.parameters.epsilon > 0.0 {
+                self.bound_approx = true;
+            }
+            let sol = self.do_discrepancy_iteration(usize::MAX, self.parameters.epsilon);
             self.statistics.print();
             sol
         } else {
             let mut discrepancy = 1;
             let mut complete_sol = None;
             loop {
-                let solution = self.do_discrepancy_iteration(discrepancy);
+                let solution = self.do_discrepancy_iteration(discrepancy, 0.0);
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     solution.print();
                     complete_sol = Some(solution);
@@ -192,9 +197,9 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         self.branching_heuristic.init(&self.problem, &self.state);
     }
 
-    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize) -> Solution {
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, eps: f64) -> Solution {
         let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
-        let result = self.pwmc(ComponentIndex(0), 1, discrepancy);
+        let result = self.pwmc(ComponentIndex(0), 1, discrepancy, eps);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
@@ -202,7 +207,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
-    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize) -> SearchResult {
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, eps: f64) -> SearchResult {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
@@ -228,6 +233,9 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             let unsat_factor = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution).map(|d| {
                 F128!(self.problem[d].remaining(&self.state))
             }).product::<Rational>();
+            let max_probability = self.component_extractor.component_distribution_iter(component).map(|d| {
+                F128!(self.problem[d].remaining(&self.state))
+            }).product::<Rational>();
             let mut child_id = 0;
             for variable in self.problem[distribution].iter_variables() {
                 if self.problem[variable].is_fixed(&self.state) {
@@ -236,6 +244,14 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                 if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || child_id == discrepancy {
                     complete = false;
                     break;
+                }
+                if self.bound_approx {
+                    let ub = max_probability.clone() - new_p_out.clone();
+                    let lb = new_p_in.clone();
+                    if ub <= lb*F128!((1.0 + eps)*(1.0 + eps)) {
+                        complete = false;
+                        break;
+                    }
                 }
                 let v_weight = self.problem[variable].weight().unwrap();
                 self.state.save_state();
@@ -268,9 +284,11 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             self.statistics.and_node();
                             self.statistics.decomposition(self.component_extractor.number_components(&self.state));
+                            let number_components = self.component_extractor.number_components(&self.state);
+                            let new_eps = eps.powf(1.0 / number_components as f64);
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
-                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id);
+                                let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id, new_eps);
                                 if !sub_solution.complete {
                                     complete = false;
                                 }
@@ -333,7 +351,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             return ac
         }
         if !is_lds {
-            let sol = self.do_discrepancy_iteration(usize::MAX);
+            let sol = self.do_discrepancy_iteration(usize::MAX, self.parameters.epsilon);
             self.statistics.print();
             if sol.has_converged(0.0) && sol.bounds().0 < FLOAT_CMP_THRESHOLD {
                 let mut ac = Dac::default();
@@ -348,7 +366,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             let mut complete_sol = None;
             let mut complete_ac = None;
             loop {
-                let solution = self.do_discrepancy_iteration(discrepancy);
+                let solution = self.do_discrepancy_iteration(discrepancy, 0.0);
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     complete_ac = Some(self.build_ac(solution.epsilon(), &forced_by_propagation));
                     complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
