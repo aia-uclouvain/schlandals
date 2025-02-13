@@ -26,7 +26,6 @@ use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
 use malachite::Rational;
-use malachite::num::arithmetic::traits::Abs;
 
 use std::time::Instant;
 
@@ -221,11 +220,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             self.statistics.or_node();
             cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
         }
-        let mut backtrack_level = level - 1;
-        let maximum_probability = self.component_extractor.component_distribution_iter(component).map(|d| {
-            F128!(self.problem[d].remaining(&self.state))
-        }).product::<Rational>();
-        if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(&maximum_probability) {
+        let mut complete = cache_entry.discrepancy < discrepancy;
+        if cache_entry.discrepancy < discrepancy && !cache_entry.is_complete() {
             let mut new_p_in = F128!(0.0);
             let mut new_p_out = F128!(0.0);
             let distribution = cache_entry.distribution.unwrap();
@@ -238,21 +234,15 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                     continue;
                 }
                 if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || child_id == discrepancy {
+                    complete = false;
                     break;
                 }
                 let v_weight = self.problem[variable].weight().unwrap();
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
-                    Err(bt) => {
+                    Err(_) => {
                         self.statistics.unsat();
                         new_p_out += v_weight * unsat_factor.clone();
-                        if bt != level {
-                            self.restore();
-                            backtrack_level = bt;
-                            new_p_out = maximum_probability.clone();
-                            cache_entry.clear_children();
-                            break;
-                        }
                     },
                     Ok(_) => {
                         let p = self.propagator.get_propagation_prob();
@@ -281,13 +271,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let sub_maximum_probability = self.component_extractor[sub_component].max_probability();
                                 let sub_solution = self.pwmc(sub_component, level + 1, discrepancy - child_id);
-                                if sub_solution.backtrack_level != level {
-                                    self.restore();
-                                    is_product_sat = false;
-                                    backtrack_level = sub_solution.backtrack_level;
-                                    new_p_out = maximum_probability.clone();
-                                    cache_entry.clear_children();
-                                    break;
+                                if !sub_solution.complete {
+                                    complete = false;
                                 }
                                 prod_p_in *= &sub_solution.bounds.0;
                                 prod_p_out *= sub_maximum_probability - sub_solution.bounds.1.clone();
@@ -317,9 +302,12 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
         }
         let result = SearchResult {
             bounds: cache_entry.bounds.clone(),
-            backtrack_level,
             cache_index: cache_entry.cache_key_index,
+            complete,
         };
+        if complete {
+            cache_entry.completed();
+        }
         self.cache.insert(cache_key, cache_entry);
         result
     }
@@ -546,6 +534,7 @@ pub struct CacheEntry {
     distribution: Option<DistributionIndex>,
     children: FxHashMap<VariableIndex, CacheChildren>,
     cache_key_index: usize,
+    complete: bool,
 }
 
 impl CacheEntry {
@@ -558,6 +547,7 @@ impl CacheEntry {
             distribution,
             children,
             cache_key_index,
+            complete: false,
         }
     }
 
@@ -573,10 +563,6 @@ impl CacheEntry {
         self.children.len()
     }
 
-    pub fn clear_children(&mut self) {
-        self.children.clear();
-    }
-
     pub fn variable_number_children(&self, variable: VariableIndex) -> usize {
         let entry = self.children.get(&variable).unwrap();
         entry.children_keys.len() + entry.forced_choices.len() + entry.unconstrained_distributions.len()
@@ -590,8 +576,12 @@ impl CacheEntry {
         self.children.get(&variable).unwrap().children_keys.clone()
     }
 
-    fn are_bounds_tight(&self, maximum_probability: &Rational) -> bool {
-        (self.bounds.0.clone() + &self.bounds.1 - maximum_probability).abs() <= FLOAT_CMP_THRESHOLD
+    fn is_complete(&self) -> bool {
+        self.complete
+    }
+
+    fn completed(&mut self) {
+        self.complete = true;
     }
 }
 
@@ -618,6 +608,6 @@ impl CacheChildren {
 
 struct SearchResult {
     bounds: (Rational, Rational),
-    backtrack_level: isize,
     cache_index: usize,
+    complete: bool,
 }
