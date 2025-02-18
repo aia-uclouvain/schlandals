@@ -108,7 +108,6 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn search(&mut self, is_lds: bool) -> Solution {
-        self.parameters.start = Instant::now();
         let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
         if let Some(sol) = self.preprocess(&max) {
@@ -133,6 +132,11 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
             let mut complete_sol = None;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy, 0.0);
+                if solution.epsilon() < 0.01 {
+                    discrepancy = usize::MAX;
+                } else {
+                    discrepancy += 1;
+                }
                 if self.parameters.start.elapsed().as_secs() < self.parameters.timeout || complete_sol.as_ref().is_none() {
                     solution.print();
                     complete_sol = Some(solution);
@@ -141,7 +145,6 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                     self.statistics.print();
                     return complete_sol.unwrap()
                 }
-                discrepancy += 1;
             }
         }
     }
@@ -280,7 +283,6 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                         let (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
                         self.state.save_state();
-                        let mut is_product_sat = true;
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             self.statistics.and_node();
                             self.statistics.decomposition(self.component_extractor.number_components(&self.state));
@@ -293,9 +295,8 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                                     complete = false;
                                 }
                                 prod_p_in *= &sub_solution.bounds.0;
-                                prod_p_out *= sub_maximum_probability - sub_solution.bounds.1.clone();
+                                prod_p_out *= sub_maximum_probability - &sub_solution.bounds.1;
                                 if prod_p_in == 0.0 {
-                                    is_product_sat = false;
                                     break;
                                 }
                                 if C {
@@ -303,7 +304,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                                 }
                             }
                         }
-                        if is_product_sat && prod_p_in > 0.0 {
+                        if C && prod_p_in > 0.0 {
                             cache_entry.children.insert(variable, child_entry);
                         }
                         prod_p_out = prod_maximum_probability - prod_p_out;
@@ -316,7 +317,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
                 child_id += 1;
             }
             cache_entry.discrepancy = discrepancy;
-            cache_entry.bounds = (new_p_in.clone(), new_p_out.clone());
+            cache_entry.bounds = (new_p_in, new_p_out);
         }
         let result = SearchResult {
             bounds: cache_entry.bounds.clone(),
