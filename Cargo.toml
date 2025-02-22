@@ -24,6 +24,7 @@ peak_alloc = ">=0.2.0"
 chrono = ">=0.4.31"
 rayon = ">=1.8.0"
 malachite = ">=0.4.16"
+arboretum-td = {version = "0.1.0", features = ["cli"] }
 
 [dev-dependencies]
 paste = "1.0.12"

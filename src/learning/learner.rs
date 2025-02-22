@@ -441,18 +441,18 @@ pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Ve
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::LogCompile(mut s) => s.compile(false),
+                    crate::GenericSolver::QuietCompile(mut s) => s.compile(false),
+                    crate::GenericSolver::LogSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::QuietSearch(_) => panic!("Non compile solver used for learning"),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::LogCompile(mut s) => s.compile(true),
+                    crate::GenericSolver::QuietCompile(mut s) => s.compile(true),
+                    crate::GenericSolver::LogSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::QuietSearch(_) => panic!("Non compile solver used for learning"),
                 }
             },
             
