@@ -211,7 +211,6 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
-        println!("Entering level {} of the search tree", level);
         let cache_key = self.component_extractor[component].get_cache_key();
         self.statistics.cache_access();
         let mut cache_entry = self.cache.remove(&cache_key).unwrap_or_else(|| {
@@ -220,14 +219,14 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             if C {
                 self.cache_keys.push(cache_key.clone());
             }
-            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index)
+            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, eps, None, FxHashMap::default(), cache_key_index)
         });
         if cache_entry.distribution.is_none() {
             self.statistics.or_node();
             cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
         }
         let mut complete = cache_entry.discrepancy < discrepancy;
-        if cache_entry.discrepancy < discrepancy && !cache_entry.is_complete() {
+        if cache_entry.discrepancy < discrepancy && !cache_entry.is_complete() && (!self.bound_approx || cache_entry.eps > eps) {
             let mut new_p_in = F128!(0.0);
             let mut new_p_out = F128!(0.0);
             let distribution = cache_entry.distribution.unwrap();
@@ -549,6 +548,7 @@ pub struct CacheEntry {
     bounds: Bounds,
     /// Maximum discrepancy used for that node
     discrepancy: usize,
+    eps: f64,
     /// The distribution on which to branch in this problem
     distribution: Option<DistributionIndex>,
     children: FxHashMap<VariableIndex, CacheChildren>,
@@ -559,10 +559,11 @@ pub struct CacheEntry {
 impl CacheEntry {
 
     /// Returns a new cache entry
-    pub fn new(bounds: Bounds, discrepancy: usize, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>, cache_key_index: usize) -> Self {
+    pub fn new(bounds: Bounds, discrepancy: usize, eps: f64, distribution: Option<DistributionIndex>, children: FxHashMap<VariableIndex, CacheChildren>, cache_key_index: usize) -> Self {
         Self {
             bounds,
             discrepancy,
+            eps,
             distribution,
             children,
             cache_key_index,
