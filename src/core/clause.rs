@@ -50,6 +50,7 @@ pub struct Clause {
     /// Has the clause been learned during the search
     is_learned: bool,
     in_degree: usize,
+    out_degree: usize,
 }
 
 impl Clause {
@@ -64,6 +65,7 @@ impl Clause {
             hash: rand::random(),
             is_learned,
             in_degree: 0,
+            out_degree: 0,
         }
     }
     
@@ -234,6 +236,8 @@ impl Clause {
     pub fn clear(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.children.clear(map, state);
         self.parents.clear(map, state);
+        self.in_degree = self.parents.len(state);
+        self.out_degree = self.children.len(state);
     }
 
     pub fn clear_literals(&mut self, map: &FxHashMap<VariableIndex, VariableIndex>) {
@@ -258,12 +262,12 @@ impl Clause {
         self.literals.get_watchers()
     }
 
-    pub fn increment_in_degree(&mut self) {
-        self.in_degree += 1;
-    }
-
     pub fn in_degree(&self) -> usize {
         self.in_degree
+    }
+
+    pub fn out_degree(&self) -> usize {
+        self.out_degree
     }
 }
 

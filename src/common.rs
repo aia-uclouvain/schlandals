@@ -41,7 +41,9 @@ pub type Bounds = (Rational, Rational);
 pub enum Branching {
     /// Minimum In-degree of a clause in the implication-graph
     MinInDegree,
+    MinOutDegree,
     DLCS,
+    DLCSVar,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]

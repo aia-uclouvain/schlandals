@@ -375,7 +375,9 @@ pub enum GenericSolver {
 pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool, compile: bool) -> GenericSolver {
     let branching: Box<dyn BranchingDecision> = match branching {
         Branching::MinInDegree => Box::<MinInDegree>::default(),
+        Branching::MinOutDegree => Box::<MinOutDegree>::default(),
         Branching::DLCS => Box::<DLCS>::default(),
+        Branching::DLCSVar => Box::<DLCSVar>::default(),
     };
     if !compile && !stat {
         let solver = Solver::<false, false>::new(problem, state, component_extractor, branching, propagator, parameters);

@@ -173,13 +173,11 @@ impl Problem {
                     for child in self[variable].iter_clauses_negative_occurence(state).filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);
                         self[child].add_parent(cid, state);
-                        self[child].increment_in_degree();
                     }
                 } else {
                     for parent in self[variable].iter_clauses_positive_occurence(state).filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_parent(parent, state);
                         self[parent].add_child(cid, state);
-                        clause.increment_in_degree();
                     }
                 }
             }
