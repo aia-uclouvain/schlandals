@@ -154,9 +154,9 @@ impl Problem {
         for literal in clause.iter().collect::<Vec<Literal>>() {
             let variable = literal.to_variable();
             if literal.is_positive() {
-                self[variable].add_clause_positive_occurence(cid);
+                self[variable].add_clause_positive_occurence(cid, state);
             } else {
-                self[variable].add_clause_negative_occurence(cid);
+                self[variable].add_clause_negative_occurence(cid, state);
             }
             if let Some(distribution) = self[literal.to_variable()].distribution() {
                 self[distribution].add_clause(cid, state);
@@ -170,13 +170,13 @@ impl Problem {
                     self[variable].add_learned_clause(cid);
                 }
                 if literal.is_positive() {
-                    for child in self[variable].iter_clauses_negative_occurence().filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
+                    for child in self[variable].iter_clauses_negative_occurence(state).filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);
                         self[child].add_parent(cid, state);
                         self[child].increment_in_degree();
                     }
                 } else {
-                    for parent in self[variable].iter_clauses_positive_occurence().filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
+                    for parent in self[variable].iter_clauses_positive_occurence(state).filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_parent(parent, state);
                         self[parent].add_child(cid, state);
                         clause.increment_in_degree();
@@ -232,7 +232,7 @@ impl Problem {
         let mut variables_map: FxHashMap<VariableIndex, VariableIndex> = FxHashMap::default();
         let mut new_variable_index = 0;
         for (i, variable) in self.variables_iter().enumerate() {
-            let number_remaining_clauses = self[variable].clear_clauses(&clauses_map);
+            let number_remaining_clauses = self[variable].clear_clauses(&clauses_map, state);
             let is_unconstrained = if self[variable].is_probabilitic() {
                 let distribution = self[variable].distribution().unwrap();
                 (number_remaining_clauses == 0 && !distributions_map.contains_key(&distribution)) || self[variable].is_fixed(state)

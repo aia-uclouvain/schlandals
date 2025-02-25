@@ -441,18 +441,16 @@ pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Ve
         match approx {
             ApproximateMethod::Bounds => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(false),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::Compiler(mut s) => s.compile(false),
+                    crate::GenericSolver::LogCompiler(mut s) => s.compile(false),
+                    _ => panic!("Search solver used for learning"),
                 }
             },
             ApproximateMethod::LDS => {
                 match compiler {
-                    crate::GenericSolver::SMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::QMinInDegreeCompile(mut s) => s.compile(true),
-                    crate::GenericSolver::SMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
-                    crate::GenericSolver::QMinInDegreeSearch(_) => panic!("Non compile solver used for learning"),
+                    crate::GenericSolver::Compiler(mut s) => s.compile(true),
+                    crate::GenericSolver::LogCompiler(mut s) => s.compile(true),
+                    _ => panic!("Search solver used for learning"),
                 }
             },
             

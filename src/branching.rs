@@ -59,3 +59,29 @@ impl BranchingDecision for MinInDegree {
     fn init(&mut self, _g: &Problem, _state: &StateManager) {}
     
 }
+
+#[derive(Default)]
+pub struct DLCS {}
+
+impl BranchingDecision for DLCS {
+    fn branch_on(
+        &mut self,
+        g: &Problem,
+        state: &mut StateManager,
+        component_extractor: &ComponentExtractor,
+        component: ComponentIndex,
+    ) -> Option<DistributionIndex> {
+        let mut distribution: Option<DistributionIndex> = None;
+        let mut best_score = g.number_clauses();
+        for d in component_extractor.component_distribution_iter(component) {
+            let score = g[d].size(state);
+            if score < best_score {
+                best_score = score;
+                distribution = Some(d);
+            }
+        }
+        distribution
+    }
+    
+    fn init(&mut self, _g: &Problem, _state: &StateManager) {}
+}

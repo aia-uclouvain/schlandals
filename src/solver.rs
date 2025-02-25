@@ -49,7 +49,7 @@ type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
 /// Finally, the compiler is able to create an arithmetic circuit for any semi-ring. Currently
 /// implemented are the probability semi-ring (the default) and tensor semi-ring, which uses torch
 /// tensors (useful for automatic differentiation in learning).
-pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
+pub struct Solver<const S: bool, const C: bool> {
     /// Implication problem of the (Horn) clauses in the input
     problem: Problem,
     /// Manages (save/restore) the states (e.g., reversible primitive types)
@@ -57,7 +57,7 @@ pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     /// Extracts the connected components in the problem
     component_extractor: ComponentExtractor,
     /// Heuristics that decide on which distribution to branch next
-    branching_heuristic: Box<B>,
+    branching_heuristic: Box<dyn BranchingDecision>,
     /// Runs Boolean Unit Propagation and Schlandals' specific propagation at each decision node
     propagator: Propagator,
     cache: FxHashMap<CacheKey, CacheEntry>,
@@ -75,12 +75,12 @@ pub struct Solver<B: BranchingDecision, const S: bool, const C: bool> {
     bound_approx: bool,
 }
 
-impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
+impl<const S: bool, const C: bool> Solver<S, C> {
     pub fn new(
         problem: Problem,
         state: StateManager,
         component_extractor: ComponentExtractor,
-        branching_heuristic: Box<B>,
+        branching_heuristic: Box<dyn BranchingDecision>,
         propagator: Propagator,
         parameters: SolverParameters,
     ) -> Self {
@@ -332,7 +332,7 @@ impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
     }
 }
 
-impl<B: BranchingDecision, const S: bool, const C: bool> Solver<B, S, C> {
+impl<const S: bool, const C: bool> Solver<S, C> {
 
     pub fn compile(&mut self, is_lds: bool) -> Dac {
         let start = Instant::now();

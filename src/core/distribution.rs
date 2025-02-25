@@ -37,7 +37,7 @@ pub struct Distribution {
     pub domain_size: usize,
     /// Number of variable in the distribution
     size: ReversibleUsize,
-    /// Reversible sparse set containing the distribution constraining the distribution. We assume
+    /// Reversible sparse set containing the clauses constraining the distribution. We assume
     /// that the distribution do not appear twice in the same clause. At the time of the writing of
     /// these line this is a reasonnable constraint, but time will tell if I must update this code.
     clauses: SparseSet<ClauseIndex>,

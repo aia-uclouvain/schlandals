@@ -21,12 +21,15 @@ use search_trail::*;
 use crate::core::problem::{ClauseIndex, DistributionIndex};
 use rustc_hash::FxHashMap;
 use malachite::Rational;
+use super::sparse_set::SparseSet;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Reason {
     Clause(ClauseIndex),
     Distribution(DistributionIndex),
 }
+
+// TODO: Change clauses_positive and clauses_negative to sparse sets
 
 /// Data structure that actually holds the data of a  variable of the input problem
 #[derive(Debug)]
@@ -41,9 +44,9 @@ pub struct Variable {
     /// The distribution in which the variable is.  None if the variable is deterministic
     distribution: Option<DistributionIndex>,
     /// The clauses in which the variable appears with positive polarity
-    clauses_positive: Vec<ClauseIndex>,
+    clauses_positive: SparseSet<ClauseIndex>,
     /// The clauses in which the variable appears with negative polarity
-    clauses_negative: Vec<ClauseIndex>,
+    clauses_negative: SparseSet<ClauseIndex>,
     learned_clauses: Vec<ClauseIndex>,
     /// The value assigned to the variable
     value: ReversibleOptionBool,
@@ -67,8 +70,8 @@ impl Variable {
             weight,
             index_in_distribution,
             distribution,
-            clauses_positive: vec![],
-            clauses_negative: vec![],
+            clauses_positive: SparseSet::new(state),
+            clauses_negative: SparseSet::new(state),
             learned_clauses: vec![],
             value: state.manage_option_bool(None),
             decision: -1,
@@ -141,13 +144,13 @@ impl Variable {
     }
     
     /// Adds the clause in the positive occurence list
-    pub fn add_clause_positive_occurence(&mut self, clause: ClauseIndex) {
-        self.clauses_positive.push(clause);
+    pub fn add_clause_positive_occurence(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        self.clauses_positive.add(clause, state);
     }
     
     /// Adds the clause in the negative occurence list
-    pub fn add_clause_negative_occurence(&mut self, clause: ClauseIndex) {
-        self.clauses_negative.push(clause);
+    pub fn add_clause_negative_occurence(&mut self, clause: ClauseIndex, state: &mut StateManager) {
+        self.clauses_negative.add(clause, state);
     }
     
     /// Sets the decision level for the variable to the given level
@@ -197,8 +200,8 @@ impl Variable {
         state.get_usize(self.assignment_position)
     }
 
-    pub fn number_clauses(&self) -> usize {
-        self.clauses_positive.len() + self.clauses_negative.len()
+    pub fn number_clauses(&self, state: &StateManager) -> usize {
+        self.clauses_positive.len(state) + self.clauses_negative.len(state)
     }
 
     pub fn add_learned_clause(&mut self, clause: ClauseIndex) {
@@ -208,44 +211,23 @@ impl Variable {
     // --- ITERATOR --- //
 
     /// Returns an iterator on the clauses in which the variable appears with a positive polarity
-    pub fn iter_clauses_positive_occurence(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
-        self.clauses_positive.iter().copied()
+    pub fn iter_clauses_positive_occurence(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.clauses_positive.iter(state)
     }
     
     /// Returns an iterator on the clauses in which the variable appears with a negative polarity
-    pub fn iter_clauses_negative_occurence(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
-        self.clauses_negative.iter().copied()
+    pub fn iter_clauses_negative_occurence(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
+        self.clauses_negative.iter(state)
     }
 
     pub fn iter_learned_clauses(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.learned_clauses.iter().copied()
     }
 
-    pub fn clear_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>) -> usize {
-        for i in (0..self.clauses_positive.len()).rev() {
-            let clause = self.clauses_positive[i];
-            match map.get(&clause) {
-                Some(c) => {
-                    self.clauses_positive[i] = *c;
-                },
-                None => {
-                    self.clauses_positive.swap_remove(i);
-                },
-            };
-        }
-
-        for i in (0..self.clauses_negative.len()).rev() {
-            let clause = self.clauses_negative[i];
-            match map.get(&clause) {
-                Some(c) => {
-                    self.clauses_negative[i] = *c;
-                },
-                None => {
-                    self.clauses_negative.swap_remove(i);
-                },
-            };
-        }
-        self.clauses_positive.len() + self.clauses_negative.len()
+    pub fn clear_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) -> usize {
+        self.clauses_positive.clear(map, state);
+        self.clauses_negative.clear(map, state);
+        self.clauses_positive.len(state) + self.clauses_negative.len(state)
     }
 }
 

@@ -230,10 +230,10 @@ impl ComponentExtractor {
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
-                                        for c in g[v].iter_clauses_negative_occurence().filter(|c| !g[*c].is_learned()) {
+                                        for c in g[v].iter_clauses_negative_occurence(state).filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
-                                        for c in g[v].iter_clauses_positive_occurence().filter(|c| !g[*c].is_learned()) {
+                                        for c in g[v].iter_clauses_positive_occurence(state).filter(|c| !g[*c].is_learned()) {
                                             self.exploration_stack.push(c);
                                         }
                                     }

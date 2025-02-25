@@ -212,12 +212,12 @@ impl Propagator {
             // TODO: check why this was only g.set_clause_unconstrained and not add unconstrained
             // clause
             if value {
-                for clause in g[variable].iter_clauses_positive_occurence(){
+                for clause in g[variable].iter_clauses_positive_occurence(state){
                     //g.set_clause_unconstrained(clause, state);
                     self.add_unconstrained_clause(clause, g, state);
                 }
             } else {
-                for clause in g[variable].iter_clauses_negative_occurence(){
+                for clause in g[variable].iter_clauses_negative_occurence(state){
                     //g.set_clause_unconstrained(clause, state);
                     self.add_unconstrained_clause(clause, g, state);
                 }
@@ -241,7 +241,7 @@ impl Propagator {
                     }
                 }
             } else if value {
-                for clause in g[variable].iter_clauses_negative_occurence().collect::<Vec<ClauseIndex>>() {
+                for clause in g[variable].iter_clauses_negative_occurence(state).collect::<Vec<ClauseIndex>>() {
                     g[clause].remove_literals(variable);
                     if g[clause].is_unit(state) {
                         let l = g[clause].get_unit_assigment(state);
@@ -249,7 +249,7 @@ impl Propagator {
                     }
                 }
             } else {
-                for clause in g[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                for clause in g[variable].iter_clauses_positive_occurence(state).collect::<Vec<ClauseIndex>>() {
                     g[clause].remove_literals(variable);
                     if g[clause].is_unit(state) {
                         let l = g[clause].get_unit_assigment(state);
@@ -261,7 +261,7 @@ impl Propagator {
             if is_p {
                 let distribution = g[variable].distribution().unwrap();
                 if !value {
-                    for clause in g[variable].iter_clauses_positive_occurence().collect::<Vec<ClauseIndex>>() {
+                    for clause in g[variable].iter_clauses_positive_occurence(state).collect::<Vec<ClauseIndex>>() {
                         g[distribution].remove_clause(clause, state);
                     }
                 }
