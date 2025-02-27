@@ -26,7 +26,6 @@ use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
 use malachite::Rational;
-
 use std::time::Instant;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);
@@ -198,12 +197,12 @@ impl<const S: bool, const C: bool> Solver<S, C> {
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, eps: f64) -> Solution {
-        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
         let result = self.pwmc(ComponentIndex(0), 1, discrepancy, eps);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
-        let ub: Rational = max - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
+        let ub: Rational = F128!(1.0) - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
+        //let ub: Rational = max - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
 
