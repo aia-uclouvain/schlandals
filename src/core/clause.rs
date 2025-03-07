@@ -179,6 +179,14 @@ impl Clause {
         bounds.0 + bounds.1 == 1
     }
 
+    pub fn is_binary(&self, state: &StateManager) -> bool {
+        if !self.is_constrained(state) {
+            return false;
+        }
+        let bounds = self.literals.get_bounds(state);
+        bounds.0 + bounds.1 == 2
+    }
+
     /// Returns the last unfixed literal in the unit clause
     pub fn get_unit_assigment(&self, state: &StateManager) -> Literal {
         debug_assert!(self.is_unit(state));

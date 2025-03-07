@@ -309,7 +309,7 @@ impl ComponentExtractor {
                     for c in clauses.iter().copied() {
                         repr.push_str(&format!("c{}", c.0));
                     }
-                    for v in clauses.iter().copied() {
+                    for v in clauses.iter().copied().filter(|c| !g[*c].is_binary(state)) {
                         repr.push_str(&format!("v{}", v.0));
                     }
                     self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, repr});
