@@ -25,7 +25,6 @@ pub struct Statistics<const B: bool> {
     number_and_nodes: usize,
     total_and_decompositions: usize,
     number_unsat: usize,
-    number_propagation: usize,
 }
 
 impl<const B: bool> Statistics<B> {
@@ -56,6 +55,9 @@ impl<const B: bool> Statistics<B> {
     pub fn decomposition(&mut self, number_components: usize) {
         if B {
             self.total_and_decompositions += number_components;
+            if number_components > 1 {
+                self.and_node();
+            }
         }
     }
     
@@ -76,14 +78,17 @@ impl<const B: bool> fmt::Display for Statistics<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if B {
             let cache_hit_percentages = 100f64 - (self.cache_miss as f64 / self.cache_access as f64) * 100.0;
-            let avg_decomposition = (self.total_and_decompositions as f64) / (self.number_and_nodes as f64);
+            let avg_decomposition = if self.number_and_nodes > 1 {
+                (self.total_and_decompositions as f64) / (self.number_and_nodes as f64)
+            } else {
+                1.0
+            };
             writeln!(f,
-                "cache_hit {:.3} | OR nodes {} | AND nodes {} | avg decomposition {} | #propagations {} | #UNSAT {}",
+                "cache_hit {:.3} | OR nodes {} | AND nodes {} | avg decomposition {} | #UNSAT {}",
                 cache_hit_percentages,
                 self.number_or_nodes,
                 self.number_and_nodes,
                 avg_decomposition,
-                self.number_propagation,
                 self.number_unsat)
         } else {
             write!(f, "")

@@ -283,7 +283,6 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
                         self.state.save_state();
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
-                            self.statistics.and_node();
                             self.statistics.decomposition(self.component_extractor.number_components(&self.state));
                             let number_components = self.component_extractor.number_components(&self.state);
                             let new_eps = eps.powf(1.0 / number_components as f64);
