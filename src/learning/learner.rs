@@ -24,7 +24,7 @@ use crate::ac::node::NodeType;
 use super::logger::Logger;
 use crate::*;
 use rayon::prelude::*;
-use crate::common::F128;
+use crate::common::rational;
 use super::*;
 use malachite::Rational;
 use malachite::num::arithmetic::traits::Pow;
@@ -104,14 +104,14 @@ impl <const S: bool> Learner<S> {
             let mut eps = args.epsilon;
             for distribution in distributions.iter() {
                 if !equal_init{
-                    let unsoftmaxed_vector = distribution.iter().map(|p| F128!(p.approx_log())).collect::<Vec<Rational>>();
+                    let unsoftmaxed_vector = distribution.iter().map(|p| rational(p.approx_log())).collect::<Vec<Rational>>();
                     unsoftmaxed_distributions.push(unsoftmaxed_vector);
                 }
                 else {
-                    let unsoftmaxed_vector = distribution.iter().map(|_| F128!(1.0/(distribution.len() as f64).log(std::f64::consts::E))).collect::<Vec<Rational>>();
+                    let unsoftmaxed_vector = distribution.iter().map(|_| rational(1.0/(distribution.len() as f64).log(std::f64::consts::E))).collect::<Vec<Rational>>();
                     unsoftmaxed_distributions.push(unsoftmaxed_vector);
                 }
-                grads.push(vec![F128!(0.0); distribution.len()]);
+                grads.push(vec![rational(0.0); distribution.len()]);
             }
 
             // Compiling the train and test queries into arithmetic circuits
@@ -195,7 +195,7 @@ impl <const S: bool> Learner<S> {
     pub fn zero_grads(&mut self) {
         for grad in self.gradients.iter_mut() {
             for el in grad.iter_mut() {
-                *el = F128!(0.0);
+                *el = rational(0.0);
             }
         }
     }
@@ -266,7 +266,7 @@ impl <const S: bool> Learner<S> {
                             // If it is a product node, we need to divide the path value by the value of the child
                             // This is equivalent to multiplying the values of the other children
                             // If the value of the child is 0, then the path value is simply 0
-                            let mut val = F128!(0.0);
+                            let mut val = rational(0.0);
                             if *self.train[query_id][child].value() != 0.0 {
                                 val = path_val.clone() * &value / self.train[query_id][child].value();
                             }
@@ -287,7 +287,7 @@ impl <const S: bool> Learner<S> {
                         }
                         // Compute the gradient contribution for the value used in the node 
                         // and all the other possible values of the distribution (derivative of the softmax)
-                        let mut sum_other_w = F128!(0.0);
+                        let mut sum_other_w = rational(0.0);
                         let child_w = self.get_probability(d, v);
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
                             let weight = self.get_probability(d, params);
@@ -303,7 +303,7 @@ impl <const S: bool> Learner<S> {
 
     /// Update the distributions with the computed gradients and the learning rate, following an SGD approach
     pub fn update_distributions(&mut self, learning_rate: f64) {
-        let lr = F128!(learning_rate);
+        let lr = rational(learning_rate);
         for (distribution, grad) in self.unsoftmaxed_distributions.iter_mut().zip(self.gradients.iter()) {
             for (value, grad) in distribution.iter_mut().zip(grad.iter()) {
                 *value -= grad * &lr;
@@ -314,7 +314,7 @@ impl <const S: bool> Learner<S> {
     /// Training loop for the train dacs, using the given training parameters
     //fn train(&mut self, params: &LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
     pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod) {
-        let mut prev_loss = F128!(1.0);
+        let mut prev_loss = rational(1.0);
         let mut count_no_improve = 0;
         self.log.start();
         let start = Instant::now();
@@ -330,8 +330,8 @@ impl <const S: bool> Learner<S> {
         }
 
         // Training loop
-        let mut train_loss = vec![F128!(0.0); self.train.len()];
-        let mut train_grad = vec![F128!(0.0); self.train.len()];
+        let mut train_loss = vec![rational(0.0); self.train.len()];
+        let mut train_grad = vec![rational(0.0); self.train.len()];
         for e in 0..params.nepochs() {
             // Update the learning rate
             let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
@@ -344,10 +344,10 @@ impl <const S: bool> Learner<S> {
                 if params.e_weighted() && self.epsilon != 0.0 {
                     //train_loss[i] *= 1.0 - self.train[i].epsilon()/self.epsilon;
                     let l = self.train.len() as f64;
-                    train_grad[i] *= F128!((1.0 - self.train[i].epsilon()/self.epsilon) * l / (l - 1.0));
+                    train_grad[i] *= rational((1.0 - self.train[i].epsilon()/self.epsilon) * l / (l - 1.0));
                 }
             }
-            let avg_loss = train_loss.iter().sum::<Rational>() / F128!(train_loss.len());
+            let avg_loss = train_loss.iter().sum::<Rational>() / rational(train_loss.len());
             self.compute_gradients(&train_grad);
             // Update the parameters
             self.update_distributions(learning_rate);
@@ -489,7 +489,7 @@ impl Dataset {
     /// Adds a query to the dataset
     pub fn add_query(&mut self, query: Dac, expected: f64) {
         self.queries.push(query);
-        self.expected.push(F128!(expected));
+        self.expected.push(rational(expected));
     }
 
     /// Returns the expected output for the required query

@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
 use malachite::Rational;
-use crate::common::F128;
+use crate::common::rational;
 
 struct EdgeConstraint {
     source: isize,
@@ -60,9 +60,9 @@ impl Parser for PgParser {
         while content_index < content.len() {
             let source = content[content_index];
             let target = content[content_index + 1];
-            let proba_up = F128!(content[content_index + 2].parse::<f64>().unwrap());
+            let proba_up = rational(content[content_index + 2].parse::<f64>().unwrap());
             content_index += 3;
-            distributions.push(vec![proba_up.clone(), F128!(1.0) - proba_up]);
+            distributions.push(vec![proba_up.clone(), rational(1.0) - proba_up]);
             let source_id = if !map_node_to_id.contains_key(source) {
                 map_node_to_id.insert(source, node_index);
                 node_index += 1;
@@ -121,7 +121,7 @@ impl Parser for PgParser {
             let target = content[content_index + 1];
             let proba_up = content[content_index + 2].parse::<f64>().unwrap();
             content_index += 3;
-            distributions.push(vec![F128!(proba_up), F128!(1.0 - proba_up)]);
+            distributions.push(vec![rational(proba_up), rational(1.0 - proba_up)]);
             let source_id = if !map_node_to_id.contains_key(source) {
                 map_node_to_id.insert(source, node_index);
                 node_index += 1;

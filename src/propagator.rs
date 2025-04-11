@@ -31,7 +31,7 @@
 
 use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 
-use crate::common::F128;
+use crate::common::rational;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::problem::{ClauseIndex, DistributionIndex, Problem, VariableIndex};
 use malachite::Rational;
@@ -64,7 +64,7 @@ impl Propagator {
             assignments: vec![],
             base_assignments: state.manage_usize(0),
             unconstrained_distributions: vec![],
-            propagation_prob: F128!(0.0),
+            propagation_prob: rational(0.0),
         }
     }
     
@@ -126,7 +126,7 @@ impl Propagator {
     fn propagate_unconstrained_distribution(&mut self, g: &Problem, distribution: DistributionIndex, state: &StateManager) {
         if g[distribution].is_constrained(state) {
             self.unconstrained_distributions.push(distribution);
-            self.propagation_prob *= F128!(g[distribution].remaining(state));
+            self.propagation_prob *= rational(g[distribution].remaining(state));
         }
     }
     
@@ -172,7 +172,7 @@ impl Propagator {
         debug_assert!(self.unconstrained_clauses.is_empty());
         state.set_usize(self.base_assignments, self.assignments.len());
         self.unconstrained_distributions.clear();
-        self.propagation_prob = F128!(1.0);
+        self.propagation_prob = rational(1.0);
         while let Some((variable, value, l, reason)) = self.propagation_stack.pop() {
             if let Some(v) = g[variable].value(state) {
                 if v == value {
@@ -557,15 +557,15 @@ mod test_clause_learning {
         propagator.init(7);
         let mut extractor = ComponentExtractor::new(&g, &mut state);
         g.add_distributions(&vec![
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
-            vec![F128!(0.5), F128!(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
+            vec![rational(0.5), rational(0.5)],
         ], &mut state);
 
         g.add_clause(vec![

@@ -2,7 +2,7 @@ use malachite::Rational;
 use malachite::num::arithmetic::traits::{Abs, Pow};
 
 use crate::{Loss, Optimizer};
-use crate::common::F128;
+use crate::common::rational;
 
 pub mod learner;
 mod logger;
@@ -40,7 +40,7 @@ impl LearnParameters {
     
     pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, 
                early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool) -> Self {
-        Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold: F128!(early_stop_threshold), early_stop_delta, 
+        Self {lr, nepochs, compilation_timeout, learn_timeout, loss, optimizer, lr_drop, epoch_drop, early_stop_threshold: rational(early_stop_threshold), early_stop_delta, 
               patience, recompile, e_weighted}
     }
 
@@ -134,14 +134,14 @@ impl LossFunctions for Loss {
 
     fn gradient(&self, predicted: &Rational, expected: &Rational) -> Rational {
         match self {
-            Loss::MSE => F128!(2.0) * (predicted - expected),
+            Loss::MSE => rational(2.0) * (predicted - expected),
             Loss::MAE => {
                 if predicted == expected {
-                    F128!(0.0)
+                    rational(0.0)
                 } else if predicted > expected {
-                    F128!(1.0)
+                    rational(1.0)
                 } else {
-                    F128!(-1.0)
+                    rational(-1.0)
                 }
             },
         }

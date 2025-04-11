@@ -4,19 +4,18 @@ use malachite::Rational;
 use malachite::num::conversion::traits::RoundingFrom;
 use malachite::rounding_modes::RoundingMode::Nearest;
 
-macro_rules! F128 {
-    ($v:expr) => {
-        Rational::try_from($v).unwrap()
-    };
-}
-pub(crate) use F128;
-
-macro_rules! rational_to_f64 {
-    ($v:expr) => {
-        f64::rounding_from($v, Nearest).0
+pub fn rational<N>(value: N) -> Rational 
+    where Rational: TryFrom<N>
+{
+    match Rational::try_from(value) {
+        Ok(v) => v,
+        Err(_) => panic!("Can not create rational"),
     }
 }
-pub(crate) use rational_to_f64;
+
+pub fn rational_to_f64(r: &Rational) -> f64 {
+    f64::rounding_from(r, Nearest).0
+}
 
 pub const FLOAT_CMP_THRESHOLD: f64 = 0.00000;
 
@@ -132,7 +131,7 @@ impl Solution {
     }
 
     pub fn has_converged(&self, epsilon: f64) -> bool {
-        let conv_factor = F128!((1.0 + epsilon + 0.0000001).powf(2.0));
+        let conv_factor = rational((1.0 + epsilon + 0.0000001).powf(2.0));
         self.upper_bound <= self.lower_bound.clone()*conv_factor
     }
 
@@ -141,11 +140,11 @@ impl Solution {
     }
 
     pub fn to_f64(&self) -> f64 {
-        rational_to_f64!(self.lower_bound.clone() * self.upper_bound.clone()).sqrt()
+        rational_to_f64(&(self.lower_bound.clone() * self.upper_bound.clone())).sqrt()
     }
 
     pub fn bounds(&self) -> (f64, f64) {
-        (rational_to_f64!(&self.lower_bound), rational_to_f64!(&self.upper_bound))
+        (rational_to_f64(&self.lower_bound), rational_to_f64(&self.upper_bound))
     }
 
     pub fn epsilon(&self) -> f64 {

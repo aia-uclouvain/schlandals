@@ -153,7 +153,7 @@ impl Dac {
     /// sum node
     pub fn circuit_probability(&self) -> Rational {
         if self.is_empty() {
-            F128!(0.0)
+            rational(0.0)
         } else {
             self.nodes.last().unwrap().value().clone()
         }
@@ -163,9 +163,9 @@ impl Dac {
         let p = if !self.is_empty() {
             self.nodes.last().unwrap().value().clone()
         } else {
-            F128!(0.0)
+            rational(0.0)
         };
-        Solution::new(F128!(p.clone()), F128!(p), self.compile_time)
+        Solution::new(rational(p.clone()), rational(p), self.compile_time)
     }
 
     /// Updates the values of the distributions to the given values
@@ -184,41 +184,41 @@ impl Dac {
             return;
         }
         for node in (0..self.nodes.len()-1).map(NodeIndex) {
-            self[node].set_path_value(F128!(0.0));
+            self[node].set_path_value(rational(0.0));
         }
-        self.nodes.last_mut().unwrap().set_path_value(F128!(1.0));
+        self.nodes.last_mut().unwrap().set_path_value(rational(1.0));
     }
 
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
     pub fn evaluate(&mut self) -> Rational {
         if self.is_empty() {
-            return F128!(0.0);
+            return rational(0.0);
         }
         for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
             let start = self.nodes[node.0].input_start();
             let end = start + self.nodes[node.0].number_inputs();
             if self[node].is_product() {
                 let value = if start != end {
-                    let mut v = F128!(1.0);
+                    let mut v = rational(1.0);
                     for idx in start..end {
                         let child = self.inputs[idx];
                         v *= self[child].value();
                     }
                     v
                 } else {
-                    F128!(0.0)
+                    rational(0.0)
                 };
                 self[node].set_value(value);
             } else if self[node].is_sum() {
                 let value = if start != end {
-                    let mut v = F128!(0.0);
+                    let mut v = rational(0.0);
                     for idx in start..end {
                         let child = self.inputs[idx];
                         v *= self[child].value();
                     }
                     v
                 } else {
-                    F128!(1.0)
+                    rational(1.0)
                 };
                 self[node].set_value(value);
             }
@@ -388,7 +388,7 @@ impl Dac {
                 let values = split.iter().skip(1).map(|i| i.parse::<usize>().unwrap()).collect::<Vec<usize>>();
                 let d = values[0];
                 let v = values[1];
-                let mut node: Node = Node::distribution(d, v, F128!(0.5));
+                let mut node: Node = Node::distribution(d, v, rational(0.5));
                 node.set_input_start(values[4]);
                 node.set_number_inputs(values[5]);
                 dac.distribution_mapping.insert((d, v), NodeIndex(dac.nodes.len()-1));

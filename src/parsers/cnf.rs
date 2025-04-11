@@ -33,7 +33,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use malachite::Rational;
-use crate::common::F128;
+use crate::common::rational;
 
 pub struct CnfParser {
     input: PathBuf,
@@ -125,7 +125,7 @@ impl Parser for CnfParser {
                 Err(e) => panic!("Problem while parsing the distributions: {}", e),
                 Ok(line) => {
                     if line.starts_with("c p distribution") {
-                        let weights: Vec<Rational> = line.split_whitespace().skip(3).map(|token| F128!(token.parse::<f64>().unwrap())).collect();
+                        let weights: Vec<Rational> = line.split_whitespace().skip(3).map(|token| rational(token.parse::<f64>().unwrap())).collect();
                         distributions.push(weights);
                     }
                 }

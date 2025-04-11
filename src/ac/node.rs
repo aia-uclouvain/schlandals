@@ -43,22 +43,22 @@ impl Node {
     /// Returns a new product node
     pub fn product() -> Self {
         Node {
-            value: F128!(1.0),
+            value: rational(1.0),
             nodetype: NodeType::Product,
             input_start: 0,
             number_inputs: 0,
-            path_value: F128!(1.0),
+            path_value: rational(1.0),
         }
     }
 
     /// Returns a new sum node
     pub fn sum() -> Self {
         Node {
-            value: F128!(0.0),
+            value: rational(0.0),
             nodetype: NodeType::Sum,
             input_start: 0,
             number_inputs: 0,
-            path_value: F128!(1.0),
+            path_value: rational(1.0),
         }
     }
 
@@ -69,7 +69,7 @@ impl Node {
             nodetype: NodeType::Distribution {d: distribution, v: value},
             input_start: 0,
             number_inputs: 0,
-            path_value: F128!(1.0),
+            path_value: rational(1.0),
         }
     }
 

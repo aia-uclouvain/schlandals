@@ -4,7 +4,7 @@ use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
 use malachite::Rational;
-use crate::common::F128;
+use crate::common::rational;
 
 pub struct Preprocessor<'b>
 {
@@ -32,7 +32,7 @@ where
     }
     
     pub fn preprocess(&mut self) -> Option<Rational> {
-        let mut p = F128!(1.0);
+        let mut p = rational(1.0);
 
         for variable in self.problem.variables_iter() {
             if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 1.0 {

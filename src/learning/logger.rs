@@ -3,7 +3,7 @@ use chrono;
 use malachite::Rational;
 use std::fs::File;
 use std::io::Write;
-use crate::common::F128;
+use crate::common::rational;
 
 /// Implements a bunch of statistics that are collected during the search
 pub struct Logger<const B: bool> {
@@ -63,7 +63,7 @@ impl<const B: bool> Logger<B> {
         if B {
             let mut output = String::new();
             let epoch_duration = (chrono::Local::now() - self.global_timestamp).num_seconds();
-            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<Rational>() / F128!(loss.len())));
+            output.push_str(&format!("{:.6},{},{},{:.8},", lr, epsilon, epoch_duration, loss.iter().sum::<Rational>() / rational(loss.len())));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }
@@ -77,7 +77,7 @@ impl<const B: bool> Logger<B> {
     pub fn log_test(&mut self, loss:&[Rational], epsilon:f64, predictions:&[Rational]) {
         if B {
             let mut output = String::new();
-            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<Rational>() / F128!(loss.len())));
+            output.push_str(&format!("{},{:.8},", epsilon, loss.iter().sum::<Rational>() / rational(loss.len())));
             for l in loss.iter() {
                 output.push_str(&format!("{:.6},", l));
             }

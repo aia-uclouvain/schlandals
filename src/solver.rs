@@ -92,7 +92,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn search(&mut self, is_lds: bool) -> Solution {
-        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
+        let max = self.problem.distributions_iter().map(|d| rational(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
         if let Some(sol) = self.preprocess(&max) {
             return sol;
@@ -146,14 +146,14 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         let preproc = preprocessor.preprocess();
         if preproc.is_none() {
             return Some(Solution::new(
-                F128!(0.0),
-                F128!(0.0),
+                rational(0.0),
+                rational(0.0),
                 self.parameters.start.elapsed().as_secs(),
             ));
         }
         self.preproc_in = Some(preproc.unwrap());
         let max_after_preproc= self.problem.distributions_iter().map(|d| {
-            F128!(self.problem[d].remaining(&self.state))
+            rational(self.problem[d].remaining(&self.state))
         }).product::<Rational>();
         self.preproc_out = Some(max - max_after_preproc);
         None
@@ -162,7 +162,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
     fn restructure_after_preprocess(&mut self) {
         self.problem.clear_after_preprocess(&mut self.state);
         let distribution_max = self.problem.distributions_iter().map(|d| {
-            F128!(self.problem[d].remaining(&self.state))
+            rational(self.problem[d].remaining(&self.state))
         }).collect::<Vec<Rational>>();
         self.state.restore_state();
         for (id, distribution) in self.problem.distributions_iter().enumerate() {
@@ -189,7 +189,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
-        let ub: Rational = F128!(1.0) - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
+        let ub: Rational = rational(1.0) - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
         //let ub: Rational = max - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
         Solution::new(lb, ub, self.parameters.start.elapsed().as_secs())
     }
@@ -206,7 +206,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             if C {
                 self.cache_keys.push(cache_key.clone());
             }
-            CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index)
+            CacheEntry::new((rational(0.0), rational(0.0)), 0, None, FxHashMap::default(), cache_key_index)
         });
         if cache_entry.distribution.is_none() {
             self.statistics.or_node();
@@ -214,14 +214,14 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         }
         let mut complete = cache_entry.discrepancy < discrepancy;
         if cache_entry.discrepancy < discrepancy && !cache_entry.is_complete() {
-            let mut new_p_in = F128!(0.0);
-            let mut new_p_out = F128!(0.0);
+            let mut new_p_in = rational(0.0);
+            let mut new_p_out = rational(0.0);
             let distribution = cache_entry.distribution.unwrap();
             let unsat_factor = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution).map(|d| {
-                F128!(self.problem[d].remaining(&self.state))
+                rational(self.problem[d].remaining(&self.state))
             }).product::<Rational>();
             let max_probability = self.component_extractor.component_distribution_iter(component).map(|d| {
-                F128!(self.problem[d].remaining(&self.state))
+                rational(self.problem[d].remaining(&self.state))
             }).product::<Rational>();
             let mut child_id = 0;
             for variable in self.problem[distribution].iter_variables() {
@@ -235,7 +235,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                 if self.bound_approx {
                     let ub = max_probability.clone() - new_p_out.clone();
                     let lb = new_p_in.clone();
-                    if ub <= lb*F128!((1.0 + eps)*(1.0 + eps)) {
+                    if ub <= lb*rational((1.0 + eps)*(1.0 + eps)) {
                         complete = false;
                         break;
                     }
@@ -252,17 +252,17 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                         let removed = unsat_factor.clone() - self.component_extractor
                             .component_distribution_iter(component)
                             .filter(|d| *d != distribution)
-                            .map(|d| F128!(self.problem[d].remaining(&self.state)))
+                            .map(|d| rational(self.problem[d].remaining(&self.state)))
                             .product::<Rational>();
                         new_p_out += removed * v_weight;
 
                         // Decomposing into independent components
-                        let mut prod_p_in = F128!(1.0);
-                        let mut prod_p_out = F128!(1.0);
+                        let mut prod_p_in = rational(1.0);
+                        let mut prod_p_out = rational(1.0);
                         let prod_maximum_probability = self.component_extractor
                             .component_distribution_iter(component)
                             .filter(|d| self.problem[*d].is_constrained(&self.state))
-                            .map(|d| F128!(self.problem[d].remaining(&self.state)))
+                            .map(|d| rational(self.problem[d].remaining(&self.state)))
                             .product::<Rational>();
                         let (forced_distribution_var, unconstrained_distribution_var) = self.forced_from_propagation();
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var);
@@ -319,7 +319,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
 
     pub fn compile(&mut self, is_lds: bool) -> Dac {
         let start = Instant::now();
-        let max = self.problem.distributions_iter().map(|d| F128!(self.problem[d].remaining(&self.state))).product::<Rational>();
+        let max = self.problem.distributions_iter().map(|d| rational(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
         let preproc_result = self.preprocess(&max);
         // Create the DAC and add elements from the preprocessing

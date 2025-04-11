@@ -220,7 +220,7 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
-    let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| F128!(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
+    let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| rational(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
     let problem = create_problem(&distributions_rational, clauses, &mut state);
     let component_extractor = ComponentExtractor::new(&problem, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
