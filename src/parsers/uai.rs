@@ -7,8 +7,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
-use malachite::Rational;
-use malachite::num::arithmetic::traits::Abs;
+use malachite::rational::Rational;
+use malachite::base::num::arithmetic::traits::Abs;
 use crate::common::rational;
 
 struct CPTConstraint {

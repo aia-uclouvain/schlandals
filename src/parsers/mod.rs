@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::io::{BufRead, BufReader};
-use malachite::Rational;
+use malachite::rational::Rational;
 
 use cnf::*;
 use uai::*;

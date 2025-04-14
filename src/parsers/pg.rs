@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use rustc_hash::FxHashMap;
-use malachite::Rational;
+use malachite::rational::Rational;
 use crate::common::rational;
 
 struct EdgeConstraint {

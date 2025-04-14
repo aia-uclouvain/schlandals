@@ -32,7 +32,7 @@ use search_trail::StateManager;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use malachite::Rational;
+use malachite::rational::Rational;
 use crate::common::rational;
 
 pub struct CnfParser {

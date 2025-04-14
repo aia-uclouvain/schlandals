@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use chrono;
-use malachite::Rational;
+use malachite::rational::Rational;
 use std::fs::File;
 use std::io::Write;
 use crate::common::rational;

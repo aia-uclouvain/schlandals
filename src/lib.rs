@@ -14,7 +14,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Write, BufRead, BufReader};
-use malachite::Rational;
+use malachite::rational::Rational;
 use clap::{Parser, Subcommand};
 
 use learning::{learner::Learner, LearnParameters};
@@ -76,7 +76,7 @@ impl Default for Args {
             statistics: false,
             memory: u64::MAX,
             epsilon: 0.0,
-            approx: ApproximateMethod::LDS,
+            approx: ApproximateMethod::Bounds,
             subcommand: None,
         }
     }

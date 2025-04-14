@@ -34,7 +34,7 @@ use search_trail::{StateManager, UsizeManager, ReversibleUsize};
 use crate::common::rational;
 use crate::core::components::{ComponentIndex, ComponentExtractor};
 use crate::core::problem::{ClauseIndex, DistributionIndex, Problem, VariableIndex};
-use malachite::Rational;
+use malachite::rational::Rational;
 
 use super::core::literal::Literal;
 use super::core::variable::Reason;

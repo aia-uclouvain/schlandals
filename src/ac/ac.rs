@@ -23,7 +23,7 @@ use crate::core::problem::{Problem, DistributionIndex, VariableIndex};
 use crate::common::Solution;
 
 use super::node::*;
-use malachite::Rational;
+use malachite::rational::Rational;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeIndex(pub usize);
@@ -234,11 +234,11 @@ impl Dac {
 
 impl Dac
 {
-    pub fn iter(&self) -> impl Iterator<Item = NodeIndex> {
+    pub fn iter(&self) -> impl Iterator<Item = NodeIndex> + use<> {
         (0..self.nodes.len()).map(NodeIndex)
     }
 
-    pub fn iter_rev(&self) -> impl Iterator<Item = NodeIndex> {
+    pub fn iter_rev(&self) -> impl Iterator<Item = NodeIndex> + use<> {
         (0..self.nodes.len()).rev().map(NodeIndex)
     }
 }

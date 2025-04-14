@@ -26,8 +26,8 @@ use crate::*;
 use rayon::prelude::*;
 use crate::common::rational;
 use super::*;
-use malachite::Rational;
-use malachite::num::arithmetic::traits::Pow;
+use malachite::rational::Rational;
+use malachite::base::num::arithmetic::traits::Pow;
 use std::ffi::OsString;
 use crate::parse_csv;
 

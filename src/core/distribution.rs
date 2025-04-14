@@ -7,9 +7,9 @@
 use super::{problem::{ClauseIndex, VariableIndex}, sparse_set::SparseSet};
 use search_trail::{F64Manager, ReversibleF64, ReversibleUsize, StateManager, UsizeManager};
 use rustc_hash::FxHashMap;
-use malachite::Rational;
-use malachite::num::conversion::traits::RoundingFrom;
-use malachite::rounding_modes::RoundingMode::Nearest;
+use malachite::rational::Rational;
+use malachite::base::num::conversion::traits::RoundingFrom;
+use malachite::base::rounding_modes::RoundingMode::Nearest;
 
 /// A distribution of the input problem
 #[derive(Debug)]
@@ -112,7 +112,7 @@ impl Distribution {
     // --- ITERATOR --- //
 
     /// Returns an iterator on the variables of the distribution
-    pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> {
+    pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> + use<> {
         (self.first.0..(self.first.0 + self.domain_size)).map(VariableIndex)
     }
 

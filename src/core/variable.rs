@@ -4,7 +4,7 @@
 use search_trail::*;
 use crate::core::problem::{ClauseIndex, DistributionIndex};
 use rustc_hash::FxHashMap;
-use malachite::Rational;
+use malachite::rational::Rational;
 use super::sparse_set::SparseSet;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]

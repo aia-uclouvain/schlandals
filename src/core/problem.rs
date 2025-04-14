@@ -6,7 +6,7 @@ use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use super::watched_vector::WatchedVector;
-use malachite::Rational;
+use malachite::rational::Rational;
 
 use rustc_hash::FxHashMap;
 
@@ -335,16 +335,16 @@ impl Problem {
     // --- ITERATORS --- //
     
     /// Returns an iterator on all (constrained and unconstrained) the clauses of the problem
-    pub fn clauses_iter(&self) -> impl Iterator<Item = ClauseIndex> {
+    pub fn clauses_iter(&self) -> impl Iterator<Item = ClauseIndex> + use<> {
         (0..self.clauses.len()).map(ClauseIndex)
     }
 
     /// Returns an iterator on the distributions of the problem
-    pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionIndex> {
+    pub fn distributions_iter(&self) -> impl Iterator<Item = DistributionIndex> + use<> {
         (0..self.distributions.len()).map(DistributionIndex)
     }
     
-    pub fn variables_iter(&self) -> impl Iterator<Item = VariableIndex> {
+    pub fn variables_iter(&self) -> impl Iterator<Item = VariableIndex> + use<> {
         (0..self.variables.len()).map(VariableIndex)
     }
 }

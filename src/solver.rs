@@ -10,7 +10,7 @@ use crate::ac::ac::{NodeIndex, Dac};
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
-use malachite::Rational;
+use malachite::rational::Rational;
 use std::time::Instant;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);

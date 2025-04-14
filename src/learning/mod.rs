@@ -1,5 +1,5 @@
-use malachite::Rational;
-use malachite::num::arithmetic::traits::{Abs, Pow};
+use malachite::rational::Rational;
+use malachite::base::num::arithmetic::traits::{Abs, Pow};
 
 use crate::{Loss, Optimizer};
 use crate::common::rational;

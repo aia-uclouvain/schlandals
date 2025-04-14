@@ -1,6 +1,6 @@
 //! This module provide an implementation of a node in an arithmetic circuits.
 
-use malachite::Rational;
+use malachite::rational::Rational;
 use crate::common::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

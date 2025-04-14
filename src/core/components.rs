@@ -15,7 +15,7 @@
 use super::problem::{ClauseIndex, VariableIndex, Problem, DistributionIndex};
 use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
-use malachite::Rational;
+use malachite::rational::Rational;
 use crate::common::rational;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`

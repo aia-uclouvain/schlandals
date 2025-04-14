@@ -1,8 +1,8 @@
 use clap::ValueEnum;
 use std::hash::Hash;
-use malachite::Rational;
-use malachite::num::conversion::traits::RoundingFrom;
-use malachite::rounding_modes::RoundingMode::Nearest;
+use malachite::rational::Rational;
+use malachite::base::num::conversion::traits::RoundingFrom;
+use malachite::base::rounding_modes::RoundingMode::Nearest;
 
 pub fn rational<N>(value: N) -> Rational 
     where Rational: TryFrom<N>

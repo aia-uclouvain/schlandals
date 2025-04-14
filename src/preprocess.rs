@@ -3,7 +3,7 @@ use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
-use malachite::Rational;
+use malachite::rational::Rational;
 use crate::common::rational;
 
 pub struct Preprocessor<'b>
