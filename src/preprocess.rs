@@ -55,7 +55,7 @@ where
             self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
         }
         
-        match self.propagator.propagate(self.problem, self.state, ComponentIndex(0), self.component_extractor, 0, true) {
+        match self.propagator.propagate(self.problem, self.state, ComponentIndex(0), self.component_extractor, 0) {
             Err(_) => return None,
             Ok(_) => {
                 p *= self.propagator.get_propagation_prob();

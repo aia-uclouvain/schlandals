@@ -5,5 +5,4 @@ pub mod literal;
 pub mod variable;
 mod clause;
 mod distribution;
-pub mod watched_vector;
 pub mod flags;

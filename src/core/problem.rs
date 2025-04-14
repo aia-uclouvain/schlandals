@@ -1,11 +1,8 @@
-use std::cmp::Ordering;
-
 use search_trail::*;
 use super::literal::*;
 use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
-use super::watched_vector::WatchedVector;
 use malachite::rational::Rational;
 
 use rustc_hash::FxHashMap;
@@ -21,10 +18,6 @@ pub struct ClauseIndex(pub usize);
 /// Abstraction used as a typesafe way of retrieving a `Distribution` in the `Problem` structure
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct DistributionIndex(pub usize);
-
-/// Abstraction used as a typesafe way of retrieving a watched vector in the `Problem` structure
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct WatchedVectorIndex(pub usize);
 
 /// Data structure representing the Problem.
 #[derive(Debug)]
@@ -97,48 +90,24 @@ impl Problem {
     
     pub fn add_clause(
         &mut self,
-        mut literals: Vec<Literal>,
-        head: Option<Literal>,
+        literals: Vec<Literal>,
         state: &mut StateManager,
         is_learned: bool,
     ) -> ClauseIndex {
         let cid = ClauseIndex(self.clauses.len());
-        // We sort the literals by probabilistic/non-probabilistic
-        let number_probabilistic = literals.iter().copied().filter(|l| self[l.to_variable()].is_probabilitic()).count();
-        let number_deterministic = literals.len() - number_probabilistic;
-        literals.sort_by(|a, b| {
-            let a_var = a.to_variable();
-            let b_var = b.to_variable();
-            if self[a_var].is_probabilitic() && !self[b_var].is_probabilitic() {
-                Ordering::Greater
-            } else if !self[a_var].is_probabilitic() && self[b_var].is_probabilitic() {
-                Ordering::Less
-            } else if self[a_var].decision_level() < self[b_var].decision_level() {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        });
-        
-        let literal_vector = WatchedVector::new(literals, number_deterministic, state);
-
-        if is_learned {
-            for i in 0..number_deterministic.min(2) {
-                let variable = literal_vector[i].to_variable();
-                self.watchers[variable.0].push(cid);
-            }
-            
-            for i in 0..number_probabilistic.min(2) {
-                let variable = literal_vector[number_deterministic + i].to_variable();
-                self.watchers[variable.0].push(cid);
-            }
+        for variable in literals.iter().take(2).map(|l| l.to_variable()) {
+            self.watchers[variable.0].push(cid);
         }
-        
-        let mut clause = Clause::new(cid.0, literal_vector, head, is_learned, state);
+
+        let number_deterministic_in_body = literals.iter().copied().filter(|l| !l.is_positive() && !self[l.to_variable()].is_probabilitic()).count();
+        let mut clause = Clause::new(cid.0, literals, number_deterministic_in_body, is_learned, state);
         for literal in clause.iter().collect::<Vec<Literal>>() {
             let variable = literal.to_variable();
             if literal.is_positive() {
                 self[variable].add_clause_positive_occurence(cid, state);
+                if self[variable].is_probabilitic() {
+                    clause.set_head_f_reachable(state);
+                }
             } else {
                 self[variable].add_clause_negative_occurence(cid, state);
             }
@@ -178,7 +147,7 @@ impl Problem {
         let mut clauses_map: FxHashMap<ClauseIndex, ClauseIndex> = FxHashMap::default();
         let mut new_clause_index = 0;
         for (i, clause) in self.clauses_iter().enumerate() {
-            if self[clause].is_constrained(state) {
+            if self[clause].is_active(state) {
                 clauses_map.insert(clause, ClauseIndex(new_clause_index));
                 self.clauses.swap(i, new_clause_index);
                 new_clause_index += 1;
@@ -214,6 +183,7 @@ impl Problem {
         let mut variables_map: FxHashMap<VariableIndex, VariableIndex> = FxHashMap::default();
         let mut new_variable_index = 0;
         for (i, variable) in self.variables_iter().enumerate() {
+            self.watchers[i].clear();
             let number_remaining_clauses = self[variable].clear_clauses(&clauses_map, state);
             let is_unconstrained = if self[variable].is_probabilitic() {
                 let distribution = self[variable].distribution().unwrap();
@@ -253,7 +223,7 @@ impl Problem {
 
         for clause in self.clauses_iter() {
             self[clause].clear_literals(&variables_map);
-            for v in self[clause].get_watchers().into_iter().flatten() {
+            for v in self[clause].get_watchers() {
                 self.watchers[v.0].push(clause);
             }
         }
@@ -302,8 +272,8 @@ impl Problem {
     // --- QUERIES --- //
     
     /// Set a clause as unconstrained
-    pub fn set_clause_unconstrained(&self, clause: ClauseIndex, state: &mut StateManager) {
-        self[clause].set_unconstrained(state);
+    pub fn deactivate_clause(&self, clause: ClauseIndex, state: &mut StateManager) {
+        self[clause].deactivate(state);
     }
     
     // --- GETTERS --- //

@@ -141,10 +141,13 @@ impl ComponentExtractor {
         comp_size: &usize,
         state: &StateManager,
     ) -> bool {
+        if g[clause].is_learned() {
+            return false;
+        }
         // if the clause has already been visited, then its position in the component must
         // be between [start..(start + size)].
         let clause_pos = self.clause_positions[clause.0];
-        g[clause].is_constrained(state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
+        g[clause].is_active(state) && !(comp_start <= clause_pos && clause_pos < (comp_start + *comp_size))
     }
     
     /// Returns true if the distribution has not yet been visited during the component exploration
@@ -170,10 +173,8 @@ impl ComponentExtractor {
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
             if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
-                if !g[clause].is_learned() {
-                    *hash ^= g[clause].hash();
-                    clauses.push(clause);
-                }
+                *hash ^= g[clause].hash();
+                clauses.push(clause);
                 // The clause is swap with the clause at position comp_sart + comp_size
                 let current_pos = self.clause_positions[clause.0];
                 let new_pos = comp_start + *comp_size;
@@ -189,17 +190,11 @@ impl ComponentExtractor {
                 
                 // Adds the variable to the hash if they have not yet been seen
                 for variable in g[clause].iter_variables() {
-                    if !self.seen_var[variable.0] && !g[variable].is_fixed(state) {
+                    if !g[variable].is_fixed(state) && !self.seen_var[variable.0] {
                         self.seen_var[variable.0] = true;
                         *hash ^= g[variable].hash();
                         variables.push(variable);
-                    }
-                }
-
-                // Explores the clauses that share a distribution with the current clause
-                if g[clause].has_probabilistic(state) {
-                    for variable in g[clause].iter_probabilistic_variables() {
-                        if !g[variable].is_fixed(state) {
+                        if g[variable].is_probabilitic() {
                             let distribution = g[variable].distribution().unwrap();
                             if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, comp_number_distribution) {
                                 let current_d_pos = self.distribution_positions[distribution.0];
@@ -226,14 +221,11 @@ impl ComponentExtractor {
                         }
                     }
                 }
-                
-                // Recursively explore the nodes in the connected components
-                for parent in g[clause].iter_parents(state) {
-                    self.exploration_stack.push(parent);
+                for c in g[clause].iter_parents(state) {
+                    self.exploration_stack.push(c);
                 }
-                
-                for child in g[clause].iter_children(state) {
-                    self.exploration_stack.push(child);
+                for c in g[clause].iter_children(state) {
+                    self.exploration_stack.push(c);
                 }
             }
         }
@@ -265,7 +257,7 @@ impl ComponentExtractor {
         // a component from it
         while start < end {
             let clause = self.clauses[start];
-            if g[clause].is_constrained(state) {
+            if g[clause].is_active(state) {
                 // If the clause is active, then we start a new component from it
                 let mut size = 0;
                 let mut hash: u64 = 0;
@@ -293,7 +285,7 @@ impl ComponentExtractor {
                     for c in clauses.iter().copied() {
                         repr.push_str(&format!("c{}", c.0));
                     }
-                    for v in clauses.iter().copied().filter(|c| !g[*c].is_binary(state)) {
+                    for v in clauses.iter().copied() {
                         repr.push_str(&format!("v{}", v.0));
                     }
                     self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, repr});
@@ -328,12 +320,6 @@ impl ComponentExtractor {
         self.clauses[start..end].iter().copied()
     }
 
-    pub fn find_constrained_distribution(&self, component: ComponentIndex, problem: &Problem, state: &StateManager) -> bool {
-        let start = self.components[component.0].start;
-        let end = start + self.components[component.0].size;
-        self.clauses[start..end].iter().copied().any(|c| problem[c].is_constrained(state) && !problem[c].is_learned() && problem[c].has_probabilistic(state))
-    }
-    
     /// Returns the number of components
     pub fn number_components(&self, state: &StateManager) -> usize {
         state.get_usize(self.limit) - state.get_usize(self.base)

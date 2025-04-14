@@ -66,7 +66,6 @@ pub fn create_problem(distributions: &[Vec<Rational>], clauses: &[Vec<isize>], s
     let variable_mapping = problem.add_distributions(distributions, state);
     for clause in clauses.iter() {
         let mut literals: Vec<Literal> = vec![];
-        let mut head: Option<Literal> = None;
         for lit in clause.iter().copied() {
             if lit == 0 {
                 panic!("Variables in clauses can not be 0");
@@ -78,15 +77,9 @@ pub fn create_problem(distributions: &[Vec<Rational>], clauses: &[Vec<isize>], s
             let var = VariableIndex(variable - 1);
             let trail_value_index = problem[var].get_value_index();
             let literal = Literal::from_variable(var, lit > 0, trail_value_index);
-            if lit > 0 {
-                if head.is_some() {
-                    panic!("The clauses {} has more than one positive literal", clause.iter().map(|i| format!("{}", i)).collect::<Vec<String>>().join(" "));
-                }
-                head = Some(literal);
-            }
             literals.push(literal);
         }
-        problem.add_clause(literals, head, state, false);
+        problem.add_clause(literals, state, false);
     }
     problem
 }

@@ -182,6 +182,14 @@ impl<const S: bool, const C: bool> Solver<S, C> {
 
         // Init the various structures
         self.branching_heuristic.init(&self.problem, &self.state);
+
+        for clause in self.problem.clauses_iter() {
+            if self.problem[clause].iter().filter(|l| l.is_positive()).count() == 0 {
+                self.problem[clause].set_head_f_reachable(&mut self.state);
+            }
+            let number_deterministic_in_body = self.problem[clause].iter().filter(|l| !l.is_positive() && !self.problem[l.to_variable()].is_probabilitic()).count();
+            self.problem[clause].refresh_number_deterministic_in_body(number_deterministic_in_body, &mut self.state);
+        }
     }
 
     pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, eps: f64) -> Solution {

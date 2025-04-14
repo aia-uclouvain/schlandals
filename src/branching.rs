@@ -7,8 +7,7 @@ pub trait BranchingDecision {
     fn init(&mut self, g: &Problem, state: &StateManager);
 }
 
-/// This heuristic selects the clause with the minimum in degree. In case of tie, it selects the clause
-/// for which the less number of parents have been removed.
+/// This heuristic selects the clause with the minimum in degree.
 /// Then, it selects the first unfixed distribution from the clause.
 #[derive(Default)]
 pub struct MinInDegree {}
@@ -23,16 +22,13 @@ impl BranchingDecision for MinInDegree {
     ) -> Option<DistributionIndex> {
         let mut selected : Option<DistributionIndex> = None;
         let mut best_score = usize::MAX;
-        let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
-            if g[clause].is_constrained(state) && !g[clause].is_learned() && g[clause].has_probabilistic(state) {
+            if g[clause].is_active(state) && !g[clause].is_learned() {
                 let score = g[clause].number_constrained_parents(state);
-                let tie = g[clause].in_degree();
-                if score < best_score || (score == best_score && tie < best_tie) {
+                if score < best_score {
                     if let Some(d) = g[clause].get_constrained_distribution(state, g) {
                         selected = Some(d);
                         best_score = score;
-                        best_tie = tie;
                     }
                 }
             }
@@ -57,16 +53,13 @@ impl BranchingDecision for MinOutDegree {
     ) -> Option<DistributionIndex> {
         let mut selected : Option<DistributionIndex> = None;
         let mut best_score = usize::MAX;
-        let mut best_tie = usize::MAX;
         for clause in component_extractor.component_iter(component) {
-            if g[clause].is_constrained(state) && !g[clause].is_learned() && g[clause].has_probabilistic(state) {
+            if g[clause].is_active(state) && !g[clause].is_learned() {
                 let score = g[clause].number_constrained_children(state);
-                let tie = g[clause].out_degree();
-                if score < best_score || (score == best_score && tie < best_tie) {
+                if score < best_score {
                     if let Some(d) = g[clause].get_constrained_distribution(state, g) {
                         selected = Some(d);
                         best_score = score;
-                        best_tie = tie;
                     }
                 }
             }

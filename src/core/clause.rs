@@ -8,10 +8,9 @@
 //! In this way the propagator can, at any time, query a boud on the number of unfixed deterministic/probabilistic
 //! variables in the clause.
 
-use search_trail::StateManager;
+use search_trail::{BoolManager, ReversibleBool, UsizeManager, ReversibleUsize, StateManager};
 use super::problem::ClauseIndex;
 use super::sparse_set::SparseSet;
-use super::watched_vector::WatchedVector;
 use super::literal::Literal;
 use rustc_hash::FxHashMap;
 
@@ -21,10 +20,8 @@ use super::problem::{DistributionIndex, VariableIndex, Problem};
 pub struct Clause {
     /// id of the clause in the input problem
     id: usize,
-    /// If the clause is not learned, this is the literal which is the head of the clause. Otherwise, None
-    head: Option<Literal>,
     /// The literals of the clause. Implemented using a vector with watched literals
-    literals: WatchedVector,
+    literals: Vec<Literal>,
     /// Vector that stores the children of the clause in the implication problem
     pub children: SparseSet<ClauseIndex>,
     /// Vector that stores the parents of the clause in the implication problem
@@ -33,23 +30,26 @@ pub struct Clause {
     hash: u64,
     /// Has the clause been learned during the search
     is_learned: bool,
-    in_degree: usize,
-    out_degree: usize,
+    /// Is the clause active (i.e., not yet satisfied)
+    active: ReversibleBool,
+    /// Number of deterministic variables in the body of the clause
+    number_deterministic_in_body: ReversibleUsize,
+    is_head_f_reachable: ReversibleBool,
 }
 
 impl Clause {
 
-    pub fn new(id: usize, literals: WatchedVector, head: Option<Literal>, is_learned: bool, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, literals: Vec<Literal>, number_deterministic_in_body: usize, is_learned: bool, state: &mut StateManager) -> Self {
         Self {
             id,
             literals,
-            head,
             children: SparseSet::new(state),
             parents: SparseSet::new(state),
             hash: rand::random(),
             is_learned,
-            in_degree: 0,
-            out_degree: 0,
+            active: state.manage_bool(true),
+            number_deterministic_in_body: state.manage_usize(number_deterministic_in_body),
+            is_head_f_reachable: state.manage_bool(false),
         }
     }
     
@@ -77,25 +77,14 @@ impl Clause {
         self.parents.remove(parent, state);
     }
     
-    /// Returns a bound on the number ofdeterministic (first element) and probabilistic (second element) 
-    /// unfixed variable in the clause
-    pub fn get_bounds_watcher(&self, state: &StateManager) -> (usize, usize) {
-        self.literals.get_bounds(state)
-    }
-    
-    /// Returns true if the clause still has unfixed probabilistic variables in it
-    pub fn has_probabilistic(&self, state: &StateManager) -> bool {
-        self.literals.get_alive_end_watcher(state).is_some()
-    }
-    
     /// Set the clause as unconstrained. This operation is reverted when the state manager restore its state.
-    pub fn set_unconstrained(&self, state: &mut StateManager) {
-        self.literals.set_unconstrained(state);
+    pub fn deactivate(&self, state: &mut StateManager) {
+        state.set_bool(self.active, false);
     }
     
     /// Returns true iff the clause is constrained
-    pub fn is_constrained(&self, state: &StateManager) -> bool {
-        self.literals.is_constrained(state)
+    pub fn is_active(&self, state: &StateManager) -> bool {
+        state.get_bool(self.active)
     }
     
     /// Returns the hash of the clause
@@ -105,11 +94,11 @@ impl Clause {
     
     /// If the clause still has unfixed probabilisitc variables, return the distribution of the first watcher.
     /// Else, return None.
-    pub fn get_constrained_distribution(&self, state: &StateManager, g: &Problem) -> Option<DistributionIndex> {
-        match self.literals.get_alive_end_watcher(state) {
-            None => None,
-            Some(l) => g[l.to_variable()].distribution(),
-        }
+    pub fn get_constrained_distribution(&self, state: &StateManager, p: &Problem) -> Option<DistributionIndex> {
+        self.literals.iter().filter(|l| {
+            let v = l.to_variable();
+            !p[v].is_fixed(state) && p[v].is_probabilitic()
+        }).map(|l| p[l.to_variable()].distribution().unwrap()).next()
     }
     
     /// Returns the number of parents of the clause in the initial problem
@@ -132,65 +121,56 @@ impl Clause {
         self.children.len(state)
     }
     
-    /// Return the head of the clause
-    pub fn head(&self) -> Option<Literal> {
-        self.head
-    }
-
-    /// Returns true iff the variable is the head of the clause
-    pub fn is_head(&self, variable: VariableIndex) -> bool {
-        match self.head {
-            None => false,
-            Some(h) => h.to_variable() == variable,
-        }
-    }
-    
     /// Notify the clause that the given variable has taken the given value. Updates the watchers accordingly.
-    pub fn notify_variable_value(&mut self, variable: VariableIndex, value: bool, probabilistic: bool, state: &mut StateManager) -> VariableIndex {
-        if !probabilistic {
-            self.literals.update_watcher_start(variable, value, state)
-        } else {
-            self.literals.update_watcher_end(variable, value, state)
+    pub fn notify_variable_value(&mut self, variable: VariableIndex, state: &mut StateManager) -> VariableIndex {
+        if self.literals[0].to_variable() == variable {
+            self.literals.swap(0, 1);
         }
+        for i in 2..self.literals.len() {
+            if !self.literals[i].is_variable_fixed(state) {
+                self.literals.swap(1, i);
+                break;
+            }
+        }
+        self.literals[1].to_variable()
     }
 
     /// Returns true iff the clause is unit
     pub fn is_unit(&self, state: &StateManager) -> bool {
-        if !self.is_constrained(state) {
+        if !self.is_active(state) {
             return false;
         }
-        let bounds = self.literals.get_bounds(state);
-        bounds.0 + bounds.1 == 1
-    }
-
-    pub fn is_binary(&self, state: &StateManager) -> bool {
-        if !self.is_constrained(state) {
-            return false;
+        if self.literals.len() == 1 {
+            return true;
         }
-        let bounds = self.literals.get_bounds(state);
-        bounds.0 + bounds.1 == 2
+        !self.literals[0].is_variable_fixed(state) && self.literals[1].is_variable_fixed(state)
     }
 
     /// Returns the last unfixed literal in the unit clause
     pub fn get_unit_assigment(&self, state: &StateManager) -> Literal {
         debug_assert!(self.is_unit(state));
-        let bounds = self.literals.get_bounds(state);
-        if bounds.0 == 0 {
-            self.literals[self.literals.limit()]
-        } else {
-            self.literals[0]
-        }
+        self.literals[0]
+    }
+
+    pub fn refresh_number_deterministic_in_body(&self, number: usize,  state: &mut StateManager) {
+        state.set_usize(self.number_deterministic_in_body, number);
+    }
+
+    pub fn decrement_deterministic_in_body(&self, state: &mut StateManager) {
+        state.decrement_usize(self.number_deterministic_in_body);
     }
 
     /// Returns true iff the clause stil has unfixed deterministic variables in its body
     pub fn has_deterministic_in_body(&self, state: &StateManager) -> bool {
-        let bound_deterministic = self.literals.get_bounds(state).0;
-        for i in 0..bound_deterministic {
-            if !self.literals[i].is_positive() {
-                return true;
-            }
-        }
-        false
+        state.get_usize(self.number_deterministic_in_body) > 0
+    }
+
+    pub fn set_head_f_reachable(&self, state: &mut StateManager) {
+        state.set_bool(self.is_head_f_reachable, true);
+    }
+
+    pub fn is_head_f_reachable(&self, state: &StateManager) -> bool {
+        state.get_bool(self.is_head_f_reachable)
     }
     
     /// Returns true iff the clause is learned
@@ -211,8 +191,8 @@ impl Clause {
     }
     
     /// Returns an interator on the literals of the clause
-    pub fn iter(&self) -> impl Iterator<Item = Literal> + '_ {
-        self.literals.iter()
+    pub fn iter(&self) -> impl Iterator<Item = Literal> + use<'_> {
+        self.literals.iter().copied()
     }
     
     /// Returns an iterator on the variables represented by the literals of the clause
@@ -220,46 +200,27 @@ impl Clause {
         self.literals.iter().map(|l| l.to_variable())
     }
     
-    /// Returns an iterator on the probabilistic varaibles in the clause
-    pub fn iter_probabilistic_variables(&self) -> impl Iterator<Item = VariableIndex> + '_ {
-        self.literals.iter_end().map(|l| l.to_variable())
-    }
-
     pub fn clear(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.children.clear(map, state);
         self.parents.clear(map, state);
-        self.in_degree = self.parents.len(state);
-        self.out_degree = self.children.len(state);
     }
 
     pub fn clear_literals(&mut self, map: &FxHashMap<VariableIndex, VariableIndex>) {
-        if let Some(lit) = self.head() {
-            let variable = lit.to_variable();
-            if let Some(new_variable) = map.get(&variable).copied() {
-                let pos = lit.is_positive();
-                let idx = lit.trail_index();
-                self.head = Some(Literal::from_variable(new_variable, pos, idx));
-            } else {
-                self.head = None;
+        for i in (0..self.literals.len()).rev() {
+            let v = self.literals[i].to_variable();
+            match map.get(&v).copied() {
+                Some(new_v) => {
+                    self.literals[i].update_variable(new_v);
+                },
+                None => {
+                    self.literals.swap_remove(i);
+                }
             }
         }
-        self.literals.reduce(map);
     }
 
-    pub fn remove_literals(&mut self, variable: VariableIndex) {
-        self.literals.remove(variable);
-    }
-
-    pub fn get_watchers(&self) -> Vec<Option<VariableIndex>> {
-        self.literals.get_watchers()
-    }
-
-    pub fn in_degree(&self) -> usize {
-        self.in_degree
-    }
-
-    pub fn out_degree(&self) -> usize {
-        self.out_degree
+    pub fn get_watchers(&self) -> Vec<VariableIndex> {
+        self.literals.iter().take(2).map(|l| l.to_variable()).collect()
     }
 }
 

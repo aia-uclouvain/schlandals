@@ -52,6 +52,14 @@ impl Literal {
     pub fn trail_index(&self) -> ReversibleOptionBool {
         self.1
     }
+
+    pub fn update_variable(&mut self, v: VariableIndex) {
+        if self.is_positive() {
+            self.0 = v.0 as isize + 1
+        } else {
+            self.0 = -(v.0 as isize + 1)
+        }
+    }
 }
 
 impl std::fmt::Display for Literal {
