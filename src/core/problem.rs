@@ -119,9 +119,6 @@ impl Problem {
         if !is_learned {
             for literal in clause.iter().collect::<Vec<Literal>>() {
                 let variable = literal.to_variable();
-                if is_learned {
-                    self[variable].add_learned_clause(cid);
-                }
                 if literal.is_positive() {
                     for child in self[variable].iter_clauses_negative_occurence(state).filter(|c| c.0 != self.clauses.len()).collect::<Vec<ClauseIndex>>() {
                         clause.add_child(child, state);

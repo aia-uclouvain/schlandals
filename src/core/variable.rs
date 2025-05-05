@@ -13,8 +13,6 @@ pub enum Reason {
     Distribution(DistributionIndex),
 }
 
-// TODO: Change clauses_positive and clauses_negative to sparse sets
-
 /// Data structure that actually holds the data of a  variable of the input problem
 #[derive(Debug)]
 pub struct Variable {
@@ -31,7 +29,6 @@ pub struct Variable {
     clauses_positive: SparseSet<ClauseIndex>,
     /// The clauses in which the variable appears with negative polarity
     clauses_negative: SparseSet<ClauseIndex>,
-    learned_clauses: Vec<ClauseIndex>,
     /// The value assigned to the variable
     value: ReversibleOptionBool,
     /// Level at which the decision was made for this variable
@@ -56,7 +53,6 @@ impl Variable {
             distribution,
             clauses_positive: SparseSet::new(state),
             clauses_negative: SparseSet::new(state),
-            learned_clauses: vec![],
             value: state.manage_option_bool(None),
             decision: -1,
             assignment_position: state.manage_usize(0),
@@ -187,10 +183,6 @@ impl Variable {
     pub fn number_clauses(&self, state: &StateManager) -> usize {
         self.clauses_positive.len(state) + self.clauses_negative.len(state)
     }
-
-    pub fn add_learned_clause(&mut self, clause: ClauseIndex) {
-        self.learned_clauses.push(clause);
-    }
     
     // --- ITERATOR --- //
 
@@ -202,10 +194,6 @@ impl Variable {
     /// Returns an iterator on the clauses in which the variable appears with a negative polarity
     pub fn iter_clauses_negative_occurence(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
         self.clauses_negative.iter(state)
-    }
-
-    pub fn iter_learned_clauses(&self) -> impl Iterator<Item = ClauseIndex> + '_ {
-        self.learned_clauses.iter().copied()
     }
 
     pub fn clear_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) -> usize {

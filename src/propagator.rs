@@ -44,7 +44,7 @@ pub type PropagationResult = Result<(), isize>;
 
 pub struct Propagator {
     propagation_stack: Vec<(VariableIndex, bool, isize, Option<Reason>)>,
-    pub unconstrained_clauses: Vec<ClauseIndex>,
+    unconstrained_clauses: Vec<ClauseIndex>,
     clause_flags: Vec<ClauseFlags>,
     lit_flags: Vec<LitFlags>,
     assignments: Vec<Literal>,
