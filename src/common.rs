@@ -1,5 +1,4 @@
 use clap::ValueEnum;
-use std::hash::Hash;
 use malachite::rational::Rational;
 use malachite::base::num::conversion::traits::RoundingFrom;
 use malachite::base::rounding_modes::RoundingMode::Nearest;
@@ -29,6 +28,14 @@ pub enum Branching {
     DLCS,
     DLCSVar,
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Caching {
+    Hybrid,
+    OmitBinary,
+    OmitImplicit,
+}
+
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Loss {
@@ -63,49 +70,6 @@ impl std::fmt::Display for ApproximateMethod {
         }
     }
 }
-
-/// A key of the cache. It is composed of
-///     1. A hash representing the sub-problem being solved
-///     2. The bitwise representation of the sub-problem being solved
-/// 
-/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
-/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
-/// two different sub-problems have different hash.
-/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
-#[derive(Default, Clone)]
-pub struct CacheKey {
-    hash: u64,
-    repr: String,
-}
-
-impl CacheKey {
-    pub fn new(hash: u64, repr: String) -> Self {
-        Self {
-            hash,
-            repr,
-        }
-    }
-}
-
-impl Hash for CacheKey {
-
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
-    }
-
-}
-
-impl PartialEq for CacheKey {
-    fn eq(&self, other: &Self) -> bool {
-        if self.hash != other.hash {
-            false
-        } else {
-            self.repr == other.repr
-        }
-    }
-}
-
-impl Eq for CacheKey {}
 
 /// This structure represent a (possibly partial) solution found by the solver.
 /// It is represented by a lower- and upper-bound on the true probability at the time at which the

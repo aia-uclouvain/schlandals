@@ -13,10 +13,10 @@
 //! It should only be used for debugging purpose to isolate bugs
 
 use super::problem::{ClauseIndex, VariableIndex, Problem, DistributionIndex};
-use crate::common::CacheKey;
 use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 use malachite::rational::Rational;
 use crate::common::rational;
+use crate::caching::*;
 
 /// Abstraction used as a typesafe way of retrieving a `Component`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -58,11 +58,13 @@ pub struct ComponentExtractor {
     distribution_positions: Vec<usize>,
     /// Stack for clause to process during exploration
     exploration_stack: Vec<ClauseIndex>,
+    caching_scheme: CachingScheme,
+    clauses_cache: Vec<ClauseIndex>,
+    variables_cache: Vec<VariableIndex>,
 }
 
 /// A Component is identified by two integers. The first is the index in the vector of clauses at
 /// which the component starts, and the second is the size of the component.
-#[derive(Debug, Clone)]
 pub struct Component {
     /// First index of the component
     start: usize,
@@ -78,21 +80,17 @@ pub struct Component {
     /// valid interpretation are models)
     max_probability: Rational,
     /// Representation of the component for hash
-    repr: String,
+    key: CacheKey,
 }
 
 impl Component {
-
-    pub fn hash(&self) -> u64 {
-        self.hash
-    }
 
     pub fn max_probability(&self) -> Rational {
         self.max_probability.clone()
     }
 
     pub fn get_cache_key(&self) -> CacheKey {
-        CacheKey::new(self.hash, self.repr.clone())
+        self.key.clone()
     }
 
     pub fn number_distribution(&self) -> usize {
@@ -102,7 +100,7 @@ impl Component {
 
 impl ComponentExtractor {
     /// Creates a new component extractor for the implication problem `g`
-    pub fn new(g: &Problem, state: &mut StateManager) -> Self {
+    pub fn new(g: &Problem, caching_scheme: CachingScheme, state: &mut StateManager) -> Self {
         let nodes = (0..g.number_clauses()).map(ClauseIndex).collect();
         let clause_positions = (0..g.number_clauses()).collect();
         let distributions = (0..g.number_distributions()).map(DistributionIndex).collect();
@@ -114,7 +112,7 @@ impl ComponentExtractor {
             number_distribution: g.number_distributions(),
             hash: 0,
             max_probability: rational(1.0),
-            repr: String::new(),
+            key: CacheKey::default(),
         }];
         Self {
             clauses: nodes,
@@ -126,6 +124,9 @@ impl ComponentExtractor {
             distributions,
             distribution_positions,
             exploration_stack: vec![],
+            caching_scheme,
+            clauses_cache: vec![],
+            variables_cache: vec![],
         }
     }
 
@@ -167,14 +168,14 @@ impl ComponentExtractor {
         comp_number_distribution: &mut usize,
         hash: &mut u64,
         max_probability: &mut Rational,
-        clauses: &mut Vec<ClauseIndex>,
-        variables: &mut Vec<VariableIndex>,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
             if self.is_node_visitable(g, clause, comp_start, comp_size, state) {
                 *hash ^= g[clause].hash();
-                clauses.push(clause);
+                if g[clause].is_modified(state) {
+                    self.clauses_cache.push(clause);
+                }
                 // The clause is swap with the clause at position comp_sart + comp_size
                 let current_pos = self.clause_positions[clause.0];
                 let new_pos = comp_start + *comp_size;
@@ -193,7 +194,7 @@ impl ComponentExtractor {
                     if !g[variable].is_fixed(state) && !self.seen_var[variable.0] {
                         self.seen_var[variable.0] = true;
                         *hash ^= g[variable].hash();
-                        variables.push(variable);
+                        self.variables_cache.push(variable);
                         if g[variable].is_probabilitic() {
                             let distribution = g[variable].distribution().unwrap();
                             if g[distribution].is_constrained(state) && self.is_distribution_visitable(distribution, comp_distribution_start, comp_number_distribution) {
@@ -263,9 +264,9 @@ impl ComponentExtractor {
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
                 let mut max_probability = rational(1.0);
-                let mut clauses: Vec<ClauseIndex> = vec![];
-                let mut variables: Vec<VariableIndex> = vec![];
                 self.exploration_stack.push(clause);
+                self.clauses_cache.clear();
+                self.variables_cache.clear();
                 self.explore_component(
                     g,
                     start,
@@ -274,21 +275,13 @@ impl ComponentExtractor {
                     &mut number_distribution,
                     &mut hash,
                     &mut max_probability,
-                    &mut clauses,
-                    &mut variables,
                     state,
                 );
                 if number_distribution > 0 {
-                    clauses.sort();
-                    variables.sort();
-                    let mut repr = String::new();
-                    for c in clauses.iter().copied() {
-                        repr.push_str(&format!("c{}", c.0));
-                    }
-                    for v in clauses.iter().copied() {
-                        repr.push_str(&format!("v{}", v.0));
-                    }
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, repr});
+                    self.clauses_cache.sort();
+                    self.variables_cache.sort();
+                    let key = self.caching_scheme.get_key(g, &self.clauses_cache, &self.variables_cache, hash, state);
+                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, key});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -347,13 +340,6 @@ impl ComponentExtractor {
         self.distributions.shrink_to_fit();
         self.distribution_positions.truncate(number_distribution);
         self.distribution_positions.shrink_to_fit();
-        let mut repr = String::new();
-        for c in 0..number_clause {
-            repr.push_str(&format!("c{}", c));
-        }
-        for v in 0..number_variables {
-            repr.push_str(&format!("v{}", v));
-        }
         self.components[0] = Component {
             start: 0,
             size: self.clauses.len(),
@@ -361,8 +347,9 @@ impl ComponentExtractor {
             number_distribution: self.distributions.len(),
             hash: 0,
             max_probability,
-            repr,
+            key: CacheKey::default(),
         };
+        self.caching_scheme.init(number_clause, number_variables);
     }
 }
 

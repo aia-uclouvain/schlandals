@@ -9,6 +9,7 @@ mod propagator;
 mod preprocess;
 pub mod learning;
 pub mod ac;
+mod caching;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ use parsers::*;
 use propagator::Propagator;
 pub use common::*;
 use branching::*;
+use caching::*;
 
 pub use solver::Solver;
 use solver::SolverParameters;
@@ -50,6 +52,12 @@ pub struct Args {
     /// How to branch
     #[clap(short, long, value_enum, default_value_t=Branching::MinInDegree)]
     pub branching: Branching,
+    /// Caching strategy
+    #[clap(short, long, value_enum, default_value_t=Caching::Hybrid)]
+    pub caching: Caching,
+    /// If set, deactivate the two level caching
+    #[clap(short, long, default_value_t=false)]
+    pub two_level_caching_deactivate: bool,
     /// Collect stats during the search, default no
     #[clap(long, action)]
     pub statistics: bool,
@@ -73,6 +81,8 @@ impl Default for Args {
             evidence: None,
             timeout: u64::MAX,
             branching: Branching::MinInDegree,
+            caching: Caching::Hybrid,
+            two_level_caching_deactivate: false,
             statistics: false,
             memory: u64::MAX,
             epsilon: 0.0,
@@ -193,7 +203,8 @@ pub fn search(args: Args) -> f64 {
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
-    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
+    let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
 
     let solution = match args.approx {
@@ -222,7 +233,8 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
     let propagator = Propagator::new(&mut state);
     let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| rational(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
     let problem = create_problem(&distributions_rational, clauses, &mut state);
-    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
+    let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
     let solution = match solver {
         GenericSolver::Search(mut solver) => solver.search(false),
@@ -239,7 +251,8 @@ pub fn compile(args: Args) -> f64 {
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
-    let component_extractor = ComponentExtractor::new(&problem, &mut state);
+    let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
+    let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
     let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
 
     let mut ac: Dac = match args.approx {
@@ -330,12 +343,14 @@ pub fn learn(args: Args) {
         );
         let approx = args.approx;
         let branching = args.branching;
+        let caching = args.caching;
+        let two_level_caching = !args.two_level_caching_deactivate;
         if do_log {
             let mut learner = Learner::<true>::new(args.input.clone(), args);
-            learner.train(&params, branching, approx);
+            learner.train(&params, branching, two_level_caching, caching, approx);
         } else {
             let mut learner = Learner::<false>::new(args.input.clone(), args);
-            learner.train(&params, branching, approx);
+            learner.train(&params, branching, two_level_caching, caching, approx);
         };
     }
 }

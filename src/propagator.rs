@@ -208,6 +208,7 @@ impl Propagator {
             for i in (0..g.number_watchers(variable)).rev() {
                 let clause = g.get_clause_watched(variable, i);
                 if g[clause].is_active(state) {
+                    g[clause].modified(state);
                     let new_watcher = g[clause].notify_variable_value(variable, state);
                     if new_watcher != variable {
                         g.remove_watcher(variable, i);

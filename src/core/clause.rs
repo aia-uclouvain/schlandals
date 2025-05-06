@@ -35,11 +35,14 @@ pub struct Clause {
     /// Number of deterministic variables in the body of the clause
     number_deterministic_in_body: ReversibleUsize,
     is_head_f_reachable: ReversibleBool,
+    is_binary: bool,
+    modified: ReversibleBool,
 }
 
 impl Clause {
 
     pub fn new(id: usize, literals: Vec<Literal>, number_deterministic_in_body: usize, is_learned: bool, state: &mut StateManager) -> Self {
+        let is_binary = literals.len() == 2;
         Self {
             id,
             literals,
@@ -50,6 +53,8 @@ impl Clause {
             active: state.manage_bool(true),
             number_deterministic_in_body: state.manage_usize(number_deterministic_in_body),
             is_head_f_reachable: state.manage_bool(false),
+            is_binary,
+            modified: state.manage_bool(false),
         }
     }
     
@@ -222,6 +227,19 @@ impl Clause {
     pub fn get_watchers(&self) -> Vec<VariableIndex> {
         self.literals.iter().take(2).map(|l| l.to_variable()).collect()
     }
+
+    pub fn modified(&self, state: &mut StateManager) {
+        state.set_bool(self.modified, true);
+    }
+
+    pub fn is_modified(&self, state: &StateManager) -> bool {
+        state.get_bool(self.modified)
+    }
+
+    pub fn is_binary(&self) -> bool {
+        self.is_binary
+    }
+    
 }
 
 // Writes a clause as C{id}: l1 l2 ... ln

@@ -115,7 +115,7 @@ impl <const S: bool> Learner<S> {
             }
 
             // Compiling the train and test queries into arithmetic circuits
-            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, args.epsilon, args.approx, args.timeout);
+            let mut train_dacs = generate_dacs(&clauses, &distributions, args.branching, !args.two_level_caching_deactivate, args.caching, args.epsilon, args.approx, args.timeout);
             if args.approx == ApproximateMethod::LDS {
                 eps = 0.0;
                 let mut present_distributions = vec![0; distributions.len()];
@@ -140,7 +140,7 @@ impl <const S: bool> Learner<S> {
                 println!("Unfinished DACs: {}, total {}", cnt_unfinished, train_dacs.len());
                 println!("Epsilon: {}", eps);
             }
-            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
+            let mut test_dacs = generate_dacs(&test_clauses, &distributions, args.branching, !args.two_level_caching_deactivate, args.caching, args.epsilon, ApproximateMethod::Bounds, u64::MAX);
             let mut train_dataset = Dataset::new(vec![], vec![]);
             let mut test_dataset = Dataset::new(vec![], vec![]);
             while let Some(d) = train_dacs.pop() {
@@ -227,9 +227,9 @@ impl <const S: bool> Learner<S> {
         self.test.get_queries().iter().map(|d| d.circuit_probability()).collect()
     }
 
-    fn recompile_dacs(&mut self, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
+    fn recompile_dacs(&mut self, branching: Branching, two_level_caching: bool, caching: Caching, approx:ApproximateMethod, compile_timeout: u64) {
         let distributions: Vec<Vec<Rational>> = self.get_softmaxed_array().iter().map(|d| d.iter().map(|f| f.clone()).collect::<Vec<Rational>>()).collect();
-        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, self.epsilon, approx, compile_timeout);
+        let mut train_dacs = generate_dacs(&self.clauses, &distributions, branching, two_level_caching, caching, self.epsilon, approx, compile_timeout);
         let mut train_data = vec![];
         let mut eps = 0.0;
         while let Some(d) = train_dacs.pop() {
@@ -313,7 +313,7 @@ impl <const S: bool> Learner<S> {
 
     /// Training loop for the train dacs, using the given training parameters
     //fn train(&mut self, params: &LearnParameters, inputs: &Vec<PathBuf>, branching: Branching, approx:ApproximateMethod, compile_timeout: u64) {
-    pub fn train(&mut self, params: &LearnParameters, branching: Branching, approx:ApproximateMethod) {
+    pub fn train(&mut self, params: &LearnParameters, branching: Branching, two_level_caching: bool, caching: Caching,  approx:ApproximateMethod) {
         let mut prev_loss = rational(1.0);
         let mut count_no_improve = 0;
         self.log.start();
@@ -367,7 +367,7 @@ impl <const S: bool> Learner<S> {
 
             if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
                 println!("Recompiling at epoch {}", e);
-                self.recompile_dacs(branching, approx, params.compilation_timeout());
+                self.recompile_dacs(branching, two_level_caching, caching, approx, params.compilation_timeout());
             }
 
             // TODO: Add a verbosity command line argument
@@ -412,7 +412,7 @@ pub fn softmax(x: &[Rational]) -> Vec<Rational> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<Rational>],branching: Branching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac> {
+pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<Rational>],branching: Branching, two_level_caching: bool, caching: Caching, epsilon: f64, approx: ApproximateMethod, timeout: u64) -> Vec<Dac> {
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -420,7 +420,8 @@ pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Ve
         let problem = create_problem(distributions, clauses, &mut state); //parser.problem_from_file(&mut state);
         let parameters = SolverParameters::new(u64::MAX, epsilon, timeout);
         let propagator = Propagator::new(&mut state);
-        let component_extractor = ComponentExtractor::new(&problem, &mut state);
+        let caching_scheme = CachingScheme::new(two_level_caching, caching);
+        let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
         let compiler = generic_solver(problem, state, component_extractor, branching, propagator, parameters, false, true);
         match approx {
             ApproximateMethod::Bounds => {

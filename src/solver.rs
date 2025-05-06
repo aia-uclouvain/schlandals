@@ -10,6 +10,7 @@ use crate::ac::ac::{NodeIndex, Dac};
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
+use crate::caching::CacheKey;
 use malachite::rational::Rational;
 use std::time::Instant;
 
@@ -109,6 +110,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                 self.bound_approx = true;
             }
             let sol = self.do_discrepancy_iteration(usize::MAX, self.parameters.epsilon);
+            self.statistics.peak_memory(PEAK_ALLOC.peak_usage_as_mb());
             self.statistics.print();
             sol
         } else {
@@ -126,6 +128,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                     complete_sol = Some(solution);
                 }
                 if self.parameters.start.elapsed().as_secs() >= self.parameters.timeout || complete_sol.as_ref().unwrap().has_converged(self.parameters.epsilon) {
+                    self.statistics.peak_memory(PEAK_ALLOC.peak_usage_as_mb());
                     self.statistics.print();
                     return complete_sol.unwrap()
                 }
