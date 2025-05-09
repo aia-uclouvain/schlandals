@@ -530,7 +530,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut complete_ac_model: Option<Dac<R>>;
             let mut complete_ac_nonmodel: Option<Dac<R>>;
             let mut cnt_idem = 0;
-            let mut last_val = 0.0;
+            let mut last_low = 0.0;
+            let mut last_up = 1.0;
             let mut last_discrepancy= 0;
             let mut lbs = vec![];
             let mut ubs = vec![];
@@ -550,12 +551,13 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                     ub_size.push(complete_ac_nonmodel.as_ref().unwrap().number_nodes());
                     epsilon.push(solution.epsilon());
                     time.push(start.elapsed().as_secs());
-                    if solution.bounds().0 == last_val {
+                    if solution.bounds().0 == last_low || solution.bounds().1 == last_up {
                         cnt_idem += 1;
                     }
                     else {
                         cnt_idem = 0;
-                        last_val = solution.bounds().0;
+                        last_low = solution.bounds().0;
+                        last_up = solution.bounds().1;
                     }
                     solution.print();
                     complete_sol = Some(solution);

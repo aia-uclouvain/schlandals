@@ -49,7 +49,7 @@ impl PyLearner {
             log_dist.push(dist.iter().map(|x| x.ln()).collect());
         }
         self.learner.set_distributions(log_dist, false);
-    }
+    }        
 
     pub fn get_distributions(&self) -> Vec<Vec<f64>> {
         self.learner.get_softmaxed_array().iter().map(|row| row.iter().map(|x| x.to_f64()).collect()).collect()
@@ -218,6 +218,10 @@ impl PyLearner {
             }
         }
         (preds, loss)
+    }
+
+    pub fn as_graphviz(&self, idx: usize) -> String {
+        self.learner.get_train().get_queries()[idx].as_graphviz()
     }
 }
 

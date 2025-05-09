@@ -99,14 +99,14 @@ impl <const S: bool> Learner<S> {
             let mut test_clauses = vec![];
             let mut all_test_distributions = vec![];
             for (query, _) in train_queries.iter() {
-                let q_parser = parser_from_input(input.clone(), Some(query.clone()));
+                let q_parser = parser_from_input(PathBuf::from(query.clone()), Some(OsString::default())); //parser_from_input(input.clone(), Some(query.clone()));
                 let c = q_parser.clauses_from_file();
                 let d = q_parser.distributions_from_file();
                 clauses.push(c);
                 all_distributions.push(d);
             }
             for (query, _) in test_queries.iter() {
-                let q_parser = parser_from_input(input.clone(), Some(query.clone()));
+                let q_parser = parser_from_input(PathBuf::from(query.clone()), Some(OsString::default())); //parser_from_input(input.clone(), Some(query.clone()));
                 let c = q_parser.clauses_from_file();
                 let d = q_parser.distributions_from_file();
                 test_clauses.push(c);
@@ -137,7 +137,7 @@ impl <const S: bool> Learner<S> {
             let mut train_dacs: Vec<Dac<Float>> = generate_dacs(&clauses, &all_distributions, args.branching, args.epsilon, args.approx, args.timeout, learning_m, lds_opti);
             let c_duration = c_time.elapsed().as_secs();
             //println!("Test");
-            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &all_test_distributions, args.branching, args.epsilon, args.approx, 3600, LearningMethod::Models, false);
+            let mut test_dacs: Vec<Dac<Float>> = generate_dacs(&test_clauses, &all_test_distributions, args.branching, args.epsilon, args.approx, args.timeout, LearningMethod::Models, false);
             let mut train_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut test_dataset = Dataset::<Float>::new(vec![], vec![]);
             let mut cnt = 0;
@@ -162,7 +162,6 @@ impl <const S: bool> Learner<S> {
                     continue;
                 }
                 d.evaluate();
-                //println!("eval {}, expected {}", d.circuit_probability().to_f64(), expected);
                 train_dataset.add_query(d,expected);
                 cnt += 1;
             }
@@ -173,6 +172,7 @@ impl <const S: bool> Learner<S> {
                 //println!("eval {} expected {}", d.circuit_probability().to_f64(), expected);
                 test_dataset.add_query(d, expected);
             }
+            test_dataset.reverse();
             // Initializing the logger
             let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len(), learning_m, c_duration as usize);
             Self {
