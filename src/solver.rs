@@ -204,8 +204,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
     }
 
     fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, init_d:usize) -> SearchResult {
-        let search = false;
-        let do_ub = true;
+        let search = false; // when no compilation is done, put to true and next to false (used for the experiments)
+        let do_ub = true; // when upper bound compilation is done, put to true and previous to false (used for the experiments)
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= self.parameters.memory_limit {
             self.cache.clear();
         }
@@ -217,18 +217,14 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         let mut all_component_d_values = vec![];
         if !search && do_ub {
-            // For upper bound, collect all the distributions' variables that are not fixed, and ignoring the distribution still summing to 1
-            // This information is used for upper-bound AC compilation when decomposing in independant subcomponents as: remaining problem - contribution of each subcomponent
+            // For upper bound, collect all the distributions' variables that are not fixed, ignoring the distribution still summing to 1
+            // This information is used for upper-bound AC compilation when decomposing in independant subcomponents as: remaining problem - contribution of each subcomponent. Here we collect the 'remaining problem' part
             let all_component_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| self.problem[*d].is_constrained(&self.state)).collect::<Vec<DistributionIndex>>();
             let all_component_d_v = all_component_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
             let nonempty = all_component_d_v[0].clone();
             for (d, v) in all_component_d_v.iter() {
-                //let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
                 let cnt = v.iter().count();
                 if cnt != self.problem[*d].iter_variables().count() { all_component_d_values.push((d.clone(), v.clone())); }
-                /* if sum < 1.0 { 
-                    all_component_d_values.push((d.clone(), v.clone())); 
-                } */
             }
             if all_component_d_values.is_empty() { all_component_d_values.push(nonempty); }
         }
@@ -242,12 +238,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             self.statistics.or_node();
             let distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
             CacheEntry::new((F128!(0.0), F128!(0.0)), 0, distribution, FxHashMap::default(), cache_key_index, FxHashMap::default(), maximum_probability, all_component_d_values, init_d-discrepancy, FxHashMap::default())
-            //CacheEntry::new((F128!(0.0), F128!(0.0)), 0, None, FxHashMap::default(), cache_key_index, FxHashMap::default(), maximum_probability, all_component_d_values, init_d-discrepancy, FxHashMap::default())
         });
-        /* if cache_entry.distribution.is_none() {
-            self.statistics.or_node();
-            cache_entry.distribution = self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component);
-        } */
 
         if cache_entry.discrepancy < discrepancy && !cache_entry.are_bounds_tight(maximum_probability) {
             let mut new_p_in = F128!(0.0);
@@ -262,10 +253,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                 let unsat_d_v = unsat_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
                 let nonempty = unsat_d_v[0].clone();
                 for (d, v) in unsat_d_v.iter() {
-                    //let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
                     let cnt = v.iter().count();
                     if cnt != self.problem[*d].iter_variables().count() { unsat_d_values.push((d.clone(), v.clone())); }
-                    //if sum < 1.0 { unsat_d_values.push((d.clone(), v.clone())); }
                 }
                 if unsat_d_values.is_empty() { unsat_d_values.push(nonempty); }
             }
@@ -302,29 +291,24 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         }
                         self.restore(); // Restore the state before the propagation
                         // Retrieve all the distributions' variables that are not fixed when branching to the unsat, and ignoring the distribution still summing to 1
-                        let mut excluded_distribtions = vec![];
+                        let mut excluded_distributions = vec![];
                         if !search && do_ub {
                             for d in component_distributions.iter() {
                                 let mut variables = vec![];
-                                //let mut total = 0.0;
                                 let mut cnt = 0;
                                 if *d != distribution {
                                     for v in self.problem[*d].iter_variables() {
                                         if !self.problem[v].is_fixed(&self.state) {
                                             variables.push(v);
-                                            //total += self.problem[v].weight().unwrap();
                                             cnt += 1;
                                         }
                                     }
-                                    if cnt != self.problem[*d].iter_variables().count() || excluded_distribtions.is_empty() {
-                                        excluded_distribtions.push((*d, variables));
+                                    if cnt != self.problem[*d].iter_variables().count() || excluded_distributions.is_empty() {
+                                        excluded_distributions.push((*d, variables));
                                     }
-                                    /* if (!variables.is_empty() && total < 1.0) || excluded_distribtions.is_empty() {
-                                        excluded_distribtions.push((*d, variables));
-                                    } */
                                 }
                             }
-                            let child_entry = CacheChildren::new(vec![(distribution, variable)], vec![], excluded_distribtions);
+                            let child_entry = CacheChildren::new(vec![(distribution, variable)], vec![], excluded_distributions);
                             cache_entry.unsat_children.insert(variable, child_entry);
                         }
                     },
@@ -341,10 +325,8 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                             let remaining_distributions = self.component_extractor.component_distribution_iter(component).filter(|d| *d != distribution && self.problem[*d].is_constrained(&self.state)).collect::<Vec<DistributionIndex>>();
                             let remaining_d_v = remaining_distributions.iter().map(|d| (*d, self.problem[*d].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)).collect::<Vec<VariableIndex>>())).collect::<Vec<(DistributionIndex, Vec<VariableIndex>)>>();
                             for (d, v) in remaining_d_v.iter() {
-                                //let sum = v.iter().map(|v| self.problem[*v].weight().unwrap()).sum::<f64>();
                                 let cnt = v.iter().count();
                                 if cnt != self.problem[*d].iter_variables().count() { remaining_d_values.push((d.clone(), v.clone())); }
-                                //if remaining_d_values.is_empty() || sum < 1.0 { remaining_d_values.push((d.clone(), v.clone())); }
                             }
                         }
 
@@ -361,7 +343,6 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
                         let (forced_distribution_var, unconstrained_distribution_var, _) = self.forced_from_propagation(distribution, true);
                         let mut child_entry = CacheChildren::new(forced_distribution_var, unconstrained_distribution_var, vec![]);
                         if !search{
-                            //child_entry.total_distributions = unsat_d_values.clone();
                             child_entry.total_remaining_to_remove = remaining_d_values.clone();
                         }
                         self.state.save_state();
@@ -452,9 +433,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.state.save_state();
 
         let preproc_result = self.preprocess();
-        // Create the DAC and add elements from the preprocessing
+        // Create the DAC and retrieve elements forced, excluded, or unconstraine by the preprocessing
         let forced_by_propagation = self.forced_from_propagation(DistributionIndex(usize::MAX), true);
-        // Remove the distributions' values from the excluded ones that had a weight of 0 or 1 and keep the old indexes of the others to be able to add them to the dac correctly
+        // For the excluded values, remove the ones that had a weight of 0 or 1 and keep the old indexes of the others to be able to add them to the dac correctly
         let mut clean_excluded = vec![];
         let mut remaining = vec![];
         for (d, values) in forced_by_propagation.2.iter() {
@@ -493,7 +474,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         self.restructure_after_preprocess();
 
         if preproc_result.is_some() {
-            println!("to verifyyyy");
+            println!("to verify");
             return (Dac::default(), Dac::default());
         }
         // Perform the actual search that will fill the cache
@@ -530,6 +511,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             let mut complete_ac_model: Option<Dac<R>>;
             let mut complete_ac_nonmodel: Option<Dac<R>>;
             let mut cnt_idem = 0;
+            // For lds optimization, we keep track of previous bounds and the number of nodes in the ac
             let mut last_low = 0.0;
             let mut last_up = 1.0;
             let mut last_discrepancy= 0;
@@ -606,26 +588,20 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         } */
 
         let mut has_node_search = false;
-        /* let mut init_k = self.component_extractor[ComponentIndex(0)].get_cache_key();
-        if let Some(s_k) = self.cache_keys.get(0) {
-            if s_k.repr().contains(init_k.repr()) {
-                init_k = s_k.clone();
-            }
-        } 
-        let mut root_number_children = if self.cache.contains_key(&init_k) { has_node_search = true; 1 } else { 0 };*/
         let mut root_number_children = if let Some(_) = cache_index { has_node_search = true; 1 } else { 0 };
         root_number_children += forced_by_propagation.0.len() + forced_by_propagation.1.len();
         if prnt {println!("\nroot forced by propagation {:?}", forced_by_propagation);
         println!("\nroot number children {}", root_number_children);
         println!("has node search {}", has_node_search);}
 
-        // The super root is used in case we have some excluded interpretations that will be added to the classical dac found from the cache exploration.
-        // In such cases, the root variable below will be a child of the super root including the sum of the excluded interpretations
+        // The super root is used for unsat compilation, in case we have some excluded interpretations that will be added to the classical dac found from the cache exploration.
+        // In such cases, the classical root node (below) will be a child of the super root, taking the sum of the excluded interpretations into account
         let mut super_root = None;
 
         let excluded_interpretations = self.compute_excluded_interpretations_at_preprocessing(&forced_by_propagation.2, &forced_by_propagation.3);
         if prnt {println!("excluded interpretations {:?}", excluded_interpretations);}
-
+        
+        // in case of unsat compilation, we add the excluded interpretations to the super root
         if !sat_compile && forced_by_propagation.2.len() > 0 && excluded_interpretations.len() > 0 {
             let super_nb_children = if has_node_search { 2 } else { 1 };
             if prnt {println!("super nb children {}", super_nb_children);}
@@ -662,6 +638,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             super_root = Some(super_sum_node);
         }
 
+        // Classical root node
         let root = dac.prod_node(root_number_children);
         let mut child_id = root.input_start();
         if prnt {println!("has node search {}", has_node_search);}
@@ -703,7 +680,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
     pub fn explore_cache<R: SemiRing>(&self, dac: &mut Dac<R>, cache_key_index: usize, c: &mut FxHashMap<usize, NodeIndex>, dist_c: &mut FxHashMap<String, NodeIndex>, 
                                     sat_compile: bool, discrepancy_limit:usize) -> NodeIndex {
-        let prnt = false;// !sat_compile;// && cache_key_index == 0;
+        let prnt = false;
         if prnt {println!("\nexplore cache key index {}", cache_key_index);}
         if let Some(child_i) = c.get(&cache_key_index) {
             return *child_i;
@@ -729,10 +706,9 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
         if prnt {println!("current bounds {:?}", current.bounds);
         println!("current max prob {}", current.max_probability);}
 
-        // Sum node with the different values the distribution can take
+        // Sum node branching on the different distribution values
         let sum_node_nb_child = current.number_children(sat_compile, discrepancy_limit);
         if sum_node_nb_child == 0 && !sat_compile {
-            //println!("no children");
             // For partial compilation, we can have entry without any children, which is a one when nonmodel compilation
             let p_node = dac.prod_node(0);
             let p_id = dac.add_node(p_node);
@@ -746,16 +722,16 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
 
         let mut sum_node_child = 0;
         // Iterate on the variables the distribution with the associated cache key for the sat children
-        for variable in current.children_variables(true) { //[..sum_node_nb_child].iter().copied() {
-            if prnt {println!("SAT PART");
-            println!("var {}, discrepancy {}", variable.0, *current.child_discrepancy.get(&variable).unwrap_or(&0));}
+        for variable in current.children_variables(true) {
+            if prnt {println!("SAT PART");}
             if *current.child_discrepancy.get(&variable).unwrap_or(&0) >= discrepancy_limit {continue;}
             if prnt{ println!("explore variable {}, distribution old i {}, var in d {}", variable.0, self.problem[current.distribution.unwrap()].old_index(), self.problem[variable].index_in_distribution().unwrap());}
 
             let number_children = if sat_compile {
+                    // Directly multiply the components, forced, and unconstrained contributions
                     current.child_keys(variable, true).len() + current.forced_choices(variable, true).len() + current.unconstrained_distribution_variables_of(variable, true).len()
                 } else {
-                    // Only link to a difference node instead of multiplying the independent components
+                    // Multiply forced and unconstraintes with a single node, which links to a difference operation that will remove the unsat contributions of all the subcomponents
                     let nb_keys = if current.child_keys(variable, true).len()>=1 {1} else {0};
                     nb_keys + current.forced_choices(variable, true).len() + current.unconstrained_distribution_variables_of(variable, true).len()
                 };
@@ -763,7 +739,7 @@ impl<B: BranchingDecision, const S: bool> Solver<B, S> {
             if prnt {println!("number children {}", number_children);
             println!("nb child key {}, nb forced {}, nb unconstrained {}", current.child_keys(variable, true).len(), current.forced_choices(variable, true).len(), current.unconstrained_distribution_variables_of(variable, true).len());
             println!("forced choices {:?}", current.forced_choices(variable, true));}
-            if number_children == 0 && (sat_compile || current.total_distributions().len()==0) {//current.total_distributions_of(variable, true).len() == 0) {
+            if number_children == 0 && (sat_compile || current.total_distributions().len()==0) {
                 if prnt {println!("we stop here");}
                 continue;
             }

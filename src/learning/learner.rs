@@ -232,6 +232,9 @@ impl <const S: bool> Learner<S> {
         &self.queries
     } */
 
+    pub fn array_f64_to_f128(&self, array: Vec<Vec<f64>>) -> Vec<Vec<Float>> {
+        array.iter().map(|row| row.iter().map(|&x| F128!(x)).collect()).collect()
+    }
 
     // --- Setters --- //
 
@@ -307,12 +310,8 @@ impl <const S: bool> Learner<S> {
         let ids = idxs.unwrap_or((0..self.train.len()).collect());
         let z_g = self.get_gradients().clone(); 
         let mut current_g = self.get_gradients().clone();
-        //let mut second_g = self.get_gradients().clone();
-        //let mut agree = vec![];
         let mut grads = vec![];
         for query_id in ids {
-            /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 { current_g = z_g.clone();}
-            else if self.learning_m == LearningMethod::Both && query_id%2==1 { second_g = z_g.clone();} */
             if self.learning_m == LearningMethod::Both { current_g = z_g.clone();}
             self.train[query_id].zero_paths();
             // Iterate on all nodes from the DAC, top-down way
@@ -336,7 +335,6 @@ impl <const S: bool> Learner<S> {
                             if self.train[query_id][child].value().to_f64() != 0.0 {
                                 val = path_val.clone() * value / self.train[query_id][child].value().to_f64();
                             }
-                            //else { println!("Division by 0, up {}, down {}", path_val.clone()*value, self.train[query_id][child].value().to_f64()); }
                             self.train[query_id][child].add_to_path_value(val);
                         },
                         NodeType::Sum => {
@@ -363,23 +361,11 @@ impl <const S: bool> Learner<S> {
                         for params in (0..self.unsoftmaxed_distributions[d].len()).filter(|i| *i != v) {
                             let weight = self.get_probability(d, params);
                             self.gradients[d][params] -= factor.clone() * weight * child_w;
-                            /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 {
-                                current_g[d][params] -= factor.clone() * weight * child_w;
-                            }
-                            else if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
-                                second_g[d][params] -= factor.clone() * weight * child_w;
-                            } */
                             if self.learning_m == LearningMethod::Both {
                                 current_g[d][params] -= factor.clone() * weight * child_w;
                             }
                             sum_other_w += weight;
                         }
-                        /* if self.learning_m == LearningMethod::Both && query_id%2 == 0 {
-                            current_g[d][v] += factor.clone() * child_w * sum_other_w.clone();
-                        }
-                        else if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
-                            second_g[d][v] += factor.clone() * child_w * sum_other_w.clone()
-                        } */
                         if self.learning_m == LearningMethod::Both {
                             current_g[d][v] += factor.clone() * child_w * sum_other_w.clone();
                         }
@@ -387,22 +373,6 @@ impl <const S: bool> Learner<S> {
                     }
                 }
             }
-            /* if self.learning_m == LearningMethod::Both && query_id%2 == 1 {
-                let mut cnt = vec![];
-                for i in 0..current_g.len(){
-                    for j in 0..current_g[i].len(){
-                        if !(current_g[i][j].is_zero() && second_g[i][j].is_zero()) {
-                            /* if (current_g[i][j].clone() * second_g[i][j].clone()) >= 0{
-                                cnt += 1.0;
-                            }
-                            total += 1.0; */
-                            cnt.push((current_g[i][j].clone() - second_g[i][j].clone()).abs().to_f64());
-                        }
-                    }
-                }
-                //total)
-                agree.push(cnt)
-            } */
             if self.learning_m == LearningMethod::Both {
                 let mut cnt = vec![];
                 for i in 0..current_g.len(){
@@ -415,11 +385,7 @@ impl <const S: bool> Learner<S> {
             else {
                 grads.push(vec![]);
             }
-            /* else if self.learning_m != LearningMethod::Both {
-                agree.push(vec![]);
-            } */
         }
-        //agree
         grads
     }
 
@@ -452,20 +418,16 @@ impl <const S: bool> Learner<S> {
         let mut train_loss = vec![0.0; self.train.len()];
         let mut train_grad = vec![0.0; self.train.len()];
         for e in 0..params.nepochs() {
-            //println!("Epoch {}", e);
             // Update the learning rate
             let learning_rate = params.lr() * params.lr_drop().powf(((1+e) as f64/ params.epoch_drop() as f64).floor());
             // Forward pass
             let predictions = self.evaluate();
             let mut other_pred = vec![];
+            // For experiments on the loss computation
             if false && self.learning_m == LearningMethod::Both {
                 for i in 0..predictions.len()/2 {
                     other_pred.push((predictions[2*i]*(1.0-predictions[2*i+1])).sqrt());
                     other_pred.push(1.0-(predictions[2*i]*(1.0-predictions[2*i+1])).sqrt());
-                    /* println!("means {} {} ", other_pred[2*i], other_pred[2*i+1]);
-                    println!("preds {} 1-{} = {}", predictions[2*i], predictions[2*i+1], (1.0-predictions[2*i+1]));
-                    println!("expecteds {} {} ", self.train.expected(2*i), self.train.expected(2*i+1));
-                    panic!("stop"); */
                 }
             }
             else {
@@ -476,18 +438,15 @@ impl <const S: bool> Learner<S> {
                 train_loss[i] = params.loss().loss(predictions[i], self.train.expected(i));
                 train_grad[i] = params.loss().gradient(other_pred[i], self.train.expected(i));//predictions[i], self.train.expected(i));
                 if params.e_weighted() && self.epsilon != 0.0 {
-                    //train_loss[i] *= 1.0 - self.train[i].epsilon()/self.epsilon;
                     let l = self.train.len() as f64;
                     train_grad[i] *= (1.0 - self.train[i].epsilon()/self.epsilon) * l / (l - 1.0);
                 }
             }
             let avg_loss = train_loss.iter().sum::<f64>() / train_loss.len() as f64;
             let grads = self.compute_gradients(&train_grad, None);
-            //println!("softmaxed: {:?}", self.get_softmaxed_array());
             self.log.log_epoch(&train_loss, learning_rate, self.epsilon, &predictions, &grads, &self.get_softmaxed_array());
             // Update the parameters
             self.update_distributions(learning_rate);
-            // Log the epoch
             
             // TODO Remove
             if self.test.len() != 0 {
@@ -507,7 +466,7 @@ impl <const S: bool> Learner<S> {
                 break;
             }
 
-            if e != params.nepochs() - 1 && params.recompile() { //&& e!=0 && e%10==0 {
+            if e != params.nepochs() - 1 && params.recompile() {
                 println!("Recompiling at epoch {}", e);
                 self.recompile_dacs(branching, approx, params.compilation_timeout(), self.learning_m, params.lds_opti());
             }
