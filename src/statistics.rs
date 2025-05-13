@@ -10,6 +10,8 @@ pub struct Statistics<const B: bool> {
     total_and_decompositions: usize,
     number_unsat: usize,
     peak_memory: f32,
+    lower_bound: f64,
+    upper_bound: f64,
 }
 
 impl<const B: bool> Statistics<B> {
@@ -57,6 +59,18 @@ impl<const B: bool> Statistics<B> {
             self.peak_memory = peak_memory;
         }
     }
+
+    pub fn lower_bound(&mut self, lower_bound: f64) {
+        if B {
+            self.lower_bound = lower_bound;
+        }
+    }
+
+    pub fn upper_bound(&mut self, upper_bound: f64) {
+        if B {
+            self.upper_bound = upper_bound;
+        }
+    }
     
     pub fn print(&self) {
         if B {
@@ -76,7 +90,9 @@ impl<const B: bool> fmt::Display for Statistics<B> {
                 1.0
             };
             writeln!(f,
-                "cache_hit {:.3} | OR nodes {} | AND nodes {} | avg decomposition {} | #UNSAT {} | Peak memory usage {} Mb",
+                "lower bound {} | upper bound {} | cache_hit {:.3} | OR nodes {} | AND nodes {} | avg decomposition {} | #UNSAT {} | Peak memory usage {} Mb",
+                self.lower_bound,
+                self.upper_bound,
                 cache_hit_percentages,
                 self.number_or_nodes,
                 self.number_and_nodes,

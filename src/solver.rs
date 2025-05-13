@@ -111,6 +111,8 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             }
             let sol = self.do_discrepancy_iteration(usize::MAX, self.parameters.epsilon);
             self.statistics.peak_memory(PEAK_ALLOC.peak_usage_as_mb());
+            self.statistics.lower_bound(sol.bounds().0);
+            self.statistics.upper_bound(sol.bounds().1);
             self.statistics.print();
             sol
         } else {

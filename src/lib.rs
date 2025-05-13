@@ -223,7 +223,9 @@ pub fn search(args: Args) -> f64 {
             }
         },
     };
-    solution.print();
+    if !args.statistics {
+        solution.print();
+    }
     solution.to_f64()
 }
 
@@ -241,7 +243,9 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
         GenericSolver::LogSearch(mut solver) => solver.search(false),
         _ => panic!("Non search solver used in search"),
     };
-    solution.print();
+    if !args.statistics {
+        solution.print();
+    }
     solution.bounds()
 }
 
@@ -291,7 +295,9 @@ pub fn compile(args: Args) -> f64 {
         }
     }
     let solution = ac.solution();
-    solution.print();
+    if !args.statistics {
+        solution.print();
+    }
     solution.to_f64()
 }
 
