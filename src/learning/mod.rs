@@ -3,9 +3,8 @@ use malachite::base::num::arithmetic::traits::{Abs, Pow};
 
 use crate::{Loss, Optimizer};
 use crate::common::rational;
-
+use crate::{Args, Command};
 pub mod learner;
-mod logger;
 
 pub struct LearnParameters {
     /// The initial learning rate
@@ -37,6 +36,47 @@ pub struct LearnParameters {
 }
 
 impl LearnParameters {
+
+    pub fn from_args(args: Args) -> Self {
+        match args.subcommand.unwrap() {
+            Command::Learn {
+            trainfile: _,
+            testfile: _,
+            outfolder: _,
+            lr,
+            nepochs,
+            ltimeout,
+            loss,
+            jobs: _,
+            optimizer,
+            lr_drop,
+            epoch_drop,
+            early_stop_threshold,
+            early_stop_delta,
+            patience,
+            equal_init: _,
+            recompile,
+            e_weighted,
+            } => {
+                Self {
+                    lr,
+                    nepochs,
+                    compilation_timeout: args.timeout,
+                    learn_timeout: ltimeout,
+                    loss,
+                    optimizer,
+                    lr_drop,
+                    epoch_drop,
+                    early_stop_threshold: rational(early_stop_threshold),
+                    early_stop_delta,
+                    patience,
+                    recompile,
+                    e_weighted,
+                }
+            },
+            _ => panic!("Creating learning parameters for non-learn command-line input"),
+        }
+    }
     
     pub fn new(lr: f64, nepochs: usize, compilation_timeout: u64, learn_timeout: u64, loss: Loss, optimizer: Optimizer, lr_drop: f64, epoch_drop: usize, 
                early_stop_threshold: f64, early_stop_delta: f64, patience: usize, recompile:bool, e_weighted:bool) -> Self {

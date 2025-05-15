@@ -1,6 +1,7 @@
 // Re-export the modules
 mod solver;
-mod statistics;
+mod logger;
+mod parameters;
 pub mod common;
 mod branching;
 pub mod core;
@@ -30,9 +31,9 @@ use propagator::Propagator;
 pub use common::*;
 use branching::*;
 use caching::*;
+use parameters::*;
 
 pub use solver::Solver;
-use solver::SolverParameters;
 
 use peak_alloc::PeakAlloc;
 #[global_allocator]
@@ -67,9 +68,12 @@ pub struct Args {
     /// Epsilon, the quality of the approximation (must be between greater or equal to 0). If 0 or absent, performs exact search
     #[clap(short, long, default_value_t=0.0)]
     pub epsilon: f64,
-    /// If epsilon present, use the appropriate approximate method
-    #[clap(short, long, value_enum, default_value_t=ApproximateMethod::Bounds)]
-    pub approx: ApproximateMethod,
+    /// Should the solver run lds?
+    #[clap(long, default_value_t=false)]
+    pub lds: bool,
+    /// Should the solver approximate sub-problems ?
+    #[clap(long, default_value_t=false)]
+    pub approx_subproblems: bool,
     #[clap(subcommand)]
     pub subcommand: Option<Command>,
 }
@@ -86,7 +90,8 @@ impl Default for Args {
             statistics: false,
             memory: u64::MAX,
             epsilon: 0.0,
-            approx: ApproximateMethod::Bounds,
+            lds: false,
+            approx_subproblems: false,
             subcommand: None,
         }
     }
@@ -117,9 +122,6 @@ pub enum Command {
         /// Number of epochs
         #[clap(long, default_value_t=6000)]
         nepochs: usize,
-        /// If present, save a detailled csv of the training and use a codified output filename
-        #[clap(long, short, action)]
-        do_log: bool,
         /// If present, define the learning timeout
         #[clap(long, default_value_t=u64::MAX)]
         ltimeout: u64,
@@ -164,13 +166,6 @@ pub enum Command {
     },
 }
 
-impl Args {
-
-    fn solver_param(&self) -> SolverParameters {
-        SolverParameters::new(self.memory, self.epsilon, self.timeout)
-    }
-}
-
 impl Command {
 
     pub fn default_learn_args() -> Self {
@@ -180,7 +175,6 @@ impl Command {
             outfolder: None,
             lr: 0.3,
             nepochs: 6000,
-            do_log: false,
             ltimeout: u64::MAX,
             loss: Loss::MAE,
             jobs: 1,
@@ -198,30 +192,19 @@ impl Command {
 }
 
 pub fn search(args: Args) -> f64 {
-    let parameters = args.solver_param();
+    let mut parameters = Parameters::default();
+    parameters.update_from_args(&args);
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
     let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
     let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
-
-    let solution = match args.approx {
-        ApproximateMethod::Bounds => {
-            match solver {
-                GenericSolver::Search(mut solver) => solver.search(false),
-                GenericSolver::LogSearch(mut solver) => solver.search(false),
-                _ => panic!("Non search solver used in search"),
-            }
-        },
-        ApproximateMethod::LDS => {
-            match solver {
-                GenericSolver::Search(mut solver) => solver.search(true),
-                GenericSolver::LogSearch(mut solver) => solver.search(true),
-                _ => panic!("Non search solver used in search"),
-            }
-        },
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, args.statistics, false);
+    let solution = match solver {
+        GenericSolver::Search(mut solver) => solver.search(&parameters),
+        GenericSolver::LogSearch(mut solver) => solver.search(&parameters),
+        _ => panic!("Non search solver used in search"),
     };
     if !args.statistics {
         solution.print();
@@ -230,17 +213,18 @@ pub fn search(args: Args) -> f64 {
 }
 
 pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) -> (f64, f64) {
-    let parameters = args.solver_param();
+    let mut parameters = Parameters::default();
+    parameters.update_from_args(&args);
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| rational(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
     let problem = create_problem(&distributions_rational, clauses, &mut state);
     let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
     let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, false);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, args.statistics, false);
     let solution = match solver {
-        GenericSolver::Search(mut solver) => solver.search(false),
-        GenericSolver::LogSearch(mut solver) => solver.search(false),
+        GenericSolver::Search(mut solver) => solver.search(&parameters),
+        GenericSolver::LogSearch(mut solver) => solver.search(&parameters),
         _ => panic!("Non search solver used in search"),
     };
     if !args.statistics {
@@ -250,14 +234,13 @@ pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) 
 }
 
 pub fn compile(args: Args) -> f64 {
-    let parameters = args.solver_param();
     let mut state = StateManager::default();
     let propagator = Propagator::new(&mut state);
     let parser = parser_from_input(args.input.clone(), args.evidence.clone());
     let problem = parser.problem_from_file(&mut state);
     let caching_scheme = CachingScheme::new(!args.two_level_caching_deactivate, args.caching);
     let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, parameters, args.statistics, true);
+    let solver = generic_solver(problem, state, component_extractor, args.branching, propagator, args.statistics, true);
 
     let mut ac: Dac = match args.approx {
         ApproximateMethod::Bounds => {
@@ -314,51 +297,20 @@ pub fn parse_csv(filename: PathBuf) -> Vec<(OsString, f64)> {
 }
 
 pub fn learn(args: Args) {
-    if let Some(Command::Learn { trainfile: _,
-                    testfile: _,
-                    outfolder: _,
-                    lr,
-                    nepochs,
-                    do_log,
-                    ltimeout,
-                    loss,
-                    jobs: _,
-                    optimizer,
-                    lr_drop,
-                    epoch_drop,
-                    early_stop_threshold,
-                    early_stop_delta,
-                    patience, 
-                    equal_init: _,
-                    recompile,
-                    e_weighted}) = args.subcommand {
-        let params = LearnParameters::new(
-            lr,
-            nepochs,
-            args.timeout,
-            ltimeout,
-            loss,
-            optimizer,
-            lr_drop,
-            epoch_drop,
-            early_stop_threshold,
-            early_stop_delta,
-            patience,
-            recompile,
-            e_weighted,
-        );
-        let approx = args.approx;
-        let branching = args.branching;
-        let caching = args.caching;
-        let two_level_caching = !args.two_level_caching_deactivate;
-        if do_log {
-            let mut learner = Learner::<true>::new(args.input.clone(), args);
-            learner.train(&params, branching, two_level_caching, caching, approx);
-        } else {
-            let mut learner = Learner::<false>::new(args.input.clone(), args);
-            learner.train(&params, branching, two_level_caching, caching, approx);
-        };
-    }
+    let input = args.input.clone();
+    let do_log = args.statistics;
+    let two_level_caching = !args.two_level_caching_deactivate;
+    let approx = args.approx;
+    let branching = args.branching;
+    let caching = args.caching;
+    let params = LearnParameters::from_args(args);
+    if do_log {
+        let mut learner = Learner::<true>::new(input, args);
+        learner.train(&params, branching, two_level_caching, caching, approx);
+    } else {
+        let mut learner = Learner::<false>::new(input, args);
+        learner.train(&params, branching, two_level_caching, caching, approx);
+    };
 }
 
 impl std::fmt::Display for Loss {
@@ -377,7 +329,7 @@ pub enum GenericSolver {
     LogCompiler(Solver<true, true>),
 }
 
-pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, parameters: SolverParameters, stat: bool, compile: bool) -> GenericSolver {
+pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, branching: Branching, propagator: Propagator, stat: bool, compile: bool) -> GenericSolver {
     let branching: Box<dyn BranchingDecision> = match branching {
         Branching::MinInDegree => Box::<MinInDegree>::default(),
         Branching::MinOutDegree => Box::<MinOutDegree>::default(),
@@ -385,16 +337,16 @@ pub fn generic_solver(problem: Problem, state: StateManager, component_extractor
         Branching::DLCSVar => Box::<DLCSVar>::default(),
     };
     if !compile && !stat {
-        let solver = Solver::<false, false>::new(problem, state, component_extractor, branching, propagator, parameters);
+        let solver = Solver::<false, false>::new(problem, state, component_extractor, branching, propagator);
         GenericSolver::Search(solver)
     } else if !compile && stat {
-        let solver = Solver::<true, false>::new(problem, state, component_extractor, branching, propagator, parameters);
+        let solver = Solver::<true, false>::new(problem, state, component_extractor, branching, propagator);
         GenericSolver::LogSearch(solver)
     } else if compile && !stat {
-        let solver = Solver::<false, true>::new(problem, state, component_extractor, branching, propagator, parameters);
+        let solver = Solver::<false, true>::new(problem, state, component_extractor, branching, propagator);
         GenericSolver::Compiler(solver)
     } else {
-        let solver = Solver::<true, true>::new(problem, state, component_extractor, branching, propagator, parameters);
+        let solver = Solver::<true, true>::new(problem, state, component_extractor, branching, propagator);
         GenericSolver::LogCompiler(solver)
     }
 }

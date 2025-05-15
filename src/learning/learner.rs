@@ -21,7 +21,7 @@ use search_trail::StateManager;
 use std::time::{Instant, Duration};
 use crate::ac::ac::*;
 use crate::ac::node::NodeType;
-use super::logger::Logger;
+use crate::logger::Logger;
 use crate::*;
 use rayon::prelude::*;
 use crate::common::rational;
@@ -53,7 +53,6 @@ impl <const S: bool> Learner<S> {
                                 outfolder,
                                 lr: _,
                                 nepochs: _,
-                                do_log: _,
                                 ltimeout: _,
                                 loss: _,
                                 jobs,
@@ -77,21 +76,11 @@ impl <const S: bool> Learner<S> {
             let mut test_clauses = vec![];
             for (query, _) in train_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
                 clauses.push(c);
             }
             for (query, _) in test_queries.iter() {
                 let q_parser = parser_from_input(input.clone(), Some(query.clone()));
-                /* let mut state = StateManager::default();
-                let problem = q_parser.problem_from_file(&mut state);
-                let c: Vec<Vec<isize>> = problem.clauses().iter().map(|c| c.iter().map(|l| 
-                    if l.is_positive() {(problem[l.to_variable()].old_index() + 1) as isize}
-                    else {(problem[l.to_variable()].old_index() + 1) as isize * -1}).collect()).collect(); */
                 let c = q_parser.clauses_from_file();
                 test_clauses.push(c);
             }
@@ -152,7 +141,8 @@ impl <const S: bool> Learner<S> {
                 test_dataset.add_query(d, expected);
             }
             // Initializing the logger
-            let log = Logger::new(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
+            let mut log: Logger<S> = Logger::default();
+            log.train_init(outfolder.as_ref(), train_dataset.len(), test_dataset.len());
             Self {
                 train: train_dataset,
                 test: test_dataset,
@@ -316,7 +306,7 @@ impl <const S: bool> Learner<S> {
     pub fn train(&mut self, params: &LearnParameters, branching: Branching, two_level_caching: bool, caching: Caching,  approx:ApproximateMethod) {
         let mut prev_loss = rational(1.0);
         let mut count_no_improve = 0;
-        self.log.start();
+        self.log.start_train();
         let start = Instant::now();
         let to = Duration::from_secs(params.learning_timeout());
         
