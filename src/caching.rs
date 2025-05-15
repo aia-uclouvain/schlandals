@@ -6,18 +6,17 @@ use std::hash::Hash;
 
 pub struct CachingScheme {
     strategy: Box<dyn CachingStrategy + Sync + Send>,
-    two_level_caching: bool,
 }
 
 impl CachingScheme {
 
-    pub fn new(two_level_caching: bool, caching: Caching) -> Self {
+    pub fn new(caching: Caching) -> Self {
         let strategy: Box<dyn CachingStrategy + Sync + Send> = match caching {
             Caching::Hybrid => Box::<Hybrid>::default(),
             Caching::OmitBinary => Box::<OmitBinary>::default(),
             Caching::OmitImplicit => Box::<OmitImplicit>::default(),
         };
-        Self { strategy, two_level_caching }
+        Self { strategy }
     }
 
     pub fn get_key(&self, problem: &Problem, clauses: &[ClauseIndex], variables: &[VariableIndex], hash: u64, state: &StateManager) -> CacheKey {
@@ -25,7 +24,6 @@ impl CachingScheme {
         CacheKey {
             hash,
             repr,
-            two_level: self.two_level_caching,
         }
     }
 
@@ -46,15 +44,13 @@ impl CachingScheme {
 pub struct CacheKey {
     hash: u64,
     repr: Vec<usize>,
-    two_level: bool,
 }
 
 impl CacheKey {
-    pub fn new(hash: u64, repr: Vec<usize>, two_level: bool) -> Self {
+    pub fn new(hash: u64, repr: Vec<usize>) -> Self {
         Self {
             hash,
             repr,
-            two_level,
         }
     }
 }
@@ -62,11 +58,7 @@ impl CacheKey {
 impl Hash for CacheKey {
 
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        if self.two_level {
-            self.hash.hash(state);
-        } else {
-            self.repr.hash(state);
-        }
+        self.repr.hash(state);
     }
 
 }

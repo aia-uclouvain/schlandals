@@ -1,12 +1,11 @@
-use schlandals::Args;
-use schlandals::Command;
+use schlandals::args::Args;
 use clap::Parser;
 
 fn main() {
     let args = Args::parse();
-    match args.subcommand {
-        Some(Command::Compile { .. }) => { schlandals::compile(args); },
-        Some(Command::Learn { .. }) => { schlandals::learn(args); },
-        None => {schlandals::search(args); },
-    };
+    if args.learning() {
+        schlandals::learn(args);
+    } else {
+        schlandals::solve(args);
+    }
 }

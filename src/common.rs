@@ -16,7 +16,7 @@ pub fn rational_to_f64(r: &Rational) -> f64 {
     f64::rounding_from(r, Nearest).0
 }
 
-pub const FLOAT_CMP_THRESHOLD: f64 = 0.00000;
+pub const FLOAT_CMP_THRESHOLD: f64 = 0.0000000001;
 
 pub type Bounds = (Rational, Rational);
 

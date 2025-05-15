@@ -43,14 +43,14 @@ pub struct Dac {
     start_computational_nodes: usize,
     /// How much seconds was needed to compile this diagram
     compile_time: u64,
-    /// epsilon of the circuit output
-    epsilon: f64,
+    /// Is the circuit fully compiled
+    complete: bool,
 }
 
 impl Dac {
 
     /// Creates a new empty DAC. An input node is created for each distribution in the problem.
-    pub fn new(epsilon: f64) -> Self {
+    pub fn new(complete: bool) -> Self {
         Self {
             nodes: vec![],
             inputs: vec![],
@@ -58,7 +58,7 @@ impl Dac {
             root: None,
             start_computational_nodes: 0,
             compile_time: u64::MAX,
-            epsilon,
+            complete,
         }
     }
 
@@ -75,12 +75,8 @@ impl Dac {
         self.len() == 0
     }
 
-    pub fn epsilon(&self) -> f64 {
-        self.epsilon
-    }
-
     pub fn is_complete(&self) -> bool {
-        self.epsilon.abs() < FLOAT_CMP_THRESHOLD
+        self.complete
     }
 
     /// Adds a prod node to the circuit. Returns its index.
@@ -170,10 +166,11 @@ impl Dac {
 
     /// Updates the values of the distributions to the given values
     pub fn reset_distributions(&mut self, distributions: &[Vec<Rational>]) {
-        // TODO: Stop after the last distribution
         for node in (0..self.nodes.len()).map(NodeIndex) {
             if let NodeType::Distribution { d, v } = self[node].get_type() {
                 self[node].set_value(distributions[d][v].clone());
+            } else {
+                break;
             }
         }
     }
@@ -214,7 +211,7 @@ impl Dac {
                     let mut v = rational(0.0);
                     for idx in start..end {
                         let child = self.inputs[idx];
-                        v *= self[child].value();
+                        v += self[child].value();
                     }
                     v
                 } else {
@@ -226,8 +223,6 @@ impl Dac {
         // Last node is the root since it has the higher layer
         self.nodes.last().unwrap().value().clone()
     }
-
-
 }
 
 // --- ITERATOR ---
@@ -361,7 +356,7 @@ impl Dac {
             root: None,
             start_computational_nodes: 0,
             compile_time: 0,
-            epsilon: 0.0,
+            complete: true,
         };
         let file = File::open(filepath).unwrap();
         let reader = BufReader::new(file);
@@ -403,6 +398,6 @@ impl Dac {
 
 impl Default for Dac {
     fn default() -> Self {
-        Self::new(0.0)
+        Self::new(true)
     }
 }
