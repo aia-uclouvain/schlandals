@@ -11,9 +11,9 @@ use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
 use crate::caching::CacheKey;
+use crate::args::Args;
 use malachite::rational::Rational;
 use std::time::Instant;
-use crate::parameters::*;
 
 type DistributionChoice = (DistributionIndex, VariableIndex);
 type UnconstrainedDistribution = (DistributionIndex, Vec<VariableIndex>);
@@ -77,7 +77,6 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             preproc_in: None,
             preproc_out: None,
             cache_keys: vec![],
-            bound_approx: false,
         }
     }
 
@@ -88,7 +87,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
     }
 
     /// Solves the problem represented by this solver using a DPLL-search based method.
-    pub fn search(&mut self, parameters: &Parameters) -> Solution {
+    pub fn search(&mut self, parameters: &SolverParameters) -> Solution {
         let max = self.problem.distributions_iter().map(|d| rational(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
         if let Some(sol) = self.preprocess(&max, parameters) {
@@ -99,13 +98,10 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         if self.problem.number_clauses() == 0 {
             let lb = self.preproc_in.clone().unwrap();
             let ub = max - self.preproc_out.clone().unwrap();
-            return Solution::new(lb, ub, parameters.start().elapsed().as_secs());
+            return Solution::new(lb, ub, parameters.start.elapsed().as_secs());
         }
-        if !parameters.is_lds() {
-            if parameters.epsilon() > 0.0 {
-                self.bound_approx = true;
-            }
-            let sol = self.do_discrepancy_iteration(usize::MAX, parameters.epsilon(), parameters);
+        if !parameters.lds {
+            let sol = self.do_discrepancy_iteration(usize::MAX, parameters.epsilon, parameters);
             self.statistics.peak_memory(PEAK_ALLOC.peak_usage_as_mb());
             self.statistics.lower_bound(sol.bounds().0);
             self.statistics.upper_bound(sol.bounds().1);
@@ -121,11 +117,11 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                 } else {
                     discrepancy += 1;
                 }
-                if parameters.start().elapsed().as_secs() < parameters.timeout() || complete_sol.as_ref().is_none() {
+                if parameters.start.elapsed().as_secs() < parameters.timeout || complete_sol.as_ref().is_none() {
                     solution.print();
                     complete_sol = Some(solution);
                 }
-                if parameters.start().elapsed().as_secs() >= parameters.timeout() || complete_sol.as_ref().unwrap().has_converged(parameters.epsilon()) {
+                if parameters.start.elapsed().as_secs() >= parameters.timeout || complete_sol.as_ref().unwrap().has_converged(parameters.epsilon) {
                     self.statistics.peak_memory(PEAK_ALLOC.peak_usage_as_mb());
                     self.statistics.print();
                     return complete_sol.unwrap()
@@ -136,7 +132,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
 
     /// Preprocess the problem, if the problem is solved during the preprocess, return a solution.
     /// Returns None otherwise
-    fn preprocess(&mut self, max: &Rational, parameters: &Parameters) -> Option<Solution> {
+    fn preprocess(&mut self, max: &Rational, parameters: &SolverParameters) -> Option<Solution> {
         self.propagator.init(self.problem.number_clauses());
         let mut preprocessor = Preprocessor::new(
             &mut self.problem,
@@ -149,7 +145,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             return Some(Solution::new(
                 rational(0.0),
                 rational(0.0),
-                parameters.start().elapsed().as_secs(),
+                parameters.start.elapsed().as_secs(),
             ));
         }
         self.preproc_in = Some(preproc.unwrap());
@@ -193,18 +189,18 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         }
     }
 
-    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, eps: f64, parameters: &Parameters) -> Solution {
+    pub fn do_discrepancy_iteration(&mut self, discrepancy: usize, eps: f64, parameters: &SolverParameters) -> Solution {
         let result = self.pwmc(ComponentIndex(0), 1, discrepancy, eps, parameters);
         let p_in = result.bounds.0.clone();
         let p_out = result.bounds.1.clone();
         let lb = p_in * self.preproc_in.clone().unwrap();
         let ub: Rational = rational(1.0) - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
         //let ub: Rational = max - (self.preproc_out.clone().unwrap() + p_out * self.preproc_in.clone().unwrap());
-        Solution::new(lb, ub, parameters.start().elapsed().as_secs())
+        Solution::new(lb, ub, parameters.start.elapsed().as_secs())
     }
 
-    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, eps: f64, parameters: &Parameters) -> SearchResult {
-        if PEAK_ALLOC.current_usage_as_mb() as u64 >= parameters.memory_limit() {
+    fn pwmc(&mut self, component: ComponentIndex, level: isize, discrepancy: usize, eps: f64, parameters: &SolverParameters) -> SearchResult {
+        if PEAK_ALLOC.current_usage_as_mb() as u64 >= parameters.memory_limit {
             self.cache.clear();
         }
         let cache_key = self.component_extractor[component].get_cache_key();
@@ -237,11 +233,11 @@ impl<const S: bool, const C: bool> Solver<S, C> {
                 if self.problem[variable].is_fixed(&self.state) {
                     continue;
                 }
-                if parameters.start().elapsed().as_secs() >= parameters.timeout() || child_id == discrepancy {
+                if parameters.start.elapsed().as_secs() >= parameters.timeout || child_id == discrepancy {
                     complete = false;
                     break;
                 }
-                if self.bound_approx {
+                if parameters.approx_subproblems {
                     let ub = max_probability.clone() - new_p_out.clone();
                     let lb = new_p_in.clone();
                     if ub <= lb*rational((1.0 + eps)*(1.0 + eps)) {
@@ -326,7 +322,7 @@ impl<const S: bool, const C: bool> Solver<S, C> {
 
 impl<const S: bool, const C: bool> Solver<S, C> {
 
-    pub fn compile(&mut self, parameters: &Parameters) -> Dac {
+    pub fn compile(&mut self, parameters: &SolverParameters) -> Dac {
         let start = Instant::now();
         let max = self.problem.distributions_iter().map(|d| rational(self.problem[d].remaining(&self.state))).product::<Rational>();
         self.state.save_state();
@@ -339,19 +335,14 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         }
         // Perform the actual search that will fill the cache
         if self.problem.number_clauses() == 0 {
-            let mut ac = self.build_ac(0.0, &forced_by_propagation);
+            let mut ac = self.build_ac(true, &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());
             return ac
         }
-        if parameters.is_lds() {
-            let sol = self.do_discrepancy_iteration(usize::MAX, parameters.epsilon(), parameters);
+        if !parameters.lds {
+            let sol = self.do_discrepancy_iteration(usize::MAX, parameters.epsilon, parameters);
             self.statistics.print();
-            if sol.has_converged(0.0) && sol.bounds().0 < FLOAT_CMP_THRESHOLD {
-                let mut ac = Dac::default();
-                ac.set_compile_time(start.elapsed().as_secs());
-                return ac;
-            }
-            let mut ac = self.build_ac(sol.epsilon(), &forced_by_propagation);
+            let mut ac = self.build_ac(sol.has_converged(0.0), &forced_by_propagation);
             ac.set_compile_time(start.elapsed().as_secs());
             ac
         } else {
@@ -360,13 +351,13 @@ impl<const S: bool, const C: bool> Solver<S, C> {
             let mut complete_ac = None;
             loop {
                 let solution = self.do_discrepancy_iteration(discrepancy, 0.0, parameters);
-                if parameters.start().elapsed().as_secs() < parameters.timeout() || complete_sol.as_ref().is_none() {
-                    complete_ac = Some(self.build_ac(solution.epsilon(), &forced_by_propagation));
+                if parameters.start.elapsed().as_secs() < parameters.timeout || complete_sol.as_ref().is_none() {
+                    complete_ac = Some(self.build_ac(solution.has_converged(0.0), &forced_by_propagation));
                     complete_ac.as_mut().unwrap().set_compile_time(start.elapsed().as_secs());
                     //solution.print();
                     complete_sol = Some(solution);
                 }
-                if parameters.start().elapsed().as_secs() >= parameters.timeout() || complete_sol.as_ref().unwrap().has_converged(parameters.epsilon()) {
+                if parameters.start.elapsed().as_secs() >= parameters.timeout || complete_sol.as_ref().unwrap().has_converged(parameters.epsilon) {
                     self.statistics.print();
                     complete_sol.unwrap().print();
                     return complete_ac.unwrap();
@@ -376,8 +367,8 @@ impl<const S: bool, const C: bool> Solver<S, C> {
         }        
     }
 
-    pub fn build_ac(&self, epsilon: f64, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac {
-        let mut dac = Dac::new(epsilon);
+    pub fn build_ac(&self, complete: bool, forced_by_propagation:&(Vec<DistributionChoice>, Vec<UnconstrainedDistribution>)) -> Dac {
+        let mut dac = Dac::new(complete);
         // Adds the distributions in the circuit
         for distribution in self.problem.distributions_iter() {
             for v in self.problem[distribution].iter_variables() {
@@ -597,4 +588,34 @@ struct SearchResult {
     bounds: (Rational, Rational),
     cache_index: usize,
     complete: bool,
+}
+
+pub struct SolverParameters {
+    /// Memory limit for the solving, in megabytes. When reached, the cache is cleared. Note that
+    /// this parameter should not be used for compilation.
+    memory_limit: u64,
+    /// Approximation factor
+    epsilon: f64,
+    /// Time limit for the search
+    timeout: u64,
+    /// Time at which the solving started
+    start: Instant,
+    /// If true, perform LDS
+    lds: bool,
+    /// If true, approximate sub-problems to have a epsilon-approximation at the root
+    approx_subproblems: bool,
+}
+
+impl SolverParameters {
+
+    pub fn new(args: &Args) -> Self {
+        Self {
+            memory_limit: args.memory(),
+            epsilon: args.epsilon(),
+            timeout: args.timeout(),
+            start: Instant::now(),
+            lds: args.lds(),
+            approx_subproblems: args.approx_subproblems(),
+        }
+    }
 }
