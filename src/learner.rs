@@ -132,15 +132,6 @@ impl <const S: bool> Learner<S> {
 
     // --- Setters --- //
 
-    /// Set the gradients of the parameters to 0
-    pub fn zero_grads(&mut self) {
-        for grad in self.gradients.iter_mut() {
-            for el in grad.iter_mut() {
-                *el = rational(0.0);
-            }
-        }
-    }
-
     // --- Evaluation --- //
 
     // TODO: Same code, should not be duplicated
@@ -184,9 +175,15 @@ impl <const S: bool> Learner<S> {
     // The computation is done in a top-down way, starting from the root node
     // and uses the chaine rule of the derivative to cumulatively compute the gradient in the leaves
     pub fn compute_gradients(&mut self, gradient_loss: &[Rational]) {
-        self.zero_grads();
+        // First, reset all gradients for all parameters
+        for grad in self.gradients.iter_mut() {
+            for el in grad.iter_mut() {
+                *el = rational(0.0);
+            }
+        }
+        // Then, compute for each query, the gradient through its AC
+        // We assume that the paths values have been reset during the evaluation of the AC.
         for query_id in 0..self.train.len() {
-            self.train[query_id].zero_paths();
             // Iterate on all nodes from the DAC, top-down way
             for node in self.train[query_id].iter_rev() {
 

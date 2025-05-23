@@ -175,23 +175,15 @@ impl Dac {
         }
     }
 
-    /// Resets the path value of each node
-    pub fn zero_paths(&mut self) {
-        if self.is_empty() {
-            return;
-        }
-        for node in (0..self.nodes.len()-1).map(NodeIndex) {
-            self[node].set_path_value(rational(0.0));
-        }
-        self.nodes.last_mut().unwrap().set_path_value(rational(1.0));
-    }
-
     /// Evaluates the circuits, layer by layer (starting from the input distribution, then layer 0)
+    /// Also reset the paths values for gradient computation.
     pub fn evaluate(&mut self) -> Rational {
         if self.is_empty() {
             return rational(0.0);
         }
+        self.nodes.last_mut().unwrap().set_path_value(rational(1.0));
         for node in (self.start_computational_nodes..self.nodes.len()).map(NodeIndex) {
+            self[node].set_path_value(rational(0.0));
             let start = self.nodes[node.0].input_start();
             let end = start + self.nodes[node.0].number_inputs();
             if self[node].is_product() {
