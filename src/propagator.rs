@@ -245,7 +245,7 @@ impl Propagator {
                 }
             }
         }
-        self.set_reachability(g, state, component, extractor, level);
+        self.set_reachability(g, state, component, extractor);
         for clause in extractor.component_iter(component) {
             if !g[clause].is_learned() && !self.clause_flags[clause.0].is_reachable() {
                 self.add_unconstrained_clause(clause, g, state);
@@ -296,7 +296,7 @@ impl Propagator {
     }
     
     /// Sets the t-reachability and f-reachability for all clauses in the component
-    fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor, level: isize) {
+    fn set_reachability(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &ComponentExtractor) {
         // First we update the parents/child in the problem and clear the flags
         for clause in extractor.component_iter(component){
             if g[clause].is_learned() {
@@ -321,9 +321,6 @@ impl Propagator {
         for clause in extractor.component_iter(component){
             if !g[clause].is_learned() && g[clause].is_active(state) {
                 if g[clause].is_head_f_reachable(state) {
-                    if level > 0 && self.clause_flags[clause.0].is_reachable() {
-                        println!("Clause {} is reachable", clause.0);
-                    }
                     self.set_f_reachability(g, state, clause);
                 }
                 if !g[clause].has_deterministic_in_body(state) {
