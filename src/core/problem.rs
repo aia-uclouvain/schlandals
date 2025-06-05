@@ -4,6 +4,7 @@ use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use malachite::rational::Rational;
+use crate::common::rational_to_f64;
 
 use rustc_hash::FxHashMap;
 
@@ -67,7 +68,8 @@ impl Problem {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
-            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
+            let total_mass = weights.iter().map(|p| rational_to_f64(p)).sum::<f64>();
+            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), total_mass, state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
             let mut weight_with_ids = weights.iter().enumerate().map(|(i, w)| (w.clone(),i)).collect::<Vec<(Rational, usize)>>();

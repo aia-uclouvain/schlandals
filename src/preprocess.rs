@@ -34,15 +34,6 @@ where
     pub fn preprocess(&mut self) -> Option<Rational> {
         let mut p = rational(1.0);
 
-        for variable in self.problem.variables_iter() {
-            if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 1.0 {
-                self.propagator.add_to_propagation_stack(variable, true, 0, None);
-            }
-            if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 0.0 {
-                self.propagator.add_to_propagation_stack(variable, false, 0, None);
-            }
-        }
-        
         // Find unit clauses
         for clause in self.problem.clauses_iter() {
             if self.problem[clause].is_unit(self.state) {
