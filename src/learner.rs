@@ -211,7 +211,16 @@ impl <const S: bool> Learner<S> {
                             // If it is a sum node, we simply propagate the path value to the children
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
+                        NodeType::Sub => {
+                            // If it is a sub node, we simply propagate the path value to the children. We negate the path value when encountering a sub node
+                            if child_index == 0 {
+                                self.train[query_id][child].add_to_path_value(path_val.clone());
+                            } else {
+                                self.train[query_id][child].add_to_path_value(-path_val.clone());
+                            }
+                        },
                         NodeType::Distribution { .. } => {},
+                        NodeType::Constant => {},
                     }
                     if let NodeType::Distribution { d, v } = self.train[query_id][child].get_type() {
                         // Compute the gradient for children that are leaf distributions

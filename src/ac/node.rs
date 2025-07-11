@@ -10,8 +10,12 @@ pub enum NodeType {
     Product,
     /// Sum nodes
     Sum,
+    /// Subtraction node
+    Sub,
     /// Distribution node. Send the value P[d = v] as output and act as input of the circuit
     Distribution {d: usize, v: usize},
+    /// Constant node
+    Constant,
 }
 
 macro_rules! is_node_type {
@@ -62,11 +66,32 @@ impl Node {
         }
     }
 
+    /// Returns a new sum node
+    pub fn sub() -> Self {
+        Node {
+            value: rational(0.0),
+            nodetype: NodeType::Sub,
+            input_start: 0,
+            number_inputs: 0,
+            path_value: rational(1.0),
+        }
+    }
+
     /// Returns a new distribution node with P[distribution = value] = probability
     pub fn distribution(distribution: usize, value: usize, probability: Rational) -> Self {
         Node {
             value: probability,
             nodetype: NodeType::Distribution {d: distribution, v: value},
+            input_start: 0,
+            number_inputs: 0,
+            path_value: rational(1.0),
+        }
+    }
+
+    pub fn constant(value: Rational) -> Self {
+        Node {
+            value,
+            nodetype: NodeType::Constant,
             input_start: 0,
             number_inputs: 0,
             path_value: rational(1.0),
@@ -86,6 +111,16 @@ impl Node {
     /// Returns true iff the node is a sum node
     pub fn is_sum(&self) -> bool {
         is_node_type!(self.nodetype, NodeType::Sum)
+    }
+
+    /// Returns true iff the node is a sub node
+    pub fn is_sub(&self) -> bool {
+        is_node_type!(self.nodetype, NodeType::Sub)
+    }
+
+    /// Returns true iff the node is a constant node
+    pub fn is_constant(&self) -> bool {
+        is_node_type!(self.nodetype, NodeType::Constant)
     }
 
     /// Returns a reference to the value stored in the node

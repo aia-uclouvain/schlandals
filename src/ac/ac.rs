@@ -17,10 +17,11 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use rustc_hash::FxHashMap;
-use crate::common::*;
 
+use crate::common::*;
 use crate::core::problem::{Problem, DistributionIndex, VariableIndex};
 use crate::common::Solution;
+use crate::solver::DistributionPartialDomain;
 
 use super::node::*;
 use malachite::rational::Rational;
@@ -36,9 +37,11 @@ pub struct Dac {
     /// their inputs in the circuit
     inputs: Vec<NodeIndex>,
     /// Mapping between the (distribution, value) and the node index for distribution nodes
-    distribution_mapping: FxHashMap<(usize, usize), NodeIndex>,
-    /// Root of the circuit
-    root: Option<NodeIndex>,
+    distribution_mapping: FxHashMap<Vec<usize>, NodeIndex>,
+    /// Root of the circuit for the weighted model count output
+    root_model: Option<NodeIndex>,
+    /// Root of the circuit for the weighted non-model count output
+    root_non_model: Option<NodeIndex>,
     /// Index of the first node that is not an input
     start_computational_nodes: usize,
     /// How much seconds was needed to compile this diagram
@@ -55,10 +58,37 @@ impl Dac {
             nodes: vec![],
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
-            root: None,
+            root_model: None,
+            root_non_model: None,
             start_computational_nodes: 0,
             compile_time: u64::MAX,
             complete,
+        }
+    }
+
+    pub fn sat() -> Self {
+        Self {
+            nodes: vec![Node::product(), Node::sum()],
+            inputs: vec![],
+            distribution_mapping: FxHashMap::default(),
+            root_model: Some(NodeIndex(0)),
+            root_non_model: Some(NodeIndex(1)),
+            start_computational_nodes: 0,
+            compile_time: 0,
+            complete: true,
+        }
+    }
+
+    pub fn unsat() -> Self {
+        Self {
+            nodes: vec![Node::sum(), Node::product()],
+            inputs: vec![],
+            distribution_mapping: FxHashMap::default(),
+            root_model: Some(NodeIndex(0)),
+            root_non_model: Some(NodeIndex(1)),
+            start_computational_nodes: 0,
+            compile_time: 0,
+            complete: true,
         }
     }
 
@@ -101,19 +131,45 @@ impl Dac {
         node
     }
 
+    /// Adds a sub node to the circuit. Returns its index.
+    pub fn sub_node(&mut self, number_children: usize) -> Node {
+        let mut node = Node::sub();
+        node.set_input_start(self.inputs.len());
+        node.set_number_inputs(number_children);
+        for _ in 0..number_children {
+            self.inputs.push(NodeIndex(0));
+        }
+        node
+    }
+
+    /// Adds a constant node to the circuit. Returns its index.
+    pub fn constant_node(&mut self, value: Rational) -> NodeIndex {
+        let node = Node::constant(value);
+        self.add_node(node)
+    }
+
     pub fn add_node(&mut self, node: Node) -> NodeIndex {
         let id = NodeIndex(self.nodes.len());
         self.nodes.push(node);
         id
     }
 
-    pub fn add_input(&mut self, index: usize, node: NodeIndex) {
-        self.inputs[index] = node;
+    pub fn add_input(&mut self, child_index: usize, node: &Node, child: NodeIndex) {
+        self.inputs[node.input_start() + child_index] = child;
+    }
+
+    pub fn get_input(&self, parent: NodeIndex, child_id: usize) -> NodeIndex {
+        let node = &self.nodes[parent.0];
+        self.inputs[node.input_start() + child_id]
     }
 
     /// Sets the root of the circuit
-    pub fn set_root(&mut self, root: NodeIndex) {
-        self.root = Some(root);
+    pub fn set_root_model(&mut self, root: NodeIndex) {
+        self.root_model = Some(root);
+    }
+
+    pub fn set_root_non_model(&mut self, root: NodeIndex) {
+        self.root_non_model = Some(root);
     }
 
     /// Returns the number of computational nodes in the circuit
@@ -131,12 +187,34 @@ impl Dac {
         let distribution_index = problem[distribution].old_index();
         let value_index = problem[variable].index_in_distribution().unwrap();
         let weight = problem[variable].weight().unwrap();
-        if let Some(x) = self.distribution_mapping.get(&(distribution_index, value_index)) {
+        let key = vec![value_index, distribution_index];
+        if let Some(x) = self.distribution_mapping.get(&key) {
             *x
         } else {
             self.nodes.push(Node::distribution(distribution_index, value_index, weight));
-            self.distribution_mapping.insert((distribution_index, value_index), NodeIndex(self.nodes.len()-1));
+            self.distribution_mapping.insert(key, NodeIndex(self.nodes.len()-1));
             NodeIndex(self.nodes.len()-1)
+        }
+    }
+
+    /// Returns a node summing some values of a given distribution.
+    /// Uses a cache to store the node for reuse.
+    pub fn sum_distribution_node(&mut self, problem: &Problem, domain: &DistributionPartialDomain) -> NodeIndex {
+        let distribution = domain.0;
+        let variables = &domain.1;
+        let distribution_index = problem[distribution].old_index();
+        let mut variables_indexes = variables.iter().copied().map(|v| problem[v].old_index()).collect::<Vec<usize>>();
+        variables_indexes.sort();
+        variables_indexes.push(distribution_index);
+        if let Some(x) = self.distribution_mapping.get(&variables_indexes) {
+            *x
+        } else {
+            let sum_node = self.sum_node(variables.len());
+            for i in 0..variables.len() {
+                let child = *self.distribution_mapping.get(&vec![variables_indexes[i], distribution_index]).unwrap();
+                self.add_input(i, &sum_node, child);
+            }
+            self.add_node(sum_node)
         }
     }
 }
@@ -161,7 +239,7 @@ impl Dac {
         } else {
             rational(0.0)
         };
-        Solution::new(rational(p.clone()), rational(p), self.compile_time)
+        Solution::new(rational(p.clone()), rational(p), self.compile_time, self.is_complete())
     }
 
     /// Updates the values of the distributions to the given values
@@ -272,6 +350,11 @@ impl Dac {
                     let label = format!("+ {}", value);
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
+                NodeType::Sub => {
+                    let attributes = &sum_node_attributes;
+                    let label = format!("- {}", value);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
                 NodeType::Product => {
                     let attributes = &prod_node_attributes;
                     let label = format!("x {}", value);
@@ -280,6 +363,11 @@ impl Dac {
                 NodeType::Distribution{d ,v } => {
                     let attributes = &dist_node_attributes;
                     let label = format!("D {} (d{} v{})", value, d, v);
+                    out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
+                },
+                NodeType:: Constant => {
+                    let attributes = &dist_node_attributes;
+                    let label = format!("C {}", self[node].value());
                     out.push_str(&format!("\t{id} [{attributes},label=\"{label}\"];\n"));
                 },
             }
@@ -324,7 +412,9 @@ impl fmt::Display for Dac {
             match node.get_type() {
                 NodeType::Product => write!(f, "x")?,
                 NodeType::Sum => write!(f, "+")?,
+                NodeType::Sub => write!(f, "-")?,
                 NodeType::Distribution {d, v} => write!(f, "d {} {}", d, v)?,
+                NodeType::Constant => write!(f, "c {}", node.value())?,
             }
             writeln!(f, " {} {}", node.input_start(), node.number_inputs())?;
         }
@@ -345,7 +435,8 @@ impl Dac {
             nodes: vec![],
             inputs: vec![],
             distribution_mapping: FxHashMap::default(),
-            root: None,
+            root_model: None,
+            root_non_model: None,
             start_computational_nodes: 0,
             compile_time: 0,
             complete: true,
@@ -385,11 +476,5 @@ impl Dac {
             }
         }
         dac
-    }
-}
-
-impl Default for Dac {
-    fn default() -> Self {
-        Self::new(true)
     }
 }

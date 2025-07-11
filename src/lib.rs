@@ -1,5 +1,6 @@
 // Re-export the modules
 mod solver;
+mod cache;
 mod logger;
 pub mod args;
 pub mod common;

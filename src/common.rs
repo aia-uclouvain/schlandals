@@ -82,15 +82,18 @@ pub struct Solution {
     upper_bound: Rational,
     /// Number of seconds, since the start of the search, at which the solution was found
     time_found: u64,
+    /// True if the solution is exact
+    exact: bool,
 }
 
 impl Solution {
 
-    pub fn new(lower_bound: Rational, upper_bound: Rational, time_found: u64) -> Self {
+    pub fn new(lower_bound: Rational, upper_bound: Rational, time_found: u64, exact: bool) -> Self {
         Self {
             lower_bound,
             upper_bound,
             time_found,
+            exact
         }
     }
 
@@ -118,6 +121,10 @@ impl Solution {
         } else {
             f64::MAX
         }
+    }
+
+    pub fn is_exact(&self) -> bool {
+        self.exact
     }
 }
 
