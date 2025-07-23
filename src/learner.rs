@@ -19,8 +19,7 @@
 use std::path::PathBuf;
 use search_trail::StateManager;
 use std::time::{Instant, Duration};
-use crate::ac::ac::*;
-use crate::ac::node::NodeType;
+use crate::target::ac::*;
 use crate::logger::Logger;
 use crate::*;
 use rayon::prelude::*;
@@ -146,6 +145,8 @@ impl <const S: bool> Learner<S> {
     // TODO: Same code, should not be duplicated
     // Evaluate the different train DACs and return the results
     pub fn evaluate(&mut self) -> Vec<Rational> {
+        vec![]
+        /* TODO
         let softmaxed = self.get_softmaxed_array();
         for dac in self.train.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
@@ -154,10 +155,13 @@ impl <const S: bool> Learner<S> {
             d.evaluate();
         });
         self.train.get_queries().iter().map(|d| d.circuit_probability()).collect()
+        */
     }
 
     // Evaluate the different test DACs and return the results
     pub fn test(&mut self) -> Vec<Rational> {
+        vec![]
+        /* TODO
         let softmaxed = self.get_softmaxed_array();
         for dac in self.test.get_queries_mut() {
             dac.reset_distributions(&softmaxed);
@@ -166,6 +170,7 @@ impl <const S: bool> Learner<S> {
             d.evaluate();
         });
         self.test.get_queries().iter().map(|d| d.circuit_probability()).collect()
+        */
     }
 
     fn recompile_dacs(&mut self, args: &Args) {
@@ -184,6 +189,7 @@ impl <const S: bool> Learner<S> {
     // The computation is done in a top-down way, starting from the root node
     // and uses the chaine rule of the derivative to cumulatively compute the gradient in the leaves
     pub fn compute_gradients(&mut self, gradient_loss: &[Rational]) {
+        /* TODO
         self.zero_grads();
         for query_id in 0..self.train.len() {
             self.train[query_id].zero_paths();
@@ -200,7 +206,7 @@ impl <const S: bool> Learner<S> {
                 for child_index in start..end {
                     let child = self.train[query_id].input_at(child_index);
                     match self.train[query_id][node].get_type() {
-                        NodeType::Product => {
+                        NodeType::Prod => {
                             // If it is a product node, we need to divide the path value by the value of the child
                             // This is equivalent to multiplying the values of the other children
                             // If the value of the child is 0, then the path value is simply 0
@@ -214,9 +220,19 @@ impl <const S: bool> Learner<S> {
                             // If it is a sum node, we simply propagate the path value to the children
                             self.train[query_id][child].add_to_path_value(path_val.clone());
                         },
-                        NodeType::Distribution { .. } => {},
+                        NodeType::Sub => {
+                            // If it is a sum node, we simply propagate the path value to the children
+                            if child_index > 0 {
+                                self.train[query_id][child].add_to_path_value(-path_val.clone());
+                            } else {
+                                self.train[query_id][child].add_to_path_value(path_val.clone());
+                            }
+                        },
+                        NodeType::Input { .. } => {},
                     }
-                    if let NodeType::Distribution { d, v } = self.train[query_id][child].get_type() {
+                    // TODO
+                    /*
+                    if let NodeType::Input { d, v } = self.train[query_id][child].get_type() {
                         // Compute the gradient for children that are leaf distributions
                         let mut factor = path_val.clone() * &gradient_loss[query_id];
                         if self.train[query_id][node].is_product() {
@@ -234,9 +250,11 @@ impl <const S: bool> Learner<S> {
                         }
                         self.gradients[d][v] += factor * child_w * sum_other_w;
                     }
+                    */
                 }
             }
         }
+        */
     }
 
     /// Update the distributions with the computed gradients and the learning rate, following an SGD approach
@@ -321,7 +339,7 @@ impl <const S: bool> Learner<S> {
 }
 
 impl <const S: bool> std::ops::Index<DacIndex> for Learner<S> {
-    type Output = Dac;
+    type Output = Ac;
 
     fn index(&self, index: DacIndex) -> &Self::Output {
         &self.train[index.0]
@@ -341,7 +359,9 @@ pub fn softmax(x: &[Rational]) -> Vec<Rational> {
 }
 
 /// Generates a vector of optional Dacs from a list of input files
-pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<Rational>], args: &Args) -> Vec<Dac> {
+pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Vec<Rational>], args: &Args) -> Vec<Ac> {
+    vec![]
+    /* TODO
     queries_clauses.par_iter().map(|clauses| {
         // We compile the input. This can either be a .cnf file or a fdac file.
         // If the file is a fdac file, then we read directly from it
@@ -350,28 +370,26 @@ pub fn generate_dacs(queries_clauses: &Vec<Vec<Vec<isize>>>, distributions: &[Ve
         let propagator = Propagator::new(&mut state);
         let caching_scheme = CachingScheme::new(args.caching());
         let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-        let compiler = generic_solver(problem, state, component_extractor, propagator, &args);
+        let mut compiler = generic_solver(problem, state, component_extractor, propagator, &args);
         let parameters = SolverParameters::new(&args);
-        match compiler {
-            crate::GenericSolver::Compiler(mut s) => s.compile(&parameters),
-            crate::GenericSolver::LogCompiler(mut s) => s.compile(&parameters),
-            _ => panic!("Search solver used for learning"),
-        }
+        // TODO get AC
+        compiler.solve(&parameters);
     }).collect::<Vec<_>>()
+    */
 }
 
 /// Structure representing a dataset for the learners. A dataset is a set of queries (boolean
 /// formulas compiled into an arithmetic circuit) associated with an expected probability
 #[derive(Default)]
 pub struct Dataset {
-    queries: Vec<Dac>,
+    queries: Vec<Ac>,
     expected: Vec<Rational>,
 }
 
 impl Dataset {
 
     /// Creates a new dataset from the provided queries and expected probabilities
-    pub fn new(queries: Vec<Dac>, expected: Vec<Rational>) -> Self {
+    pub fn new(queries: Vec<Ac>, expected: Vec<Rational>) -> Self {
         Self {
             queries,
             expected,
@@ -384,17 +402,17 @@ impl Dataset {
     }
 
     /// Returns a reference to the queries of the dataset
-    pub fn get_queries(&self) -> &Vec<Dac> {
+    pub fn get_queries(&self) -> &Vec<Ac> {
         &self.queries
     }
 
     /// Returns a mutable reference to the queries of the dataset
-    pub fn get_queries_mut(&mut self) -> &mut Vec<Dac> {
+    pub fn get_queries_mut(&mut self) -> &mut Vec<Ac> {
         &mut self.queries
     }
 
     /// Adds a query to the dataset
-    pub fn add_query(&mut self, query: Dac, expected: f64) {
+    pub fn add_query(&mut self, query: Ac, expected: f64) {
         self.queries.push(query);
         self.expected.push(rational(expected));
     }
@@ -405,13 +423,13 @@ impl Dataset {
     }
 
     /// Sets the queries of the dataset
-    pub fn set_queries(&mut self, queries: Vec<Dac>) {
+    pub fn set_queries(&mut self, queries: Vec<Ac>) {
         self.queries = queries;
     }
 }
 
 impl std::ops::Index<usize> for Dataset {
-    type Output = Dac;
+    type Output = Ac;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.queries[index]

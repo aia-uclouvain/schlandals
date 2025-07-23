@@ -23,11 +23,8 @@ pub struct Args {
     #[clap(short, long, value_enum, default_value_t=Caching::Hybrid)]
     caching: Caching,
     /// If present, launch the solver in learning mode
-    #[clap(short, long, default_value_t=false)]
+    #[clap(long, default_value_t=false)]
     learning: bool,
-    /// If present, launch the solver in compilation mode
-    #[clap(short, long, default_value_t=false)]
-    compile: bool,
     /// Collect stats during the search
     #[clap(long, action)]
     statistics: bool,
@@ -107,7 +104,6 @@ impl Default for Args {
             branching: Branching::MinInDegree,
             caching: Caching::Hybrid,
             learning: false,
-            compile: false,
             statistics: false,
             memory: u64::MAX,
             epsilon: 0.0,
@@ -157,10 +153,6 @@ impl Args {
 
     pub fn learning(&self) -> bool {
         self.learning
-    }
-
-    pub fn compile(&self) -> bool {
-        self.compile
     }
 
     pub fn statistics(&self) -> bool {
@@ -269,10 +261,6 @@ impl Args {
 
     pub fn set_learning(&mut self, value: bool) {
         self.learning = value;
-    }
-
-    pub fn set_compile(&mut self, value: bool) {
-        self.compile = value;
     }
 
     pub fn set_statistics(&mut self, value: bool) {

@@ -9,8 +9,8 @@ mod parsers;
 mod propagator;
 mod preprocess;
 pub mod learner;
-pub mod ac;
 mod caching;
+mod target;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -45,55 +45,13 @@ pub fn solve(args: Args) -> f64 {
     let problem = parser.problem_from_file(&mut state);
     let caching_scheme = CachingScheme::new(args.caching());
     let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, propagator, &args);
+    let mut solver = generic_solver(problem, state, component_extractor, propagator, &args);
     let parameters = SolverParameters::new(&args);
-    let solution = if !args.compile() {
-        match solver {
-            GenericSolver::Search(mut solver) => solver.search(&parameters),
-            GenericSolver::LogSearch(mut solver) => solver.search(&parameters),
-            _ => panic!("Non-search solver used in search"),
-        }
-    } else {
-        let mut ac = match solver {
-            GenericSolver::Compiler(mut solver) => solver.compile(&parameters),
-            GenericSolver::LogCompiler(mut solver) => solver.compile(&parameters),
-            _ => panic!("Non compile solver used in compilation"),
-        };
-        ac.evaluate();
-        if let Some(f) = args.dotfile() {
-            let out = ac.as_graphviz();
-            let mut outfile = File::create(f).unwrap();
-            match outfile.write_all(out.as_bytes()) {
-                Ok(_) => (),
-                Err(e) => println!("Could not write the circuit into the dot file: {:?}", e),
-            }
-        }
-        ac.solution()
-    };
+    let solution = solver.solve(&parameters);
     if !args.statistics() {
         solution.print();
     }
     solution.to_f64()
-}
-
-pub fn pysearch(args: Args, distributions: &[Vec<f64>], clauses: &[Vec<isize>]) -> (f64, f64) {
-    let mut state = StateManager::default();
-    let propagator = Propagator::new(&mut state);
-    let distributions_rational = distributions.iter().map(|d| d.iter().map(|f| rational(*f)).collect::<Vec<Rational>>()).collect::<Vec<Vec<Rational>>>();
-    let problem = create_problem(&distributions_rational, clauses, &mut state);
-    let caching_scheme = CachingScheme::new(args.caching());
-    let component_extractor = ComponentExtractor::new(&problem, caching_scheme, &mut state);
-    let solver = generic_solver(problem, state, component_extractor, propagator, &args);
-    let parameters = SolverParameters::new(&args);
-    let solution = match solver {
-        GenericSolver::Search(mut solver) => solver.search(&parameters),
-        GenericSolver::LogSearch(mut solver) => solver.search(&parameters),
-        _ => panic!("Non search solver used in search"),
-    };
-    if !args.statistics() {
-        solution.print();
-    }
-    solution.bounds()
 }
 
 pub fn parse_csv(filename: PathBuf) -> Vec<(OsString, f64)> {
@@ -129,10 +87,17 @@ impl std::fmt::Display for Loss {
 }
 
 pub enum GenericSolver {
-    Search(Solver<false, false>),
-    LogSearch(Solver<true, false>),
-    Compiler(Solver<false, true>),
-    LogCompiler(Solver<true, true>),
+    Log(Solver<true>),
+    NoLog(Solver<false>),
+}
+
+impl GenericSolver {
+    fn solve(&mut self, parameters: &SolverParameters) -> Solution {
+        match self {
+            Self::Log(solver) => solver.compute_pwmc(parameters),
+            Self::NoLog(solver) => solver.compute_pwmc(parameters),
+        }
+    }
 }
 
 pub fn generic_solver(problem: Problem, state: StateManager, component_extractor: ComponentExtractor, propagator: Propagator, args: &Args) -> GenericSolver {
@@ -142,17 +107,11 @@ pub fn generic_solver(problem: Problem, state: StateManager, component_extractor
         Branching::DLCS => Box::<DLCS>::default(),
         Branching::DLCSVar => Box::<DLCSVar>::default(),
     };
-    if !args.compile() && !args.statistics() {
-        let solver = Solver::<false, false>::new(problem, state, component_extractor, branching, propagator);
-        GenericSolver::Search(solver)
-    } else if !args.compile() && args.statistics() {
-        let solver = Solver::<true, false>::new(problem, state, component_extractor, branching, propagator);
-        GenericSolver::LogSearch(solver)
-    } else if args.compile() && !args.statistics() {
-        let solver = Solver::<false, true>::new(problem, state, component_extractor, branching, propagator);
-        GenericSolver::Compiler(solver)
+    if args.statistics() {
+        let solver = Solver::<true>::new(problem, state, component_extractor, branching, propagator);
+        GenericSolver::Log(solver)
     } else {
-        let solver = Solver::<true, true>::new(problem, state, component_extractor, branching, propagator);
-        GenericSolver::LogCompiler(solver)
+        let solver = Solver::<false>::new(problem, state, component_extractor, branching, propagator);
+        GenericSolver::NoLog(solver)
     }
 }

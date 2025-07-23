@@ -97,7 +97,7 @@ impl Variable {
     }
 
     /// Returns the initial index of the variable in the problem
-    pub fn old_index(&self) -> usize {
+    pub fn id(&self) -> usize {
         self.id
     }
     

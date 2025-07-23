@@ -18,7 +18,7 @@ pub struct Distribution {
     id: usize,
     /// First variable in the distribution
     first: VariableIndex,
-    pub domain_size: usize,
+    domain_size: usize,
     /// Number of variable in the distribution
     size: ReversibleUsize,
     /// Reversible sparse set containing the clauses constraining the distribution. We assume
@@ -103,6 +103,10 @@ impl Distribution {
 
     pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
         self.clauses.clear(map, state);
+    }
+
+    pub fn domain_size(&self) -> usize {
+        self.domain_size
     }
 
     pub fn set_domain_size(&mut self, domain_size: usize) {

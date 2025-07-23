@@ -490,10 +490,6 @@ impl Propagator {
         (learned, g[self.assignments[backjump].to_variable()].decision_level())
     }
 
-    pub fn iter_propagated_assignments(&self) -> impl Iterator<Item = Literal> + '_ {
-        self.assignments.iter().copied()
-    }
-
     pub fn reduce(&mut self, number_clauses: usize, number_variables: usize) {
         self.clause_flags.truncate(number_clauses);
         self.clause_flags.shrink_to_fit();
