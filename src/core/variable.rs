@@ -7,12 +7,6 @@ use rustc_hash::FxHashMap;
 use malachite::rational::Rational;
 use super::sparse_set::SparseSet;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub enum Reason {
-    Clause(ClauseIndex),
-    Distribution(DistributionIndex),
-}
-
 /// Data structure that actually holds the data of a  variable of the input problem
 #[derive(Debug)]
 pub struct Variable {
@@ -35,10 +29,6 @@ pub struct Variable {
     decision: isize,
     /// Index in the assignment stack at which the decision has been made for the variable
     assignment_position: ReversibleUsize,
-    /// The clause that set the variable, if any
-    reason: Option<Reason>,
-    /// True if the variable has been implied during BUP
-    is_implied: ReversibleBool,
     /// Random u64 associated to the variable, used for hash computation
     hash: u64,
 }
@@ -56,8 +46,6 @@ impl Variable {
             value: state.manage_option_bool(None),
             decision: -1,
             assignment_position: state.manage_usize(0),
-            reason: None,
-            is_implied: state.manage_bool(false),
             hash: rand::random(),
         }
     }
@@ -143,26 +131,6 @@ impl Variable {
     /// clause learning, it should always be the case
     pub fn decision_level(&self) -> isize {
         self.decision
-    }
-    
-    /// Sets the reason of the variable. The reason is either a clause or a distribution which forced,
-    /// during boolean unit propagation, the variable to take a given value.
-    pub fn set_reason(&mut self, reason: Option<Reason>, state: &mut StateManager) {
-        if reason.is_some() {
-            state.set_bool(self.is_implied, true);
-        } else {
-            state.set_bool(self.is_implied, false);
-        }
-        self.reason = reason;
-    }
-    
-    /// Returns the reason, if any, of the variable.
-    pub fn reason(&self, state: &StateManager) -> Option<Reason> {
-        if !state.get_bool(self.is_implied) {
-            None
-        } else {
-            self.reason
-        }
     }
     
     /// Returns the hash of the variable

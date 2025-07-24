@@ -219,6 +219,48 @@ impl Node {
     }
 }
 
+impl Ac {
+
+    pub fn to_graphviz(&self) -> String {
+        let mut out = String::new();
+        out.push_str("digraph {\ntranksep =3; \n\n");
+
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            let id = node.0;
+            let value = format!("{:.4}", rational_to_f64(&self[node].value));
+            match self[node].nodetype() {
+                NodeType::Sum => {
+                    out.push_str(&format!("\t{id} [shape=circle,style=filled,label=\"{id} | + | {value}\"];\n"));
+                },
+                NodeType::Sub => {
+                    out.push_str(&format!("\t{id} [shape=circle,style=filled,label=\"{id} | - | {value}\"];\n"));
+                },
+                NodeType::Prod => {
+                    out.push_str(&format!("\t{id} [shape=square,style=filled,label=\"{id} | * | {value}\"];\n"));
+                },
+                NodeType::Input => {
+                    out.push_str(&format!("\t{id} [shape=doublecircle,style=filled,label=\"{id} | {value}\"];\n"));
+                },
+            }
+        }
+
+        for node in (0..self.nodes.len()).map(NodeIndex) {
+            let mut edge_ptr = self[node].first_child;
+            while let Some(edge) = edge_ptr {
+                let child = self[edge].to;
+                let from = node.0;
+                let to = child.0;
+                out.push_str(&format!("\t{from} -> {to} [penwidth=1];\n"));
+                edge_ptr = self[edge].next;
+            }
+        }
+
+        out.push_str("}\n");
+        out
+    }
+
+}
+
 impl std::ops::Index<NodeIndex> for Ac {
     type Output=Node;
 

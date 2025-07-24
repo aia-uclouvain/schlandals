@@ -3,8 +3,6 @@ use search_trail::StateManager;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
 use crate::core::problem::*;
 use crate::propagator::Propagator;
-use malachite::rational::Rational;
-use crate::common::rational;
 
 pub struct Preprocessor<'b>
 {
@@ -31,12 +29,10 @@ where
         }
     }
     
-    pub fn preprocess(&mut self) -> Option<Rational> {
-        let mut p = rational(1.0);
-
+    pub fn preprocess(&mut self) -> Result<(), ()> {
         for variable in self.problem.variables_iter() {
             if self.problem[variable].is_probabilitic() && self.problem[variable].weight().unwrap() == 0.0 {
-                self.propagator.add_to_propagation_stack(variable, false, 0, None);
+                self.propagator.add_to_propagation_stack(variable, false, 0);
             }
         }
 
@@ -44,20 +40,17 @@ where
         for clause in self.problem.clauses_iter() {
             if self.problem[clause].is_unit(self.state) {
                 let l = self.problem[clause].get_unit_assigment(self.state);
-                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
+                self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0);
             }
         }
 
         for l in self.problem.clauses_iter().filter(|c| self.problem[*c].is_unit(self.state)).map(|c| self.problem[c].get_unit_assigment(self.state)) {
-            self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0, None);
+            self.propagator.add_to_propagation_stack(l.to_variable(), l.is_positive(), 0);
         }
         
         match self.propagator.propagate(self.problem, self.state, ComponentIndex(0), self.component_extractor, 0) {
-            Err(_) => return None,
-            Ok(_) => {
-                p *= self.propagator.get_propagation_prob();
-            }
-        };
-        Some(p)
+            Err(_) =>  Err(()),
+            Ok(_) => Ok(()),
+        }
     }
 }

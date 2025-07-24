@@ -74,20 +74,15 @@ pub struct Component {
     distribution_start: usize,
     /// Number of distribution in the component
     number_distribution: usize,
+    /// Start unconstrained distributions (distribution_start <= unconstrained_distribution_start <= distribution_start + number_distribution
+    unconstrained_distribution_start: usize,
     /// Hash of the component, computed during its detection
     hash: u64,
-    /// Maximum probability of the sub-problem represented by the component (i.e., all remaining
-    /// valid interpretation are models)
-    max_probability: Rational,
     /// Representation of the component for hash
     key: CacheKey,
 }
 
 impl Component {
-
-    pub fn max_probability(&self) -> Rational {
-        self.max_probability.clone()
-    }
 
     pub fn get_cache_key(&self) -> CacheKey {
         self.key.clone()
@@ -110,8 +105,8 @@ impl ComponentExtractor {
             size: g.number_clauses(),
             distribution_start: 0,
             number_distribution: g.number_distributions(),
+            unconstrained_distribution_start: 0,
             hash: 0,
-            max_probability: rational(1.0),
             key: CacheKey::default(),
         }];
         Self {
@@ -167,7 +162,6 @@ impl ComponentExtractor {
         comp_distribution_start: usize,
         comp_number_distribution: &mut usize,
         hash: &mut u64,
-        max_probability: &mut Rational,
         state: &mut StateManager,
     ) {
         while let Some(clause) = self.exploration_stack.pop() {
@@ -206,7 +200,6 @@ impl ComponentExtractor {
                                     self.distribution_positions[distribution.0] = new_d_pos;
                                     self.distribution_positions[moved_d.0] = current_d_pos;
                                 }
-                                *max_probability *= rational(g[distribution].remaining(state));
                                 *comp_number_distribution += 1;
                                 for v in g[distribution].iter_variables() {
                                     if !g[v].is_fixed(state) {
@@ -250,10 +243,9 @@ impl ComponentExtractor {
         // they do not share variables
         self.seen_var.fill(false);
         state.set_usize(self.base, end);
-        let super_comp = &self.components[component.0];
-        let mut start = super_comp.start;
-        let mut distribution_start = super_comp.distribution_start;
-        let end = start + super_comp.size;
+        let mut start = self.components[component.0].start;
+        let mut distribution_start = self.components[component.0].distribution_start;
+        let end = start + self.components[component.0].size;
         // We iterate over all the clause in the current component. When we encounter a constrained clause, we start
         // a component from it
         while start < end {
@@ -263,7 +255,6 @@ impl ComponentExtractor {
                 let mut size = 0;
                 let mut hash: u64 = 0;
                 let mut number_distribution = 0;
-                let mut max_probability = rational(1.0);
                 self.exploration_stack.push(clause);
                 self.clauses_cache.clear();
                 self.variables_cache.clear();
@@ -274,14 +265,13 @@ impl ComponentExtractor {
                     distribution_start,
                     &mut number_distribution,
                     &mut hash,
-                    &mut max_probability,
                     state,
                 );
                 if number_distribution > 0 {
                     self.clauses_cache.sort();
                     self.variables_cache.sort();
                     let key = self.caching_scheme.get_key(g, &self.clauses_cache, &self.variables_cache, hash, state);
-                    self.components.push(Component { start, size, distribution_start, number_distribution, hash, max_probability, key});
+                    self.components.push(Component { start, size, distribution_start, number_distribution, unconstrained_distribution_start: distribution_start, hash, key});
                 }
                 distribution_start += number_distribution;
                 start += size;
@@ -289,6 +279,7 @@ impl ComponentExtractor {
                 start += 1;
             }
         }
+        self.components[component.0].unconstrained_distribution_start = distribution_start;
         state.set_usize(self.limit, self.components.len());
         self.number_components(state) > 0
     }
@@ -329,24 +320,28 @@ impl ComponentExtractor {
         self.distributions[start..end].iter().copied()
     }
 
-    pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize, max_probability: Rational) {
-        self.clauses.truncate(number_clause);
-        self.clauses.shrink_to_fit();
-        self.clause_positions.truncate(number_clause);
-        self.clause_positions.shrink_to_fit();
+    pub fn component_removed_distribution_iter(&self, component: ComponentIndex) -> impl Iterator<Item = DistributionIndex> + '_ {
+        let start = self.components[component.0].distribution_start;
+        let end = start + self.components[component.0].number_distribution;
+        let start_removed = self.components[component.0].unconstrained_distribution_start;
+        debug_assert!(start <= start_removed && start_removed < end);
+        self.distributions[start_removed..end].iter().copied()
+    }
+
+    pub fn shrink(&mut self, number_clause: usize, number_variables: usize, number_distribution: usize) {
+        self.clauses = (0..number_clause).map(ClauseIndex).collect();
+        self.clause_positions = (0..number_clause).collect();
         self.seen_var.truncate(number_variables);
         self.seen_var.shrink_to_fit();
-        self.distributions.truncate(number_distribution);
-        self.distributions.shrink_to_fit();
-        self.distribution_positions.truncate(number_distribution);
-        self.distribution_positions.shrink_to_fit();
+        self.distributions = (0..number_distribution).map(DistributionIndex).collect();
+        self.distribution_positions = (0..number_distribution).collect();
         self.components[0] = Component {
             start: 0,
             size: self.clauses.len(),
             distribution_start: 0,
             number_distribution: self.distributions.len(),
+            unconstrained_distribution_start: 0,
             hash: 0,
-            max_probability,
             key: CacheKey::default(),
         };
         self.caching_scheme.init(number_clause, number_variables);

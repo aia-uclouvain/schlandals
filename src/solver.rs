@@ -78,9 +78,7 @@ impl<const S: bool> Solver<S> {
     /// Solves the problem represented by this solver using a DPLL-search based method.
     pub fn compute_pwmc(&mut self, parameters: &SolverParameters) -> Solution {
         let mut ac = Ac::default();
-        let max = self.problem.distributions_iter().map(|d| rational(self.problem[d].remaining(&self.state))).product::<Rational>();
-        self.state.save_state();
-        if let Some(sol) = self.preprocess(&max, parameters) {
+        if let Some(sol) = self.preprocess(parameters) {
             self.statistics.print();
             return sol;
         }
@@ -103,42 +101,16 @@ impl<const S: bool> Solver<S> {
                 }
             }
 
-            for distribution in self.propagator.unconstrained_distributions_iter().filter(|d| self.problem[*d].remaining(&self.state) != 1.0) {
-                let node = ac.prod_node();
-                for variable in self.problem[distribution].iter_variables().filter(|v| !self.problem[*v].is_fixed(&self.state)) {
-                    let child = ac.get_distribution_node(distribution, variable, self.problem[variable].weight().unwrap());
-                    ac.add_edge(node, child);
+            if self.component_extractor.detect_components(&mut self.problem, &mut self.state, ComponentIndex(0)) {
+                // A number of distribution are not fixed but do not appear in the
+                // sub-components, we can compute their contribution in closed form
+                for distribution in self.component_extractor
+                    .component_removed_distribution_iter(ComponentIndex(0))
+                    .filter(|d| self.problem[*d].is_constrained(&self.state) && self.problem[*d].is_partial_domain(&self.state)) {
+                        let sum_distribution_node = self.sum_node_distribution_partial_domain(&mut ac, distribution);
+                        ac.add_edge(root_model, sum_distribution_node);
                 }
-                ac.add_edge(root_model, node);
             }
-        }
-
-        // Then, we consider the root for the unsatisfying assignments
-        let root_unsatisfying = ac.sub_node();
-        {
-            let max_node = ac.input_node(max.clone());
-            ac.add_edge(root_unsatisfying, max_node);
-            // We compute the lost probability mass due to reduced domain in the distributions
-            let before = ac.prod_node();
-            let after = ac.prod_node();
-            for distribution in self.problem.distributions_iter().filter(|d| self.problem[*d].size(&self.state) != self.problem[*d].domain_size()) {
-                let sum_before = ac.sum_node();
-                let sum_after = ac.sum_node();
-                for variable in self.problem[distribution].iter_variables() {
-                    let node = ac.get_distribution_node(distribution, variable, self.problem[variable].weight().unwrap());
-                    ac.add_edge(sum_before, node);
-                    if !self.problem[variable].is_fixed(&self.state) {
-                        ac.add_edge(sum_after, node);
-                    }
-                }
-                ac.add_edge(before, sum_before);
-                ac.add_edge(after, sum_after);
-            }
-
-            let node_preproc_out = ac.sub_node();
-            ac.add_edge(node_preproc_out, before);
-            ac.add_edge(node_preproc_out, after);
-            ac.add_edge(root_unsatisfying, node_preproc_out);
         }
 
         self.restructure_after_preprocess();
@@ -158,12 +130,14 @@ impl<const S: bool> Solver<S> {
             */
         }
         self.statistics.print();
+        println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
+        //println!("{}", ac.to_graphviz());
         Solution::new(ac[root_model].value(), ac[root_model].value(), parameters.start.elapsed().as_secs())
     }
 
     /// Preprocess the problem, if the problem is solved during the preprocess, return a solution.
     /// Returns None otherwise
-    fn preprocess(&mut self, max: &Rational, parameters: &SolverParameters) -> Option<Solution> {
+    fn preprocess(&mut self, parameters: &SolverParameters) -> Option<Solution> {
         self.propagator.init(self.problem.number_clauses());
         let mut preprocessor = Preprocessor::new(
             &mut self.problem,
@@ -172,10 +146,10 @@ impl<const S: bool> Solver<S> {
             &mut self.component_extractor,
         );
         let preproc = preprocessor.preprocess();
-        if preproc.is_none() {
+        if preproc.is_err() {
             return Some(Solution::new(
                 rational(0.0),
-                rational(0.0),
+                rational(1.0),
                 parameters.start.elapsed().as_secs(),
             ));
         }
@@ -184,23 +158,15 @@ impl<const S: bool> Solver<S> {
 
     fn restructure_after_preprocess(&mut self) {
         self.problem.clear_after_preprocess(&mut self.state);
-        let distribution_max = self.problem.distributions_iter().map(|d| {
-            rational(self.problem[d].remaining(&self.state))
-        }).collect::<Vec<Rational>>();
-        self.state.restore_state();
-        for (id, distribution) in self.problem.distributions_iter().enumerate() {
-            self.problem[distribution].set_remaining(distribution_max[id].clone(), &mut self.state);
-        }
-        let max_probability = distribution_max.iter().product::<Rational>();
         self.component_extractor.shrink(
             self.problem.number_clauses(),
             self.problem.number_variables(),
             self.problem.number_distributions(),
-            max_probability,
         );
         self.propagator.reduce(
             self.problem.number_clauses(),
             self.problem.number_variables(),
+            &mut self.state
         );
 
         // Init the various structures
@@ -266,22 +232,30 @@ impl<const S: bool> Solver<S> {
                     // linked with a product node.
                     let child_node = ac.prod_node();
                     // Then, we also create a sub-circuit for the values propagated to true
-                    // during propagation and the unconstrained distributions.
+                    // during propagation
                     for literal in self.propagator.assignments_iter(&self.state).filter(|l| l.is_positive() && self.problem[l.to_variable()].is_probabilitic()) {
                         let variable = literal.to_variable();
                         let distribution = self.problem[variable].distribution().unwrap();
                         let node = ac.get_distribution_node(distribution, variable, self.problem[variable].weight().unwrap());
                         ac.add_edge(child_node, node);
                     }
-                    for distribution in self.propagator.unconstrained_distributions_iter() {
-                        let sum_distribution_node = self.sum_node_distribution_partial_domain(ac, distribution);
-                        ac.add_edge(child_node, sum_distribution_node);
-                    }
                     self.state.save_state();
                     if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
+                        // A number of distribution are not fixed but do not appear in the
+                        // sub-components, we can compute their contribution in closed form
+                        for distribution in self
+                            .component_extractor
+                            .component_removed_distribution_iter(component)
+                            .filter(|d| self.problem[*d].is_constrained(&self.state) && self.problem[*d].is_partial_domain(&self.state)) {
+                            let sum_distribution_node = self.sum_node_distribution_partial_domain(ac, distribution);
+                            ac.add_edge(child_node, sum_distribution_node);
+                        }
                         for sub_component in self.component_extractor.components_iter(&self.state) {
+                            // The recursive call to pwmc will add the link between the child_node
+                            // and the node for the sub-problem.
                             self.pwmc(ac, child_node, sub_component, level + 1, discrepancy, parameters);
                             if ac[child_node].value() == 0.0 {
+                                complete = true;
                                 break;
                             }
                             complete &= ac[child_node].is_complete();

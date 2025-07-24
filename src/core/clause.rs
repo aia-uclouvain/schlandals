@@ -70,18 +70,6 @@ impl Clause {
         self.parents.add(parent, state);
     }
     
-    /// Remove a child from the children of this clause. Not that this operation is reverted when
-    /// the state manager restore the state
-    pub fn remove_child(&mut self, child: ClauseIndex, state: &mut StateManager) {
-        self.children.remove(child, state);
-    }
-    
-    /// Remove a parent from the parents of this clause. Not that this operation is reverted when
-    /// the state manager restore the state
-    pub fn remove_parent(&mut self, parent: ClauseIndex, state: &mut StateManager) {
-        self.parents.remove(parent, state);
-    }
-    
     /// Set the clause as unconstrained. This operation is reverted when the state manager restore its state.
     pub fn deactivate(&self, state: &mut StateManager) {
         state.set_bool(self.active, false);
@@ -124,6 +112,22 @@ impl Clause {
     /// Returns the number of constrained children of the clause
     pub fn number_constrained_children(&self, state: &StateManager) -> usize {
         self.children.len(state)
+    }
+
+    pub fn get_parent_at(&self, index: usize) -> ClauseIndex {
+        self.parents.get(index)
+    }
+
+    pub fn get_child_at(&self, index: usize) -> ClauseIndex {
+        self.children.get(index)
+    }
+
+    pub fn remove_parent_at(&mut self, index: usize, state: &mut StateManager) {
+        self.parents.remove(index, state);
+    }
+
+    pub fn remove_child_at(&mut self, index: usize, state: &mut StateManager) {
+        self.children.remove(index, state);
     }
     
     /// Notify the clause that the given variable has taken the given value. Updates the watchers accordingly.
@@ -222,6 +226,7 @@ impl Clause {
                 }
             }
         }
+        debug_assert!(self.literals.len() > 1);
     }
 
     pub fn get_watchers(&self) -> Vec<VariableIndex> {

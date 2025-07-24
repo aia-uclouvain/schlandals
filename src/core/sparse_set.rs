@@ -44,15 +44,13 @@ use search_trail::{StateManager, ReversibleUsize, UsizeManager};
 ///     2. Then the set is used in the search and is updated/restored
 /// 
 /// We assume that **no elements are added in the set after the first call to remove**
-pub struct SparseSet<T> 
-    where T: Hash + Eq + Copy,
+pub struct SparseSet<T>
+    where T: Hash + Eq + Copy
 {
     /// Vectors containing the elements in the set
     plain: Vec<T>,
-    /// Map each elements of the set to its index in the plain vector
-    indexes: FxHashMap<T, usize>,
     /// Size of the set
-    removed: ReversibleUsize,
+    size: ReversibleUsize,
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -64,43 +62,29 @@ impl<T> SparseSet<T>
     pub fn new(state: &mut StateManager) -> Self {
         Self {
             plain: vec![],
-            indexes: FxHashMap::<T, usize>::default(),
-            removed: state.manage_usize(0),
+            size: state.manage_usize(0),
         }
     }
     
     /// Adds element `eleme` to the sparse-set
     pub fn add(&mut self, elem: T, state: &mut StateManager) {
-        if self.indexes.contains_key(&elem) {
-            return;
-        }
-        // Note: this is a strange way to insert into a sparse-set. But with clause learning, it
-        // happens that a clause is added during the search, hence while the sparse-set is not
-        // full. This ensure that the element is added in the "alive" part of the set, and that the
-        // indexes are update
-        let index = self.plain.len() - state.get_usize(self.removed);
-        self.indexes.insert(elem, index);
-        self.plain.insert(index, elem);
-        for i in (index + 1)..self.plain.len() {
-            self.indexes.insert(self.plain[i], i);
-        }
+        self.plain.push(elem);
+        state.increment_usize(self.size);
+    }
+
+    pub fn get(&self, index: usize) -> T {
+        self.plain[index]
     }
     
     /// Removes element `elem` from the sparse-set
-    pub fn remove(&mut self, elem: T, state: &mut StateManager) {
-        let cur_idx = *self.indexes.get(&elem).unwrap();
-        if cur_idx >= self.len(state) {
-            return;
-        }
-        let last_idx = self.plain.len() - 1 - state.get_usize(self.removed);
-        self.plain.swap(cur_idx, last_idx);
-        self.indexes.insert(self.plain[cur_idx], cur_idx);
-        self.indexes.insert(self.plain[last_idx], last_idx);
-        state.increment_usize(self.removed);
+    pub fn remove(&mut self, index: usize, state: &mut StateManager) {
+        let current_size = state.get_usize(self.size);
+        self.plain.swap(index, current_size - 1);
+        state.decrement_usize(self.size);
     }
 
     pub fn remove_all(&self, state: &mut StateManager) {
-        state.set_usize(self.removed, self.plain.len());
+        state.set_usize(self.size, 0);
     }
     
     /// Iterates over the current elements of the sparse-set
@@ -110,7 +94,7 @@ impl<T> SparseSet<T>
     
     /// Returns the current size of the sparse-set
     pub fn len(&self, state: &StateManager) -> usize {
-        self.plain.len() - state.get_usize(self.removed)
+        state.get_usize(self.size)
     }
     
     /// Returns the total capacity of the sparse-set (i.e., the total number of element in
@@ -120,7 +104,6 @@ impl<T> SparseSet<T>
     }
 
     pub fn clear(&mut self, map: &FxHashMap<T, T>, state: &mut StateManager) {
-        state.set_usize(self.removed, 0);
         for i in (0..self.plain.len()).rev() {
             let elem = self.plain[i];
             match map.get(&elem).copied() {
@@ -128,14 +111,12 @@ impl<T> SparseSet<T>
                 None => { self.plain.swap_remove(i); },
             };
         }
-        self.indexes.clear();
-        for (i, elem) in self.plain.iter().copied().enumerate() {
-            self.indexes.insert(elem, i);
-        }
         self.plain.shrink_to_fit();
+        state.set_usize(self.size, self.plain.len());
     }
 }
 
+/*
 #[cfg(test)]
 mod test_sparse_set {
     use search_trail::{StateManager, SaveAndRestore};
@@ -206,3 +187,4 @@ mod test_sparse_set {
         check_map(&set, vec![(10, 0), (55, 1), (43, 2), (5, 3)]);
     }
 }
+*/

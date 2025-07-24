@@ -4,12 +4,8 @@
 //!     2. The sum of the variables' weight must sum to 1
 //!     3. In each model of the input formula, exactly one of the variables is set to true
 
-use super::{problem::{ClauseIndex, VariableIndex}, sparse_set::SparseSet};
-use search_trail::{F64Manager, ReversibleF64, ReversibleUsize, StateManager, UsizeManager};
-use rustc_hash::FxHashMap;
-use malachite::rational::Rational;
-use malachite::base::num::conversion::traits::RoundingFrom;
-use malachite::base::rounding_modes::RoundingMode::Nearest;
+use super::problem::VariableIndex;
+use search_trail::{ReversibleUsize, StateManager, UsizeManager};
 
 /// A distribution of the input problem
 #[derive(Debug)]
@@ -21,44 +17,28 @@ pub struct Distribution {
     domain_size: usize,
     /// Number of variable in the distribution
     size: ReversibleUsize,
-    /// Reversible sparse set containing the clauses constraining the distribution. We assume
-    /// that the distribution do not appear twice in the same clause. At the time of the writing of
-    /// these line this is a reasonnable constraint, but time will tell if I must update this code.
-    clauses: SparseSet<ClauseIndex>,
-    /// Sum of the weight of the unfixed variables in the distribution
-    remaining: ReversibleF64,
     /// Initial first variable of the distribution in the problem
     old_first: VariableIndex,
 }
 
 impl Distribution {
     
-    pub fn new(id: usize, first: VariableIndex, size: usize, total_mass: f64, state: &mut StateManager) -> Self {
+    pub fn new(id: usize, first: VariableIndex, size: usize, state: &mut StateManager) -> Self {
         Self {
             id,
             first,
             domain_size: size,
             size: state.manage_usize(size),
-            clauses: SparseSet::new(state),
-            remaining: state.manage_f64(total_mass),
             old_first: first,
         }
     }
 
-    pub fn add_clause(&mut self, clause: ClauseIndex, state: &mut StateManager) {
-        self.clauses.add(clause, state);
-    }
-
-    pub fn remove_clause(&mut self, clause: ClauseIndex, state: &mut StateManager) {
-        self.clauses.remove(clause, state);
-    }
-
     pub fn is_constrained(&self, state: &StateManager) -> bool {
-        self.clauses.len(state) != 0
+        state.get_usize(self.size) > 1
     }
 
     pub fn set_unconstrained(&self, state: &mut StateManager) {
-        self.clauses.remove_all(state);
+        state.set_usize(self.size, 0);
     }
     
     /// Returns the initial index of the distribution in the problem
@@ -80,37 +60,24 @@ impl Distribution {
         self.first = start;
     }
 
-    pub fn remaining(&self, state: &StateManager) -> f64 {
-        state.get_f64(self.remaining)
-    }
-
-    pub fn set_remaining(&self, value: Rational, state: &mut StateManager) {
-        let remaining = f64::rounding_from(value, Nearest).0;
-        state.set_f64(self.remaining, remaining);
-    }
-
-    pub fn remove_probability_mass(&self, removed: Rational, state: &mut StateManager) {
-        let old_value = state.get_f64(self.remaining);
-        let new_value = old_value - f64::rounding_from(removed, Nearest).0;
-        state.set_f64(self.remaining, new_value);
-        let old_size = state.get_usize(self.size);
-        state.set_usize(self.size, old_size - 1);
-    }
-
     pub fn size(&self, state: &StateManager) -> usize {
         state.get_usize(self.size)
-    }
-
-    pub fn update_clauses(&mut self, map: &FxHashMap<ClauseIndex, ClauseIndex>, state: &mut StateManager) {
-        self.clauses.clear(map, state);
     }
 
     pub fn domain_size(&self) -> usize {
         self.domain_size
     }
 
+    pub fn is_partial_domain(&self, state: &StateManager) -> bool {
+        self.domain_size != self.size(state)
+    }
+
     pub fn set_domain_size(&mut self, domain_size: usize) {
         self.domain_size = domain_size;
+    }
+
+    pub fn decrement_size(&self, state: &mut StateManager) {
+        state.decrement_usize(self.size);
     }
 
     // --- ITERATOR --- //
@@ -118,10 +85,6 @@ impl Distribution {
     /// Returns an iterator on the variables of the distribution
     pub fn iter_variables(&self) -> impl Iterator<Item = VariableIndex> + use<> {
         (self.first.0..(self.first.0 + self.domain_size)).map(VariableIndex)
-    }
-
-    pub fn iter_clauses(&self, state: &StateManager) -> impl Iterator<Item = ClauseIndex> + '_ {
-        self.clauses.iter(state)
     }
 }
 

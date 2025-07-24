@@ -4,7 +4,6 @@ use super::variable::*;
 use super::clause::*;
 use super::distribution::*;
 use malachite::rational::Rational;
-use crate::common::rational_to_f64;
 
 use rustc_hash::FxHashMap;
 
@@ -68,8 +67,7 @@ impl Problem {
         let mut mapping: FxHashMap<usize, usize> = FxHashMap::default();
         let mut current_start = 0;
         for (d_id, weights) in distributions.iter().enumerate() {
-            let total_mass = weights.iter().map(|p| rational_to_f64(p)).sum::<f64>();
-            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), total_mass, state);
+            let distribution = Distribution::new(d_id, VariableIndex(current_start), weights.len(), state);
             let distribution_id = DistributionIndex(self.distributions.len());
             self.distributions.push(distribution);
             let mut weight_with_ids = weights.iter().enumerate().map(|(i, w)| (w.clone(),i)).collect::<Vec<(Rational, usize)>>();
@@ -112,9 +110,6 @@ impl Problem {
                 }
             } else {
                 self[variable].add_clause_negative_occurence(cid, state);
-            }
-            if let Some(distribution) = self[literal.to_variable()].distribution() {
-                self[distribution].add_clause(cid, state);
             }
         }
         // If the clause is not learned, we need to link it to the other clauses for FT-reachable propagation.
@@ -226,10 +221,6 @@ impl Problem {
                 self.watchers[v.0].push(clause);
             }
         }
-
-        for distribution in self.distributions_iter() {
-            self[distribution].update_clauses(&clauses_map, state);
-        }
     }
     
     // --- problem MODIFICATIONS --- //
@@ -238,15 +229,12 @@ impl Problem {
     ///     - If true, Removes the variable from the body of the constrained clauses
     ///     - If false, and probabilistic, increase the counter of false variable in the distribution
     /// If the variable is the min or max variable not fixed, update the boundaries accordingly.
-    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, level: isize, reason: Option<Reason>, state: &mut StateManager) {
+    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, level: isize, state: &mut StateManager) {
         self[variable].set_value(value, state);
         self[variable].set_decision_level(level);
-        self[variable].set_reason(reason, state);
-
-        // If probabilistic and false, update the counter
         if !value && self[variable].is_probabilitic() {
             let distribution = self[variable].distribution().unwrap();
-            self[distribution].remove_probability_mass(self[variable].weight().unwrap(), state);
+            self[distribution].decrement_size(state);
         }
     }
 
