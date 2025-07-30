@@ -5,15 +5,13 @@ use crate::logger::Logger;
 use crate::branching::BranchingDecision;
 use crate::common::*;
 use crate::core::components::{ComponentExtractor, ComponentIndex};
-use crate::core::problem::{DistributionIndex, Problem, VariableIndex};
+use crate::core::problem::{DistributionIndex, Problem};
 use crate::target::ac::*;
 use crate::target::*;
 use crate::preprocess::Preprocessor;
 use crate::propagator::Propagator;
 use crate::PEAK_ALLOC;
-use crate::caching::CacheKey;
 use crate::args::Args;
-use malachite::rational::Rational;
 use std::time::Instant;
 
 /// This structure represent a general solver in Schlandals. It stores a representation of the
@@ -45,7 +43,7 @@ pub struct Solver<const S: bool> {
     /// Runs Boolean Unit Propagation and Schlandals' specific propagation at each decision node
     propagator: Propagator,
     /// Cache for the sub-problems solved
-    cache: FxHashMap<CacheKey, NodeIndex>,
+    cache: FxHashMap<Vec<usize>, NodeIndex>,
     /// Statistics gathered during the solving
     statistics: Logger<S>,
 }
@@ -115,23 +113,34 @@ impl<const S: bool> Solver<S> {
 
         self.restructure_after_preprocess();
 
+        ac[root_model].incomplete();
         if self.problem.number_clauses() > 0 {
-            self.do_discrepancy_iteration(&mut ac, root_model, usize::MAX, parameters);
-            /* TODO
             if !parameters.lds {
+                let child = self.pwmc(&mut ac, ComponentIndex(0), usize::MAX, parameters);
+                ac.add_edge(root_model, child);
+                ac.evaluate();
+                self.statistics.print();
+                println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
+                //println!("{}", ac.to_graphviz());
             } else {
-                self.do_discrepancy_iteration(&mut ac, root_model, usize::MAX, parameters);
-                let mut discrepancy = 1;
-                loop {
-                    self.do_discrepancy_iteration(&mut ac, root_model, discrepancy, parameters);
+                let mut discrepancy = 0;
+                while !ac[root_model].is_complete() {
+                    let child = self.pwmc(&mut ac, ComponentIndex(0), discrepancy, parameters);
+                    if discrepancy == 0 {
+                        ac.add_edge(root_model, child);
+                    }
+                    if ac[child].is_complete() {
+                        ac[root_model].complete();
+                    }
+                    println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
+                    ac.evaluate();
+                    println!("{} {} {}", ac[root_model].is_complete(), rational_to_f64(&ac[root_model].value()), rational_to_f64(&(rational(1.0) - ac[root_model].value())));
                     discrepancy += 1;
                 }
+                self.statistics.print();
             }
-            */
         }
-        self.statistics.print();
-        println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
-        //println!("{}", ac.to_graphviz());
+        println!("{}", ac.to_graphviz());
         Solution::new(ac[root_model].value(), ac[root_model].value(), parameters.start.elapsed().as_secs())
     }
 
@@ -181,12 +190,7 @@ impl<const S: bool> Solver<S> {
         }
     }
 
-    pub fn do_discrepancy_iteration(&mut self, ac: &mut Ac, root: NodeIndex, discrepancy: usize, parameters: &SolverParameters) {
-        self.pwmc(ac, root, ComponentIndex(0), 1, discrepancy, parameters);
-    }
-
-    fn pwmc(&mut self, ac: &mut Ac, parent: NodeIndex, component: ComponentIndex, level: isize, discrepancy: usize, parameters: &SolverParameters) {
-        self.statistics.or_node();
+    fn pwmc(&mut self, ac: &mut Ac, component: ComponentIndex, discrepancy: usize, parameters: &SolverParameters) -> NodeIndex {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= parameters.memory_limit {
             self.cache.clear();
         }
@@ -194,14 +198,14 @@ impl<const S: bool> Solver<S> {
         self.statistics.cache_access();
         let current_node = self.cache.remove(&cache_key).unwrap_or_else(|| {
             self.statistics.cache_miss();
+            self.statistics.or_node();
             let node = ac.sum_node();
             ac[node].set_distribution(self.branching_heuristic.branch_on(&self.problem, &mut self.state, &self.component_extractor, component));
             ac[node].incomplete();
             node
         });
-        if ac[current_node].is_complete() {
-            ac.add_edge(parent, current_node);
-            return;
+        if ac[current_node].is_complete() || ac[current_node].discrepancy() > discrepancy {
+            return current_node;
         }
         // We are sure that the node has a distribution to branch on, otherwise no components are
         // detected.
@@ -212,15 +216,42 @@ impl<const S: bool> Solver<S> {
             if self.problem[variable].is_fixed(&self.state) {
                 continue
             }
-            if parameters.start.elapsed().as_secs() >= parameters.timeout || child_id == discrepancy {
+            if parameters.start.elapsed().as_secs() >= parameters.timeout || child_id > discrepancy {
                 complete = false;
                 break;
             }
+            // If we are exploring edges already explored, then just call the recursive function
+            // and do not add any nodes/edges to the circuit.
+            if parameters.lds && child_id < discrepancy {
+                self.state.save_state();
+                match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor) {
+                    Err(_) => {
+                        self.statistics.unsat();
+                        // TODO
+                    },
+                    Ok(_) => {
+                        self.state.save_state();
+                        if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
+                            for sub_component in self.component_extractor.components_iter(&self.state) {
+                                let node = self.pwmc(ac, sub_component, discrepancy - child_id, parameters);
+                                complete &= ac[node].is_complete();
+                            }
+                        }
+                        self.restore();
+                    }
+                };
+                self.restore();
+                child_id += 1;
+                continue;
+            }
+            // Otherwise, create new sub-circuits.
             if parameters.approx_subproblems {
                 panic!("Approx sub-problems not yet implemented in new version");
             }
             self.state.save_state();
-            match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor, level) {
+            // New nodes, we need to create the sub-circuits associated with the newly explored
+            // search space
+            match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor) {
                 Err(_) => {
                     self.statistics.unsat();
                     // TODO
@@ -230,9 +261,11 @@ impl<const S: bool> Solver<S> {
                     // the sub-problems.
                     // We detect independent components at this step; hence, all sub-circuits are
                     // linked with a product node.
+
+                    // If the current child has already been explored during previous iteration,
+                    // just solve the sub-problem.
+
                     let child_node = ac.prod_node();
-                    // Then, we also create a sub-circuit for the values propagated to true
-                    // during propagation
                     for literal in self.propagator.assignments_iter(&self.state).filter(|l| l.is_positive() && self.problem[l.to_variable()].is_probabilitic()) {
                         let variable = literal.to_variable();
                         let distribution = self.problem[variable].distribution().unwrap();
@@ -251,14 +284,12 @@ impl<const S: bool> Solver<S> {
                             ac.add_edge(child_node, sum_distribution_node);
                         }
                         for sub_component in self.component_extractor.components_iter(&self.state) {
-                            // The recursive call to pwmc will add the link between the child_node
-                            // and the node for the sub-problem.
-                            self.pwmc(ac, child_node, sub_component, level + 1, discrepancy, parameters);
-                            if ac[child_node].value() == 0.0 {
-                                complete = true;
-                                break;
-                            }
-                            complete &= ac[child_node].is_complete();
+                            let subproblem_node = self.pwmc(ac, sub_component, discrepancy - child_id, parameters);
+                            ac.add_edge(child_node, subproblem_node);
+                            // TODO: We need that so we can skip instances that have a
+                            // sub-component UNSAT
+                            // if ac[child_node].value == 0 { break; }
+                            complete &= ac[subproblem_node].is_complete();
                         }
                     }
                     self.restore();
@@ -272,7 +303,8 @@ impl<const S: bool> Solver<S> {
             ac[current_node].complete();
         }
         self.cache.insert(cache_key, current_node);
-        ac.add_edge(parent, current_node);
+        ac[current_node].set_discrepancy(discrepancy);
+        current_node
     }
 
     fn sum_node_distribution_partial_domain(&self, ac: &mut Ac, distribution: DistributionIndex) -> NodeIndex {

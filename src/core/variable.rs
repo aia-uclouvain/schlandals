@@ -25,8 +25,6 @@ pub struct Variable {
     clauses_negative: SparseSet<ClauseIndex>,
     /// The value assigned to the variable
     value: ReversibleOptionBool,
-    /// Level at which the decision was made for this variable
-    decision: isize,
     /// Index in the assignment stack at which the decision has been made for the variable
     assignment_position: ReversibleUsize,
     /// Random u64 associated to the variable, used for hash computation
@@ -44,7 +42,6 @@ impl Variable {
             clauses_positive: SparseSet::new(state),
             clauses_negative: SparseSet::new(state),
             value: state.manage_option_bool(None),
-            decision: -1,
             assignment_position: state.manage_usize(0),
             hash: rand::random(),
         }
@@ -119,18 +116,6 @@ impl Variable {
     /// Adds the clause in the negative occurence list
     pub fn add_clause_negative_occurence(&mut self, clause: ClauseIndex, state: &mut StateManager) {
         self.clauses_negative.add(clause, state);
-    }
-    
-    /// Sets the decision level for the variable to the given level
-    pub fn set_decision_level(&mut self, level: isize) {
-        self.decision = level
-    }
-    
-    /// Returns the decision level for the variable. This function assume that the query is done
-    /// only on fixed variable since the level is not reversible. Since this function is used in
-    /// clause learning, it should always be the case
-    pub fn decision_level(&self) -> isize {
-        self.decision
     }
     
     /// Returns the hash of the variable

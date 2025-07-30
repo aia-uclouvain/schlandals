@@ -11,16 +11,16 @@ pub struct Node {
     nodetype: NodeType,
     /// Distribution to branch on if Sum node
     distribution: Option<DistributionIndex>,
-    /// Value propagated to true when branching (only fill if children of a sum node)
-    propagated: Option<NodeIndex>,
     /// Edge to the first child
-    first_child: Option<EdgeIndex>,
-    /// Edge to the last child
-    last_child: Option<EdgeIndex>,
+    first_parent: Option<EdgeIndex>,
     // True if the sub-circuit is complete
     complete: bool,
+    /// True if the sub-circuit is SAT
+    sat: bool,
     /// Discrepancy of the node
     discrepancy: usize,
+    /// Position in the DAG (layer and position in the layer)
+    position: (usize, usize),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -31,11 +31,22 @@ pub enum NodeType {
     Input,
 }
 
-#[derive(Default)]
 pub struct Ac {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     cache: FxHashMap<Vec<usize>, NodeIndex>,
+    layers: Vec<Vec<NodeIndex>>,
+}
+
+impl Default for Ac {
+    fn default() -> Self {
+        Self {
+            nodes: vec![],
+            edges: vec![],
+            cache: FxHashMap::default(),
+            layers: vec![vec![]],
+        }
+    }
 }
 
 impl Ac {
@@ -45,11 +56,11 @@ impl Ac {
             value: rational(0.0),
             nodetype: NodeType::Sum,
             distribution: None,
-            propagated: None,
-            first_child: None,
-            last_child: None,
+            first_parent: None,
             complete: true,
+            sat: true,
             discrepancy: 0,
+            position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
     }
@@ -59,11 +70,11 @@ impl Ac {
             value: rational(0.0),
             nodetype: NodeType::Sub,
             distribution: None,
-            propagated: None,
-            first_child: None,
-            last_child: None,
+            first_parent: None,
             complete: true,
+            sat: true,
             discrepancy: 0,
+            position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
     }
@@ -73,11 +84,11 @@ impl Ac {
             value: rational(1.0),
             nodetype: NodeType::Prod,
             distribution: None,
-            propagated: None,
-            first_child: None,
-            last_child: None,
+            first_parent: None,
             complete: true,
+            sat: true,
             discrepancy: 0,
+            position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
     }
@@ -88,6 +99,9 @@ impl Ac {
             Some(node) => *node,
             None => {
                 let node = self.input_node(value);
+                let position_in_layer = self.layers[0].len();
+                self[node].position = (0, position_in_layer);
+                self.layers[0].push(node);
                 self.cache.insert(key, node);
                 node
             }
@@ -99,41 +113,50 @@ impl Ac {
             value,
             nodetype: NodeType::Input,
             distribution: None,
-            propagated: None,
-            first_child: None,
-            last_child: None,
+            first_parent: None,
             complete: true,
+            sat: true,
             discrepancy: 0,
+            position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
     }
 
-    pub fn add_edge(&mut self, parent: NodeIndex, child: NodeIndex) {
-        // First, we update the value of the parent
-        let child_value = match self[child].nodetype {
-            NodeType::Sub => {
-                if self[parent].first_child.is_none() {
-                    -self[child].value.clone()
-                } else {
-                    self[child].value.clone()
-                }
-            },
-            _ => self[child].value.clone(),
-        };
-        self.aggregate_child_value(parent, child_value);
-        // Then, we add the edge
-        let index = EdgeIndex(self.edges.len());
-        self.edges.push(Edge {
-            to: child,
-            next: None,
-        });
-        if self[parent].first_child.is_none() {
-            self[parent].first_child = Some(index);
-            self[parent].last_child = Some(index);
-        } else {
-            let last_child = self[parent].last_child.unwrap();
-            self[last_child].next = Some(index);
+    fn update_layer_positions(&mut self, node: NodeIndex, new_layer: usize) {
+        if new_layer >= self.layers.len() {
+            self.layers.push(vec![]);
         }
+        let (layer, position_in_layer) = self[node].position;
+        // New node, not in any layer
+        if layer == 0 {
+            self[node].position = (new_layer, self.layers[new_layer].len());
+            self.layers[new_layer].push(node);
+        } else if position_in_layer == self.layers[layer].len() - 1{
+            // Last element, just removes it
+            self.layers[layer].remove(position_in_layer);
+            self[node].position = (new_layer, self.layers[new_layer].len());
+            self.layers[new_layer].push(node);
+        } else {
+            // In the middle of a layer, we swap remove and update the swapped node
+            self.layers[layer].swap_remove(position_in_layer);
+            self[node].position = (new_layer, self.layers[new_layer].len());
+            self.layers[new_layer].push(node);
+            let node_to_update = self.layers[layer][position_in_layer];
+            self[node_to_update].position = (layer, position_in_layer);
+        }
+    }
+
+    pub fn add_edge(&mut self, parent: NodeIndex, child: NodeIndex) {
+        let new_layer = self[child].position.0 + 1;
+        if new_layer > self[parent].position.0 {
+            debug_assert!(!matches!(self[parent].nodetype, NodeType::Input));
+            self.update_layer_positions(parent, new_layer);
+        }
+        self.edges.push(Edge {
+            to: parent,
+            next: self[child].first_parent,
+        });
+        self[child].first_parent = Some(EdgeIndex(self.edges.len() - 1));
     }
 
     pub fn number_edges(&self) -> usize {
@@ -144,45 +167,35 @@ impl Ac {
         self.nodes.len()
     }
 
-    pub fn set_propagated(&mut self, parent: NodeIndex, child: NodeIndex) {
-        self[parent].propagated = Some(child);
-    }
-
-    fn aggregate_child_value(&mut self, node: NodeIndex, value: Rational) {
-        match self[node].nodetype {
-            NodeType::Sum => self[node].value += value,
-            NodeType::Prod => self[node].value *= value,
-            NodeType::Sub => self[node].value -= value,
-            NodeType::Input => panic!("Doing arithmetic operation on input node"),
-        }
-    }
-
-    pub fn evaluate(&mut self, node: NodeIndex) {
-        let mut edge_ptr = self[node].first_child;
-        let mut first_child = true;
-        while let Some(edge) = edge_ptr {
-            let child = self[edge].to;
-            self.evaluate(child);
-            let child_value = self[child].value.clone();
-            match self[node].nodetype {
-                NodeType::Sum => self[node].value += child_value,
-                NodeType::Sub => {
-                    if first_child {
-                        self[node].value += child_value;
-                        first_child = false;
-                    } else {
-                        self[node].value -= child_value;
-                    }
-                },
-                NodeType::Prod => self[node].value *= child_value,
-                NodeType::Input => panic!("Trying to do arithmetic operation on input nodes"),
+    fn reset(&mut self) {
+        for node in self.nodes.iter_mut() {
+            match node.nodetype {
+                NodeType::Sum => node.value = rational(0.0),
+                NodeType::Sub => node.value = rational(0.0),
+                NodeType::Prod => node.value = rational(1.0),
+                NodeType::Input => (),
             }
-            edge_ptr = self[edge].next;
         }
-        if let Some(child) = self[node].propagated {
-            self.evaluate(child);
-            let child_value = self[child].value.clone();
-            self[node].value *= child_value;
+    }
+
+    pub fn evaluate(&mut self) {
+        self.reset();
+        for layer in 0..self.layers.len() {
+            for index in 0..self.layers[layer].len() {
+                let node = self.layers[layer][index];
+                let value = self[node].value.clone();
+                let mut edge_ptr = self[node].first_parent;
+                while let Some(edge) = edge_ptr {
+                    let parent = self[edge].to;
+                    match self[parent].nodetype {
+                        NodeType::Sum => self[parent].value += &value,
+                        NodeType::Sub => panic!("Sub node not yet implemented"),
+                        NodeType::Prod => self[parent].value *= &value,
+                        NodeType::Input => panic!("Trying to do arithmetic operation on input nodes"),
+                    }
+                    edge_ptr = self[edge].next;
+                }
+            }
         }
     }
 
@@ -210,6 +223,14 @@ impl Node {
         self.complete
     }
 
+    pub fn is_sat(&self) -> bool {
+        self.sat
+    }
+
+    pub fn unsat(&mut self) {
+        self.sat = false;
+    }
+
     pub fn value(&self) -> Rational {
         self.value.clone()
     }
@@ -217,6 +238,19 @@ impl Node {
     pub fn nodetype(&self) -> NodeType {
         self.nodetype
     }
+
+    pub fn discrepancy(&self) -> usize {
+        self.discrepancy
+    }
+
+    pub fn set_discrepancy(&mut self, discrepancy: usize) {
+        self.discrepancy = discrepancy;
+    }
+
+    pub fn first_parent(&self) -> Option<EdgeIndex> {
+        self.first_parent
+    }
+
 }
 
 impl Ac {
@@ -245,11 +279,11 @@ impl Ac {
         }
 
         for node in (0..self.nodes.len()).map(NodeIndex) {
-            let mut edge_ptr = self[node].first_child;
+            let mut edge_ptr = self[node].first_parent;
             while let Some(edge) = edge_ptr {
-                let child = self[edge].to;
+                let parent = self[edge].to;
                 let from = node.0;
-                let to = child.0;
+                let to = parent.0;
                 out.push_str(&format!("\t{from} -> {to} [penwidth=1];\n"));
                 edge_ptr = self[edge].next;
             }

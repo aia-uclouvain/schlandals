@@ -229,9 +229,8 @@ impl Problem {
     ///     - If true, Removes the variable from the body of the constrained clauses
     ///     - If false, and probabilistic, increase the counter of false variable in the distribution
     /// If the variable is the min or max variable not fixed, update the boundaries accordingly.
-    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, level: isize, state: &mut StateManager) {
+    pub fn set_variable(&mut self, variable: VariableIndex, value: bool, state: &mut StateManager) {
         self[variable].set_value(value, state);
-        self[variable].set_decision_level(level);
         if !value && self[variable].is_probabilitic() {
             let distribution = self[variable].distribution().unwrap();
             self[distribution].decrement_size(state);

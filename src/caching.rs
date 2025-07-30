@@ -2,7 +2,6 @@
 use search_trail::StateManager;
 use crate::core::problem::{Problem, ClauseIndex, VariableIndex};
 use crate::common::Caching;
-use std::hash::Hash;
 
 pub struct CachingScheme {
     strategy: Box<dyn CachingStrategy + Sync + Send>,
@@ -19,57 +18,14 @@ impl CachingScheme {
         Self { strategy }
     }
 
-    pub fn get_key(&self, problem: &Problem, clauses: &[ClauseIndex], variables: &[VariableIndex], hash: u64, state: &StateManager) -> CacheKey {
-        let repr = self.strategy.get_representation(problem, clauses, variables, state);
-        CacheKey {
-            hash,
-            repr,
-        }
+    pub fn get_key(&self, problem: &Problem, clauses: &[ClauseIndex], variables: &[VariableIndex], state: &StateManager) -> Vec<usize> {
+        self.strategy.get_representation(problem, clauses, variables, state)
     }
 
     pub fn init(&mut self, number_clauses: usize, number_vars: usize) {
         self.strategy.init(number_clauses, number_vars);
     }
 }
-
-/// A key of the cache. It is composed of
-///     1. A hash representing the sub-problem being solved
-///     2. Therepresentation of the sub-problem being solved computed by the caching strategy
-///
-/// We adopt this two-level representation for the cache key for efficiency reason. The hash is computed during
-/// the detection of the components and is a XOR of random bit string. This is efficient but do not ensure that
-/// two different sub-problems have different hash.
-/// Hence, we also provide an unique representation of the sub-problem, using 64 bits words, in case of hash collision.
-#[derive(Default, Clone)]
-pub struct CacheKey {
-    hash: u64,
-    repr: Vec<usize>,
-}
-
-impl CacheKey {
-    pub fn new(hash: u64, repr: Vec<usize>) -> Self {
-        Self {
-            hash,
-            repr,
-        }
-    }
-}
-
-impl Hash for CacheKey {
-
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.repr.hash(state);
-    }
-
-}
-
-impl PartialEq for CacheKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash && self.repr == other.repr
-    }
-}
-
-impl Eq for CacheKey {}
 
 pub trait CachingStrategy {
 

@@ -37,10 +37,10 @@ use crate::core::problem::{ClauseIndex, Problem, VariableIndex};
 use super::core::literal::Literal;
 use super::core::flags::*;
 
-pub type PropagationResult = Result<(), isize>;
+pub type PropagationResult = Result<(), ()>;
 
 pub struct Propagator {
-    propagation_stack: Vec<(VariableIndex, bool, isize)>,
+    propagation_stack: Vec<(VariableIndex, bool)>,
     clause_flags: Vec<ClauseFlags>,
     assignments: Vec<Literal>,
     base_assignments: ReversibleUsize,
@@ -63,14 +63,14 @@ impl Propagator {
     }
     
     /// Adds a variable to be propagated with the given value
-    pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool, level: isize) {
-        self.propagation_stack.push((variable, value, level));
+    pub fn add_to_propagation_stack(&mut self, variable: VariableIndex, value: bool) {
+        self.propagation_stack.push((variable, value));
     }
     
     /// Propagates a variable to the given value. The component of the variable is also given to be able to use the {f-t}-reachability.
-    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
-        self.add_to_propagation_stack(variable, value, level);
-        self.propagate(g, state, component, extractor, level)
+    pub fn propagate_variable(&mut self, variable: VariableIndex, value: bool, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor) -> PropagationResult {
+        self.add_to_propagation_stack(variable, value);
+        self.propagate(g, state, component, extractor)
     }
     
     /// Returns an iterator over the assignments made during the last propagation
@@ -98,19 +98,19 @@ impl Propagator {
 
     /// Propagates all variables in the propagation stack. The component of being currently solved is also passed as parameter to allow the computation of
     /// the {f-t}-reachability.
-    pub fn propagate(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor, level: isize) -> PropagationResult {
+    pub fn propagate(&mut self, g: &mut Problem, state: &mut StateManager, component: ComponentIndex, extractor: &mut ComponentExtractor) -> PropagationResult {
         state.set_usize(self.base_assignments, self.assignments.len());
-        while let Some((variable, value, l)) = self.propagation_stack.pop() {
+        while let Some((variable, value)) = self.propagation_stack.pop() {
             if let Some(v) = g[variable].value(state) {
                 if v == value {
                     continue;
                 }
                 self.clear();
-                return PropagationResult::Err(level);
+                return PropagationResult::Err(());
             }
             g[variable].set_assignment_position(self.assignments.len(), state);
             self.assignments.push(Literal::from_variable(variable, value, g[variable].get_value_index()));
-            g.set_variable(variable, value, l, state);
+            g.set_variable(variable, value, state);
             
             if value {
                 for clause in g[variable].iter_clauses_positive_occurence(state){
@@ -136,7 +136,7 @@ impl Propagator {
                     }
                     if g[clause].is_unit(state) {
                         let l = g[clause].get_unit_assigment(state);
-                        self.add_to_propagation_stack(l.to_variable(), l.is_positive(), level);
+                        self.add_to_propagation_stack(l.to_variable(), l.is_positive());
                     }
                 }
             }
@@ -145,11 +145,11 @@ impl Propagator {
                 let distribution = g[variable].distribution().unwrap();
                 if value {
                     for v in g[distribution].iter_variables().filter(|va| !g[*va].is_fixed(state) && *va != variable) {
-                        self.add_to_propagation_stack(v, false, level);
+                        self.add_to_propagation_stack(v, false);
                     }
                 } else if g[distribution].size(state) == 1 {
                     if let Some(v) = g[distribution].iter_variables().find(|v| !g[*v].is_fixed(state)) {
-                        self.add_to_propagation_stack(v, true, level);
+                        self.add_to_propagation_stack(v, true);
                     }
                 }
             } else if value {
