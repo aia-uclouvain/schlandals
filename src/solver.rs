@@ -212,6 +212,7 @@ impl<const S: bool> Solver<S> {
         let distribution = ac[current_node].distribution().unwrap();
         let mut child_id = 0;
         let mut complete = true;
+        let mut sat = false;
         for variable in self.problem[distribution].iter_variables() {
             if self.problem[variable].is_fixed(&self.state) {
                 continue
@@ -231,11 +232,17 @@ impl<const S: bool> Solver<S> {
                     },
                     Ok(_) => {
                         self.state.save_state();
+                        let mut prod_child_sat = true;
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let node = self.pwmc(ac, sub_component, discrepancy - child_id, parameters);
                                 complete &= ac[node].is_complete();
+                                if ac[node].is_complete() && !ac[node].is_sat() {
+                                    prod_child_sat = false;
+                                    break;
+                                }
                             }
+                            sat |= prod_child_sat;
                         }
                         self.restore();
                     }
@@ -273,6 +280,7 @@ impl<const S: bool> Solver<S> {
                         ac.add_edge(child_node, node);
                     }
                     self.state.save_state();
+                    let mut prod_child_sat = true;
                     if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                         // A number of distribution are not fixed but do not appear in the
                         // sub-components, we can compute their contribution in closed form
@@ -289,8 +297,15 @@ impl<const S: bool> Solver<S> {
                             // TODO: We need that so we can skip instances that have a
                             // sub-component UNSAT
                             // if ac[child_node].value == 0 { break; }
-                            complete &= ac[subproblem_node].is_complete();
+                            if ac[subproblem_node].is_complete() {
+                                complete &= true;
+                                prod_child_sat &= ac[subproblem_node].is_sat();
+                            }
+                            if !prod_child_sat {
+                                break;
+                            }
                         }
+                        sat |= prod_child_sat;
                     }
                     self.restore();
                     ac.add_edge(current_node, child_node);
@@ -301,6 +316,9 @@ impl<const S: bool> Solver<S> {
         }
         if complete {
             ac[current_node].complete();
+            if !sat {
+                ac[current_node].unsat();
+            }
         }
         self.cache.insert(cache_key, current_node);
         ac[current_node].set_discrepancy(discrepancy);
