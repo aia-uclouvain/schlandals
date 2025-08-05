@@ -116,7 +116,7 @@ impl<const S: bool> Solver<S> {
         ac[root_model].incomplete();
         if self.problem.number_clauses() > 0 {
             if !parameters.lds {
-                let child = self.pwmc(&mut ac, ComponentIndex(0), usize::MAX, parameters);
+                let child = self.pwmc(&mut ac, ComponentIndex(0), isize::MAX, parameters);
                 ac.add_edge(root_model, child);
                 ac.clean();
                 println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
@@ -125,6 +125,7 @@ impl<const S: bool> Solver<S> {
             } else {
                 let mut discrepancy = 0;
                 while !ac[root_model].is_complete() {
+                    println!("Launching with discrepancy {}", discrepancy);
                     let child = self.pwmc(&mut ac, ComponentIndex(0), discrepancy, parameters);
                     if discrepancy == 0 {
                         ac.add_edge(root_model, child);
@@ -189,7 +190,7 @@ impl<const S: bool> Solver<S> {
         }
     }
 
-    fn pwmc(&mut self, ac: &mut Ac, component: ComponentIndex, discrepancy: usize, parameters: &SolverParameters) -> NodeIndex {
+    fn pwmc(&mut self, ac: &mut Ac, component: ComponentIndex, discrepancy: isize, parameters: &SolverParameters) -> NodeIndex {
         if PEAK_ALLOC.current_usage_as_mb() as u64 >= parameters.memory_limit {
             self.cache.clear();
         }
@@ -203,7 +204,8 @@ impl<const S: bool> Solver<S> {
             ac[node].incomplete();
             node
         });
-        if ac[current_node].is_complete() || ac[current_node].discrepancy() > discrepancy {
+        if ac[current_node].is_complete() || ac[current_node].discrepancy() >= discrepancy {
+            self.cache.insert(cache_key, current_node);
             return current_node;
         }
         // We are sure that the node has a distribution to branch on, otherwise no components are
@@ -222,7 +224,7 @@ impl<const S: bool> Solver<S> {
             }
             // If we are exploring edges already explored, then just call the recursive function
             // and do not add any nodes/edges to the circuit.
-            if parameters.lds && child_id < discrepancy {
+            if parameters.lds && child_id <= ac[current_node].discrepancy() {
                 self.state.save_state();
                 match self.propagator.propagate_variable(variable, true, &mut self.problem, &mut self.state, component, &mut self.component_extractor) {
                     Err(_) => {
@@ -235,9 +237,12 @@ impl<const S: bool> Solver<S> {
                         if self.component_extractor.detect_components(&mut self.problem, &mut self.state, component) {
                             for sub_component in self.component_extractor.components_iter(&self.state) {
                                 let node = self.pwmc(ac, sub_component, discrepancy - child_id, parameters);
-                                complete &= ac[node].is_complete();
-                                if ac[node].is_complete() && !ac[node].is_sat() {
-                                    prod_child_sat = false;
+                                if ac[node].is_complete() {
+                                    prod_child_sat &= ac[node].is_sat();
+                                } else {
+                                    complete = false;
+                                }
+                                if !prod_child_sat {
                                     break;
                                 }
                             }
@@ -297,8 +302,9 @@ impl<const S: bool> Solver<S> {
                             // sub-component UNSAT
                             // if ac[child_node].value == 0 { break; }
                             if ac[subproblem_node].is_complete() {
-                                complete &= true;
                                 prod_child_sat &= ac[subproblem_node].is_sat();
+                            } else {
+                                complete = false;
                             }
                             if !prod_child_sat {
                                 break;

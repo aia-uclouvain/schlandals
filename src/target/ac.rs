@@ -18,7 +18,7 @@ pub struct Node {
     /// True if the sub-circuit is SAT
     sat: bool,
     /// Discrepancy of the node
-    discrepancy: usize,
+    discrepancy: isize,
     /// Position in the DAG (layer and position in the layer)
     position: (usize, usize),
 }
@@ -59,7 +59,7 @@ impl Ac {
             first_parent: None,
             complete: true,
             sat: true,
-            discrepancy: 0,
+            discrepancy: -1,
             position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
@@ -73,7 +73,7 @@ impl Ac {
             first_parent: None,
             complete: true,
             sat: true,
-            discrepancy: 0,
+            discrepancy: -1,
             position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
@@ -87,7 +87,7 @@ impl Ac {
             first_parent: None,
             complete: true,
             sat: true,
-            discrepancy: 0,
+            discrepancy: -1,
             position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
@@ -116,7 +116,7 @@ impl Ac {
             first_parent: None,
             complete: true,
             sat: true,
-            discrepancy: 0,
+            discrepancy: -1,
             position: (0, 0),
         });
         NodeIndex(self.nodes.len() - 1)
@@ -157,11 +157,23 @@ impl Ac {
         }
     }
 
+    fn update_layer_recursive(&mut self, node: NodeIndex, layer: usize) {
+        self.update_layer_positions(node, layer);
+        let mut parent_ptr = self[node].first_parent;
+        while let Some(edge) = parent_ptr {
+            let parent = self[edge].to;
+            if self[parent].position.0 <= layer + 1 {
+                self.update_layer_recursive(parent, layer + 1);
+            }
+            parent_ptr = self[edge].next;
+        }
+    }
+
     pub fn add_edge(&mut self, parent: NodeIndex, child: NodeIndex) {
         let new_layer = self[child].position.0 + 1;
         if new_layer > self[parent].position.0 {
             debug_assert!(!matches!(self[parent].nodetype, NodeType::Input));
-            self.update_layer_positions(parent, new_layer);
+            self.update_layer_recursive(parent, new_layer);
         }
         self.edges.push(Edge {
             to: parent,
@@ -198,6 +210,7 @@ impl Ac {
                 let mut edge_ptr = self[node].first_parent;
                 while let Some(edge) = edge_ptr {
                     let parent = self[edge].to;
+                    debug_assert!(self[node].position.0 < self[parent].position.0);
                     match self[parent].nodetype {
                         NodeType::Sum => self[parent].value += &value,
                         NodeType::Sub => panic!("Sub node not yet implemented"),
@@ -328,11 +341,11 @@ impl Node {
         self.nodetype
     }
 
-    pub fn discrepancy(&self) -> usize {
+    pub fn discrepancy(&self) -> isize {
         self.discrepancy
     }
 
-    pub fn set_discrepancy(&mut self, discrepancy: usize) {
+    pub fn set_discrepancy(&mut self, discrepancy: isize) {
         self.discrepancy = discrepancy;
     }
 
@@ -351,20 +364,20 @@ impl Ac {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = node.0;
             let value = format!("{:.4}", rational_to_f64(&self[node].value));
-            let color = if self[node].is_sat() { "grey" } else { "red" };
+            let color = if self[node].is_complete() { "grey" } else { "red" };
             let layer = self[node].position.0;
             match self[node].nodetype() {
                 NodeType::Sum => {
-                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | + | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | {layer} | + | {value}\"];\n"));
                 },
                 NodeType::Sub => {
-                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | - | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | {layer} | - | {value}\"];\n"));
                 },
                 NodeType::Prod => {
-                    out.push_str(&format!("\t{id} [shape=square,color={color},style=filled,layer={layer},label=\"{id} | * | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=square,color={color},style=filled,layer={layer},label=\"{id} | {layer} | * | {value}\"];\n"));
                 },
                 NodeType::Input => {
-                    out.push_str(&format!("\t{id} [shape=doublecircle,color={color},style=filled,layer={layer},label=\"{id} | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=doublecircle,color={color},style=filled,layer={layer},label=\"{id} | {layer} | {value}\"];\n"));
                 },
             }
         }
