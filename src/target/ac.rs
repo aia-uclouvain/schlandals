@@ -352,18 +352,19 @@ impl Ac {
             let id = node.0;
             let value = format!("{:.4}", rational_to_f64(&self[node].value));
             let color = if self[node].is_sat() { "grey" } else { "red" };
+            let layer = self[node].position.0;
             match self[node].nodetype() {
                 NodeType::Sum => {
-                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,label=\"{id} | + | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | + | {value}\"];\n"));
                 },
                 NodeType::Sub => {
-                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,label=\"{id} | - | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,layer={layer},label=\"{id} | - | {value}\"];\n"));
                 },
                 NodeType::Prod => {
-                    out.push_str(&format!("\t{id} [shape=square,color={color},style=filled,label=\"{id} | * | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=square,color={color},style=filled,layer={layer},label=\"{id} | * | {value}\"];\n"));
                 },
                 NodeType::Input => {
-                    out.push_str(&format!("\t{id} [shape=doublecircle,color={color},style=filled,label=\"{id} | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=doublecircle,color={color},style=filled,layer={layer},label=\"{id} | {value}\"];\n"));
                 },
             }
         }
