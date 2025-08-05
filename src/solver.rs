@@ -118,10 +118,10 @@ impl<const S: bool> Solver<S> {
             if !parameters.lds {
                 let child = self.pwmc(&mut ac, ComponentIndex(0), usize::MAX, parameters);
                 ac.add_edge(root_model, child);
+                ac.clean();
+                println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
                 ac.evaluate();
                 self.statistics.print();
-                println!("AC size: {} nodes {} edges", ac.number_nodes(), ac.number_edges());
-                //println!("{}", ac.to_graphviz());
             } else {
                 let mut discrepancy = 0;
                 while !ac[root_model].is_complete() {
@@ -140,7 +140,6 @@ impl<const S: bool> Solver<S> {
                 self.statistics.print();
             }
         }
-        println!("{}", ac.to_graphviz());
         Solution::new(ac[root_model].value(), ac[root_model].value(), parameters.start.elapsed().as_secs())
     }
 
@@ -305,10 +304,10 @@ impl<const S: bool> Solver<S> {
                                 break;
                             }
                         }
-                        sat |= prod_child_sat;
                     }
                     self.restore();
                     ac.add_edge(current_node, child_node);
+                    sat |= prod_child_sat;
                 }
             };
             self.restore();

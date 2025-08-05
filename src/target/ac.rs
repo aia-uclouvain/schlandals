@@ -146,6 +146,17 @@ impl Ac {
         }
     }
 
+    fn remove_from_layer(&mut self, node: NodeIndex) {
+        let (layer, position) = self[node].position;
+        if self.layers[layer].len() == 1 {
+            self.layers[layer].clear();
+        } else {
+            let to_swap = *self.layers[layer].last().unwrap();
+            self.layers[layer].swap_remove(position);
+            self[to_swap].position = (layer, position);
+        }
+    }
+
     pub fn add_edge(&mut self, parent: NodeIndex, child: NodeIndex) {
         let new_layer = self[child].position.0 + 1;
         if new_layer > self[parent].position.0 {
@@ -197,6 +208,84 @@ impl Ac {
                 }
             }
         }
+    }
+
+    pub fn clean(&mut self) {
+        let mut new_node_indexes: Vec<NodeIndex> = (0..self.nodes.len()).map(NodeIndex).collect();
+        let mut size_nodes = self.nodes.len();
+        for i in (0..self.nodes.len()).rev() {
+            if !self.nodes[i].is_sat() {
+                new_node_indexes.swap(i, size_nodes - 1);
+                size_nodes -= 1;
+                self.remove_from_layer(NodeIndex(i));
+            }
+        }
+
+        let mut map_node = FxHashMap::<NodeIndex, NodeIndex>::default();
+        for i in 0..size_nodes {
+            let old_index = new_node_indexes[i];
+            let new_index = NodeIndex(i);
+            map_node.insert(old_index, new_index);
+        }
+
+        for layer in 0..self.layers.len() {
+            for i in 0..self.layers[layer].len() {
+                let node = self.layers[layer][i];
+                self.layers[layer][i] = map_node[&node];
+            }
+        }
+
+        let mut new_edge_indexes: Vec<EdgeIndex> = (0..self.edges.len()).map(EdgeIndex).collect();
+        let mut size_edges = self.edges.len();
+        for i in (0..self.edges.len()).rev() {
+            let to = self.edges[i].to;
+            if !map_node.contains_key(&to) {
+                new_edge_indexes.swap(i, size_edges - 1);
+                size_edges -= 1;
+            }
+        }
+
+        let mut map_edges = FxHashMap::<EdgeIndex, EdgeIndex>::default();
+        for i in 0..size_edges {
+            let old_index = new_edge_indexes[i];
+            let new_index = EdgeIndex(i);
+            map_edges.insert(old_index, new_index);
+        }
+
+        for i in 0..size_nodes {
+            let index = new_node_indexes[i].0;
+            self.nodes.swap(i, index);
+            let mut parent_ptr = self.nodes[i].first_parent;
+            while parent_ptr.is_some() && !map_edges.contains_key(&parent_ptr.unwrap()) {
+                let edge = parent_ptr.unwrap();
+                parent_ptr = self[edge].next;
+            }
+            match parent_ptr {
+                Some(e) => self.nodes[i].first_parent = Some(map_edges[&e]),
+                None => self.nodes[i].first_parent = None,
+            };
+        }
+        self.nodes.truncate(size_nodes);
+
+        for i in 0..size_edges {
+            let source = new_edge_indexes[i];
+            let mut next = self[source].next;
+            while next.is_some() && !map_edges.contains_key(&next.unwrap()) {
+                next = self[next.unwrap()].next;
+            }
+            match next {
+                Some(e) => self[source].next = Some(map_edges[&e]),
+                None => self[source].next = None,
+            };
+            let old_to = self[source].to;
+            self[source].to = map_node[&old_to];
+        }
+        for i in 0..size_edges {
+            let index = new_edge_indexes[i].0;
+            self.edges.swap(i, index);
+        }
+        self.edges.truncate(size_edges);
+
     }
 
 }
@@ -262,18 +351,19 @@ impl Ac {
         for node in (0..self.nodes.len()).map(NodeIndex) {
             let id = node.0;
             let value = format!("{:.4}", rational_to_f64(&self[node].value));
+            let color = if self[node].is_sat() { "grey" } else { "red" };
             match self[node].nodetype() {
                 NodeType::Sum => {
-                    out.push_str(&format!("\t{id} [shape=circle,style=filled,label=\"{id} | + | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,label=\"{id} | + | {value}\"];\n"));
                 },
                 NodeType::Sub => {
-                    out.push_str(&format!("\t{id} [shape=circle,style=filled,label=\"{id} | - | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=circle,color={color},style=filled,label=\"{id} | - | {value}\"];\n"));
                 },
                 NodeType::Prod => {
-                    out.push_str(&format!("\t{id} [shape=square,style=filled,label=\"{id} | * | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=square,color={color},style=filled,label=\"{id} | * | {value}\"];\n"));
                 },
                 NodeType::Input => {
-                    out.push_str(&format!("\t{id} [shape=doublecircle,style=filled,label=\"{id} | {value}\"];\n"));
+                    out.push_str(&format!("\t{id} [shape=doublecircle,color={color},style=filled,label=\"{id} | {value}\"];\n"));
                 },
             }
         }
